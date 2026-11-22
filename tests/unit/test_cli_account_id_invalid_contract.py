@@ -345,7 +345,7 @@ class TestValidAccountIdRegression:
                 cli, ["--format", "json", "account", "info", _VALID_PRESENT]
             )
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output.strip())
+        payload = json.loads(result.output.strip())["data"]
         assert payload["account_id"] == _VALID_PRESENT
         svc.get.assert_awaited_once_with(_VALID_PRESENT)
 
@@ -359,7 +359,7 @@ class TestValidAccountIdRegression:
                 ["--format", "json", "account", "credentials", _VALID_PRESENT],
             )
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output.strip())
+        payload = json.loads(result.output.strip())["data"]
         assert payload["account_id"] == _VALID_PRESENT
         assert "app_key" in payload["credentials"]
         svc.get.assert_awaited_once_with(_VALID_PRESENT)
