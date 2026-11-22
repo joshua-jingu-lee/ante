@@ -25,6 +25,7 @@ from ante.core.registry import ServiceRegistry
 from ante.eventbus.bus import EventBus
 from ante.eventbus.events import OrderFilledEvent
 from ante.ipc.registry import CommandRegistry, _handle_signal_connect
+from ante.ipc.requests import SignalConnectRequest
 from ante.ipc.server import IPCServer
 from ante.strategy.base import Signal, Strategy, StrategyMeta
 
@@ -127,7 +128,7 @@ class _Harness:
             _handle_signal_connect,
             is_mutating=False,
             required_services=frozenset({"bot_manager"}),
-            account_id_policy="none",
+            request_model=SignalConnectRequest,
         )
         self.server = IPCServer(socket_path, svc, cmd_reg)
         await self.server.start()
