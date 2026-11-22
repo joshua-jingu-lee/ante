@@ -178,6 +178,14 @@ SSOT의 CLI success/error envelope을 적용하는 표면 메서드 시그니처
 | `error` | message: str, code: str = "" | None | CLI error envelope `{status:"error", code, message}` 출력 (SSOT: [envelopes.md](../contracts/envelopes.md#cli-error-envelope)) |
 | `success` | message: str, data: dict \| None = None | None | CLI success envelope `{status:"ok", message, data}` 출력 (SSOT: [envelopes.md](../contracts/envelopes.md#cli-success-envelope)) |
 
+CLI 계약(`src/ante/contracts/cli_registry.py`)의 `envelope`이 `standard`이고 leaf 콜백이
+`CommandResult`(`data`·`message`·`text`)를 돌려주는 명령은 스스로 출력하지 않고, 진입점 훅(루트
+`AuthenticatedGroup.invoke`)이 한 번 직렬화한다. JSON 모드는 `success(message, data)`이고,
+text 모드는 `text`의 줄을 차례로 내며 `text`가 없으면 `message`를 낸다. `data`가 배열이면
+`{<계약의 data_key>: 배열}`로 넣는다. `CommandResult`를 돌려주는데 계약이 없거나 `standard`가
+아니면, 또는 배열 `data`에 계약의 `data_key`가 없으면 `TypeError`다. `CommandResult`를 돌려주지
+않는 명령은 위 메서드로 직접 출력하며, 훅은 그 반환값에 아무것도 하지 않는다.
+
 소스: `src/ante/cli/formatter.py`
 
 ### 인증 미들웨어
