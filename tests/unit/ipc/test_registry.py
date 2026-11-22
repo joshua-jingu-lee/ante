@@ -163,7 +163,7 @@ def test_register_all_handlers_taxonomy() -> None:
     """등록된 42개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
 
     Refs #1712: ``bot.start`` / ``bot.stop`` mutating, ``bot.status``
-    read-only — ``docs/specs/ipc/ipc.md`` Handler taxonomy SSOT 와 동기화.
+    read-only — 생성 문서 ``docs/architecture/generated/ipc-commands.md`` 와 같은 값.
 
     Refs #2111: ``bot.signal_key.rotate`` mutating 추가.
 
@@ -1312,6 +1312,21 @@ class TestCommandSpecMetadataExtension:
         register: typing.Any = registry.register
         with pytest.raises(TypeError, match="request_model"):
             register("legacy.cmd", handler, is_mutating=False)
+        assert registry.get("legacy.cmd") is None
+        assert registry.commands == []
+
+    def test_register_with_none_request_model_raises_type_error(
+        self, registry: CommandRegistry
+    ) -> None:
+        """``request_model=None``을 명시한 등록도 ``TypeError``이고 등록되지 않는다."""
+
+        async def handler(svc: object, args: object, actor: str) -> dict[str, object]:
+            return {}
+
+        register: typing.Any = registry.register
+        with pytest.raises(TypeError) as info:
+            register("legacy.cmd", handler, is_mutating=False, request_model=None)
+        assert str(info.value) == "legacy.cmd: request_model is required"
         assert registry.get("legacy.cmd") is None
         assert registry.commands == []
 

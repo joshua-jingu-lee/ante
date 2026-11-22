@@ -223,7 +223,7 @@ CLI error 봉투로, text 모드에서 `Error: <code>: <message>`로 끝난다. 
 인접 기존 코드(재정의 금지, reference만):
 
 - `BOT_NOT_FOUND`(`not_found`) — 게이트 2. 대표 fault lock 표에 이미 등록됨.
-- `BOT_NOT_ACCEPTING_SIGNALS`(`state_conflict`) — 게이트 4. 코드 레지스트리(`src/ante/contracts/error_registry.py:504-505`)에 `ErrorSpec(category="state_conflict")`로 등록됨, 단 본 taxonomy 문서 표에는 미등재(`bot signal-key --rotate`/`signal connect` 공유). 분류는 `state_conflict`.
+- `BOT_NOT_ACCEPTING_SIGNALS`(`state_conflict`) — 게이트 4. 코드 레지스트리(`src/ante/contracts/error_registry.py`의 `_BOT_NOT_ACCEPTING_SIGNALS_SPEC`)에 `ErrorSpec(category="state_conflict")`로 등록됨, 단 본 taxonomy 문서 표에는 미등재(`bot signal-key --rotate`/`signal connect` 공유). 분류는 `state_conflict`.
 - `SERVICE_UNAVAILABLE`(`service_unavailable`) — `DRAINING`/`STOPPED` 핸드셰이크 거부. lifecycle gate 정렬(envelopes.md/ipc.md).
 - `SERVICE_NOT_CONFIGURED`(`service_unavailable`) — `required_services`(`bot_manager`) 부재 또는 `signal_key_manager` 미구성. #2334 신규 typed exception `SignalKeyManagerNotConfigured` → `SERVICE_NOT_CONFIGURED("signal_key_manager")`로 매핑되며, `error_registry.py` 등록은 #2334 구현 PR이 수행한다(코드 재정의 아님). `## SERVICE_NOT_CONFIGURED (normative)` 절 정렬.
 - `IPC_SERVER_NOT_RUNNING` / `IPC_TIMEOUT` — 데몬 미기동/핸드셰이크 30s 초과. 기존 IPC 표면 코드(`src/ante/cli/commands/ipc_helpers.py`, ipc.md)이며 본 SSOT가 새로 도입하지 않는다. message는 #2334 구현 시 기존 IPC 문자열을 SSOT로 재사용.
@@ -233,7 +233,7 @@ CLI error 봉투로, text 모드에서 `Error: <code>: <message>`로 끝난다. 
 - 신규 4건은 #2334 구현 PR에서 `error_registry.py` `ErrorSpec` 등록 + 대표 fault lock 표 확장의 회귀 lock이다(typed exception `InvalidSignalKey`/`BotNotRunning`/`SignalKeyManagerNotConfigured` → public code).
 - auth lowercase legacy alias(`auth_required` 등)는 signal connect의 CLI-side `@require_auth`에 그대로 적용되며 본 절이 재정의하지 않는다(Legacy alias 정렬).
 
-> coherence minor 해소: `SignalKeyManagerNotConfigured`→`SERVICE_NOT_CONFIGURED` 매핑을 typed-exception 회귀 lock 목록에 포함했고, `BOT_NOT_ACCEPTING_SIGNALS` "이미 등록" 출처를 코드 레지스트리(`error_registry.py:504-505`, category=`state_conflict` 코드 확인)와 taxonomy 문서 미등재로 명확히 구분했다.
+> coherence minor 해소: `SignalKeyManagerNotConfigured`→`SERVICE_NOT_CONFIGURED` 매핑을 typed-exception 회귀 lock 목록에 포함했고, `BOT_NOT_ACCEPTING_SIGNALS` "이미 등록" 출처를 코드 레지스트리(`error_registry.py`의 `_BOT_NOT_ACCEPTING_SIGNALS_SPEC`, category=`state_conflict` 코드 확인)와 taxonomy 문서 미등재로 명확히 구분했다.
 
 ## Broker external code 분리
 
