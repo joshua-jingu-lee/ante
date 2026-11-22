@@ -1764,9 +1764,19 @@ def test_script_exits_2_when_a_handler_is_a_lambda(tmp_path: Path) -> None:
     assert result.returncode == 2, result.stdout + result.stderr
 
 
-def test_repository_request_keys_are_not_empty() -> None:
+def test_repository_request_keys_reach_the_end_state() -> None:
     measurement = checker.measure(REPO_ROOT)
-    assert measurement.ipc_handlers_without_model
-    assert measurement.ipc_args_reads
+    assert measurement.ipc_handlers_without_model == frozenset()
+    assert measurement.ipc_args_reads == {}
     assert measurement.cli_direct_ipc_send
-    assert set(measurement.ipc_args_reads) <= measurement.ipc_handlers_without_model
+
+
+def test_an_empty_registry_is_an_error_not_an_empty_key(tmp_path: Path) -> None:
+    root = _request_tree(tmp_path / "repo")
+    _write(root, IPC_REGISTRY, _ipc("pass"))
+    with pytest.raises(checker.CheckError) as info:
+        checker.measure(root)
+    assert str(info.value) == (
+        "no register(<command>, <handler>, ...) call in "
+        "register_all_handlers of src/ante/ipc/registry.py"
+    )
