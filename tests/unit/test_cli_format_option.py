@@ -200,7 +200,8 @@ class TestAccountListFormatOption:
             result = runner.invoke(cli, ["account", "list", "--format", "json"])
             assert result.exit_code == 0
             data = json.loads(result.output)
-            assert "accounts" in data or "message" in data
+            assert data["status"] == "ok"
+            assert data["data"]["accounts"] == []
 
 
 # ── account info --format json ────────────────────────────
@@ -235,7 +236,8 @@ class TestAccountInfoFormatOption:
             )
             assert result.exit_code == 0
             data = json.loads(result.output)
-            assert data["account_id"] == "test-acct"
+            assert data["status"] == "ok"
+            assert data["data"]["account_id"] == "test-acct"
 
 
 # ── account delete --yes ──────────────────────────────

@@ -33,6 +33,22 @@ class CommandResult:
     message: str = ""
     text: tuple[str, ...] | None = None
 
+    def __post_init__(self) -> None:
+        if isinstance(self.text, str):
+            raise TypeError("CommandResult.text must be a tuple of lines, not a str")
+        if self.text == ():
+            raise TypeError("CommandResult.text must be None or a non-empty tuple")
+
+
+def table_lines(rows: list[dict[str, Any]], columns: list[str]) -> list[str]:
+    if not rows:
+        return ["(no data)"]
+    header = " | ".join(f"{c:>12}" for c in columns)
+    lines = [header, "-" * len(header)]
+    for row in rows:
+        lines.append(" | ".join(f"{str(row.get(c, '')):>12}" for c in columns))
+    return lines
+
 
 def format_option(fn: Callable[..., Any]) -> Callable[..., Any]:
     """서브커맨드용 --format 옵션 데코레이터.
@@ -101,16 +117,7 @@ class OutputFormatter:
                 )
             )
             return
-
-        if not rows:
-            click.echo("(no data)")
-            return
-
-        header = " | ".join(f"{c:>12}" for c in columns)
-        click.echo(header)
-        click.echo("-" * len(header))
-        for row in rows:
-            line = " | ".join(f"{str(row.get(c, '')):>12}" for c in columns)
+        for line in table_lines(rows, columns):
             click.echo(line)
 
     def error(self, message: str, code: str = "") -> None:

@@ -101,19 +101,19 @@ ACCOUNT_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("account", "list"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"account:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("account", "info"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"account:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("account", "credentials"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"account:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
@@ -125,7 +125,7 @@ ACCOUNT_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("account", "set-credentials"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"account:write"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="cold_path",
     ),
     CliCommandContract(
