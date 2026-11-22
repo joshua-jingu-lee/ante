@@ -31,8 +31,7 @@ exclusion: non-empty string literals in an error-code position that are not a
 5. the default of ``getattr(_, "ipc_error_code", D)``,
    ``getattr(_, "code", D)`` and ``_.get("code", D)``;
 6. the second positional argument of ``<x>.error(...)``, unless the name just
-   before ``.error``, without leading ``_``, starts with ``log``; and the
-   second positional argument of ``_emit_auth_error(...)``;
+   before ``.error``, without leading ``_``, starts with ``log``;
 7. a literal operand of an ``or`` whose expression is in positions 1 to 6, or
    whose other operand reads a code (``getattr(_, "code"|"ipc_error_code",
    ...)``, ``_.get("code", ...)``, ``_.code``, ``_.ipc_error_code``).
@@ -342,7 +341,7 @@ def _call_positions(node: ast.Call) -> Iterator[ast.expr]:
         isinstance(func, ast.Attribute)
         and func.attr == "error"
         and not _is_logger_receiver(func)
-    ) or _terminal_name(func) == "_emit_auth_error":
+    ):
         yield node.args[1]
 
 
