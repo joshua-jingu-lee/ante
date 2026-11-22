@@ -577,8 +577,8 @@ class TestStatusAndReconcileFollowupScope:
             f"got {result.exit_code}\n"
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
-        # status 정상 계약은 ``fmt.output`` 으로 indent=2 멀티라인 JSON 을
-        # 출력하므로(에러 envelope 의 한 줄 형식이 아님), stdout 전체를 파싱한다.
+        # status 성공 출력은 standard 봉투(indent=2 여러 줄)이며 payload는
+        # ``data`` 에 있으므로, stdout 전체를 파싱해 ``data`` 를 읽는다.
         payload = json.loads(result.stdout)["data"]
         assert isinstance(payload, dict), payload
         assert payload["connected"] is False, payload
