@@ -19,7 +19,7 @@
 
 | 산출물 | 입력/SSOT | Generate | Check | 기대 동작 |
 |---|---|---|---|---|
-| `docs/architecture/generated/project-structure.md` | 현재 Git 추적/비무시 파일 트리 | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py` | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check` | generate는 파일 구조 문서를 재생성한다. check는 산출물이 최신이면 0으로 종료하고, 불일치하면 실패하며 재생성 명령을 안내한다. |
+| `docs/architecture/generated/project-structure.md` | 현재 Git 추적/비무시 파일 트리(`tests/`는 디렉터리까지) | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py` | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check` | generate는 파일 구조 문서를 재생성한다. check는 산출물이 최신이면 0으로 종료하고, 불일치하면 실패하며 재생성 명령을 안내한다. |
 | `docs/architecture/generated/db-schema.md` | 모듈 소스 코드의 DDL 상수 | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py` | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check` | generate는 DB schema 문서를 재생성한다. check는 산출물이 최신이면 0으로 종료하고, 불일치하면 실패하며 재생성 명령을 안내한다. |
 | `guide/cli.md` | Click CLI command tree | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py` | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check` | generate는 CLI 레퍼런스를 재생성한다. check는 산출물이 최신이면 0으로 종료하고, 불일치하면 실패하며 재생성 명령을 안내한다. |
 
