@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ante.ipc.requests import (
     AccountActivateRequest,
@@ -56,7 +56,7 @@ from ante.ipc.requests import (
 if TYPE_CHECKING:
     from ante.core.registry import ServiceRegistry
 
-CommandHandler = Callable[["ServiceRegistry", Any, str], Awaitable[dict]]
+CommandHandler = Callable[["ServiceRegistry", Any, str], Awaitable[dict[str, Any]]]
 
 ShutdownBehavior = Literal["block_on_mutating", "block_all", "allow_all"]
 
@@ -137,7 +137,7 @@ class CommandRegistry:
         return list(self._specs.keys())
 
 
-def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
+def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict[str, Any]:
     """Kill Switch IPC 응답 envelope."""
     from datetime import UTC, datetime
 
@@ -153,7 +153,7 @@ def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
 
 async def _handle_system_halt(
     svc: ServiceRegistry, request: SystemHaltRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """전역 거래 정지(kill switch) IPC handler."""
     reason = request.reason
     accounts = await svc.account.suspend_all(reason=reason, suspended_by=actor)
@@ -168,7 +168,7 @@ async def _handle_system_halt(
 
 async def _handle_system_clear_halt(
     svc: ServiceRegistry, request: SystemClearHaltRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """전역 거래 정지 해제 IPC handler."""
     accounts = await svc.account.activate_all(activated_by=actor)
     payload = _kill_switch_payload("halt_cleared", accounts)
@@ -182,7 +182,7 @@ async def _handle_system_clear_halt(
 
 async def _handle_account_suspend(
     svc: ServiceRegistry, request: AccountSuspendRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """계좌 정지 IPC handler."""
     account_id = request.account_id
     reason = request.reason
@@ -200,7 +200,7 @@ async def _handle_account_suspend(
 
 async def _handle_account_activate(
     svc: ServiceRegistry, request: AccountActivateRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """계좌 활성화 IPC handler."""
     account_id = request.account_id
     await svc.account.activate(account_id, activated_by=actor)
@@ -657,7 +657,7 @@ async def _handle_rule_update(
 
 async def _handle_strategy_set_status(
     svc: ServiceRegistry, request: StrategySetStatusRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """전략 상태 변경 IPC handler."""
     from ante.strategy.registry import StrategyStatus
 
@@ -678,7 +678,7 @@ async def _handle_strategy_set_status(
 
 async def _handle_member_update_scopes(
     svc: ServiceRegistry, request: MemberUpdateScopesRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """멤버 scope 업데이트 IPC handler."""
     member_id = request.member_id
     scopes = request.scopes
@@ -701,7 +701,7 @@ async def _handle_member_update_scopes(
 
 async def _handle_member_register(
     svc: ServiceRegistry, request: MemberRegisterRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """멤버 등록 IPC handler."""
     member_id = request.member_id
     member = getattr(svc, "member_service", None)
@@ -732,7 +732,7 @@ async def _handle_member_register(
 
 async def _handle_member_set_emoji(
     svc: ServiceRegistry, request: MemberSetEmojiRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """멤버 emoji 설정 IPC handler."""
     member_id = request.member_id
     emoji = request.emoji
@@ -753,7 +753,7 @@ async def _handle_member_set_emoji(
 
 async def _handle_member_suspend(
     svc: ServiceRegistry, request: MemberSuspendRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """멤버 일시 정지 IPC handler."""
     member_id = request.member_id
     member = getattr(svc, "member_service", None)
@@ -773,7 +773,7 @@ async def _handle_member_suspend(
 
 async def _handle_member_reactivate(
     svc: ServiceRegistry, request: MemberReactivateRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """멤버 재활성화 IPC handler."""
     member_id = request.member_id
     member = getattr(svc, "member_service", None)
@@ -793,7 +793,7 @@ async def _handle_member_reactivate(
 
 async def _handle_member_revoke(
     svc: ServiceRegistry, request: MemberRevokeRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """멤버 영구 폐기 IPC handler."""
     member_id = request.member_id
     member = getattr(svc, "member_service", None)
@@ -813,7 +813,7 @@ async def _handle_member_revoke(
 
 async def _handle_member_rotate_token(
     svc: ServiceRegistry, request: MemberRotateTokenRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """토큰 재발급 IPC handler."""
     member_id = request.member_id
     member = getattr(svc, "member_service", None)
@@ -841,12 +841,12 @@ async def _resolve_master_member_id(member: Any) -> str:
     if master is None:
         msg = "master 멤버가 존재하지 않습니다"
         raise ValueError(msg)
-    return master.member_id
+    return cast("str", master.member_id)
 
 
 async def _handle_member_reset_password(
     svc: ServiceRegistry, request: MemberResetPasswordRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """recovery key 로 패스워드 리셋 IPC handler (auth-exempt)."""
     member = getattr(svc, "member_service", None)
     if member is None:
@@ -867,7 +867,7 @@ async def _handle_member_reset_password(
 
 async def _handle_member_regenerate_recovery_key(
     svc: ServiceRegistry, request: MemberRegenerateRecoveryKeyRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """recovery key 재발급 IPC handler (auth-exempt)."""
     member = getattr(svc, "member_service", None)
     if member is None:
@@ -898,7 +898,7 @@ async def _handle_config_set(
 
 async def _handle_approval_request(
     svc: ServiceRegistry, request: ApprovalRequestRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     created = await svc.approval.create(
         type=request.type,
         requester=actor,
@@ -913,7 +913,7 @@ async def _handle_approval_request(
 
 async def _handle_approval_approve(
     svc: ServiceRegistry, request: ApprovalApproveRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """승인 요청 승인 IPC handler."""
     approval_id = request.id
     approval = await svc.approval.approve(approval_id, resolved_by=actor)
@@ -930,7 +930,7 @@ async def _handle_approval_approve(
 
 async def _handle_approval_reject(
     svc: ServiceRegistry, request: ApprovalRejectRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """승인 요청 거부 IPC handler."""
     approval_id = request.id
     reason = request.reason
@@ -952,7 +952,7 @@ async def _handle_approval_reject(
 
 async def _handle_approval_cancel(
     svc: ServiceRegistry, request: ApprovalCancelRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """승인 요청 취소 IPC handler."""
     approval_id = request.id
     approval = await svc.approval.cancel(approval_id, requester=actor)
@@ -969,7 +969,7 @@ async def _handle_approval_cancel(
 
 async def _handle_approval_cancel_invalid(
     svc: ServiceRegistry, request: ApprovalCancelInvalidRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     """Administrative cancellation of a legacy invalid-type approval."""
     approval_id = request.approval_id
     approval = await svc.approval.cancel_invalid_type_request(
@@ -991,7 +991,7 @@ async def _handle_approval_cancel_invalid(
 
 async def _handle_approval_reopen(
     svc: ServiceRegistry, request: ApprovalReopenRequest, actor: str
-) -> dict:
+) -> dict[str, Any]:
     reopened = await svc.approval.reopen(
         request.id,
         requester=actor,
