@@ -31,6 +31,8 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
     "pytest-xdist>=3.5",
+    # 버전마다 같은 설정에서도 만드는 예가 달라 고정한다. 올림은 따로 PR로 (#2769)
+    "hypothesis==6.170.17",
     "pyyaml>=6.0",
     "ruff==0.17.6",
     "mypy==2.4.1",
