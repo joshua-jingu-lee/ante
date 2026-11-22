@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 
@@ -49,7 +49,7 @@ def bot() -> None:
     """봇 생성·시작·중지·조회."""
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coro)
 
 
@@ -106,7 +106,7 @@ async def _create_services(
         yield db, eventbus, manager, account_service
 
 
-async def _audit_log(db, **kwargs) -> None:
+async def _audit_log(db: Database, **kwargs: Any) -> None:
     """감사 로그 기록 (실패해도 주 동작에 영향 없음)."""
     try:
         from ante.audit import AuditLogger
@@ -120,7 +120,7 @@ async def _audit_log(db, **kwargs) -> None:
 
 async def _run_bot_remove_cold_path(
     bot_id: str, ctx: click.Context | None = None
-) -> dict:
+) -> dict[str, Any]:
     """서버 정지 상태에서 BotManager 없이 봇을 soft-delete한다."""
     from ante.bot.cold_path import cold_path_remove_bot
     from ante.cli.main import get_config_dir
@@ -158,7 +158,7 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
 
     actor = get_member_id(ctx)
 
-    async def _run_list_fallback() -> list[dict]:
+    async def _run_list_fallback() -> list[dict[str, Any]]:
         async with _create_services(ctx=ctx) as (db, _, _, _):
             if account_id is not None:
                 rows = await db.fetch_all(
@@ -173,10 +173,10 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
                 )
             return [dict(r) for r in rows]
 
-    async def _run_list() -> list[dict]:
+    async def _run_list() -> list[dict[str, Any]]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
-        args: dict = {}
+        args: dict[str, Any] = {}
         if account_id is not None:
             args["account_id"] = account_id
         try:
@@ -220,12 +220,12 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_info_fallback() -> dict | None:
+    async def _run_info_fallback() -> dict[str, Any] | None:
         async with _create_services(ctx=ctx) as (db, _, _, _):
             row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = ?", (bot_id,))
             return dict(row) if row else None
 
-    async def _run_info() -> dict | None:
+    async def _run_info() -> dict[str, Any] | None:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         try:
@@ -275,10 +275,10 @@ def _parse_param(value: str) -> tuple[str, object]:
     return key.strip(), parsed
 
 
-def _resolve_account_non_interactive(accounts: list) -> str:
+def _resolve_account_non_interactive(accounts: list[Any]) -> str:
     """활성 계좌 목록에서 비대화형으로 계좌를 선택한다."""
     if len(accounts) == 1:
-        return accounts[0].account_id
+        return cast("str", accounts[0].account_id)
 
     if not accounts:
         raise BotMissingRequiredAccountError(
@@ -328,7 +328,7 @@ def bot_create(
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    param_dict: dict = {}
+    param_dict: dict[str, Any] = {}
     for p in params:
         try:
             key, value = _parse_param(p)
@@ -344,7 +344,7 @@ def bot_create(
     if account_id is None:
         from ante.account.models import AccountStatus
 
-        async def _list_accounts() -> list:
+        async def _list_accounts() -> list[Any]:
             async with _create_services(ctx=ctx) as (_, _, _, account_service):
                 return await account_service.list(status=AccountStatus.ACTIVE)
 
@@ -353,10 +353,10 @@ def bot_create(
 
     resolved_account_id = account_id
 
-    async def _run_create() -> dict:
+    async def _run_create() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
-        args: dict = {
+        args: dict[str, Any] = {
             "name": name,
             "strategy_id": strategy,
             "account_id": resolved_account_id,
@@ -398,7 +398,7 @@ def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
             "위험 명령입니다. --yes를 명시해야 봇을 삭제합니다."
         )
 
-    async def _run_remove() -> dict:
+    async def _run_remove() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         if is_active_runtime():
@@ -437,7 +437,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
     if rotate:
         actor = get_member_id(ctx)
 
-        async def _run_rotate() -> dict:
+        async def _run_rotate() -> dict[str, Any]:
             from ante.cli.commands.ipc_helpers import ipc_send
 
             return await ipc_send(
@@ -461,7 +461,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
 
     actor = get_member_id(ctx)
 
-    async def _run_signal_key_fallback() -> dict:
+    async def _run_signal_key_fallback() -> dict[str, Any]:
         from ante.bot.signal_key import SignalKeyManager
 
         async with _create_services(ctx=ctx) as (db, _, _, _):
@@ -487,7 +487,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
                 return {"bot_id": bot_id, "signal_key": None}
             return {"bot_id": bot_id, "signal_key": key}
 
-    async def _run_signal_key() -> dict:
+    async def _run_signal_key() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         try:
@@ -534,7 +534,7 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_positions_fallback() -> list[dict] | None:
+    async def _run_positions_fallback() -> list[dict[str, Any]] | None:
         from ante.trade.performance import PerformanceTracker
         from ante.trade.position import PositionHistory
         from ante.trade.recorder import TradeRecorder
@@ -577,7 +577,7 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
                 for p in positions
             ]
 
-    async def _run_positions() -> list[dict] | None:
+    async def _run_positions() -> list[dict[str, Any]] | None:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         try:
@@ -675,7 +675,7 @@ def bot_update(
     if not updates:
         raise CliMissingRequiredInputError("변경할 필드를 하나 이상 지정하세요.")
 
-    async def _run_update() -> dict:
+    async def _run_update() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send(
@@ -748,7 +748,7 @@ def bot_logs(
             f"시작일({from_date})이(가) 종료일({to_date}) 이후입니다."
         )
 
-    async def _run_logs() -> dict:
+    async def _run_logs() -> dict[str, Any]:
         from ante.eventbus.history import EventHistoryStore
 
         async with open_cli_db(ctx) as db:
@@ -815,7 +815,7 @@ def bot_start(ctx: click.Context, bot_id: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_start() -> dict:
+    async def _run_start() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send("bot.start", {"bot_id": bot_id}, actor=actor)
@@ -849,7 +849,7 @@ def bot_stop(ctx: click.Context, bot_id: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_stop() -> dict:
+    async def _run_stop() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send("bot.stop", {"bot_id": bot_id}, actor=actor)
@@ -883,7 +883,7 @@ def bot_status(ctx: click.Context, bot_id: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_status() -> dict:
+    async def _run_status() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send("bot.status", {"bot_id": bot_id}, actor=actor)
