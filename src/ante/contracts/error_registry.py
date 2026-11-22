@@ -47,10 +47,16 @@ from ante.broker.registry import (
 from ante.config.exceptions import ConfigValidationError
 from ante.contracts.cli_errors import (
     AccountAlreadyDeletedError,
+    AccountCredentialEnvNotSetError,
+    AccountCredentialFileNotFoundError,
+    AccountDuplicateCredentialKeyError,
     AccountInvalidStatusError,
+    AccountInvalidTimezoneError,
     AccountMasterBootstrapFailedError,
+    AccountMissingRequiredCredentialError,
     AccountTestCreateFailedError,
     AccountTestInactiveError,
+    AccountUnknownCredentialKeyError,
     AlreadyRunningError,
     ApprovalInvalidStatusError,
     ApprovalInvalidTypeError,
@@ -662,6 +668,36 @@ _MEMBER_PASSWORD_FILE_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="validation",
 )
 
+_ACCOUNT_CREDENTIAL_ENV_NOT_SET_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_CREDENTIAL_ENV_NOT_SET",
+    category="validation",
+)
+
+_ACCOUNT_CREDENTIAL_FILE_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_CREDENTIAL_FILE_NOT_FOUND",
+    category="validation",
+)
+
+_ACCOUNT_DUPLICATE_CREDENTIAL_KEY_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_DUPLICATE_CREDENTIAL_KEY",
+    category="validation",
+)
+
+_ACCOUNT_INVALID_TIMEZONE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_INVALID_TIMEZONE",
+    category="validation",
+)
+
+_ACCOUNT_MISSING_REQUIRED_CREDENTIAL_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_MISSING_REQUIRED_CREDENTIAL",
+    category="validation",
+)
+
+_ACCOUNT_UNKNOWN_CREDENTIAL_KEY_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+    category="validation",
+)
+
 _ALREADY_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="ALREADY_RUNNING",
     category="state_conflict",
@@ -940,6 +976,12 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     CliMemberNotFoundError: _MEMBER_NOT_FOUND_SPEC,
     MemberPasswordEnvNotSetError: _MEMBER_PASSWORD_ENV_NOT_SET_SPEC,
     MemberPasswordFileNotFoundError: _MEMBER_PASSWORD_FILE_NOT_FOUND_SPEC,
+    AccountCredentialEnvNotSetError: _ACCOUNT_CREDENTIAL_ENV_NOT_SET_SPEC,
+    AccountCredentialFileNotFoundError: _ACCOUNT_CREDENTIAL_FILE_NOT_FOUND_SPEC,
+    AccountDuplicateCredentialKeyError: _ACCOUNT_DUPLICATE_CREDENTIAL_KEY_SPEC,
+    AccountInvalidTimezoneError: _ACCOUNT_INVALID_TIMEZONE_SPEC,
+    AccountMissingRequiredCredentialError: _ACCOUNT_MISSING_REQUIRED_CREDENTIAL_SPEC,
+    AccountUnknownCredentialKeyError: _ACCOUNT_UNKNOWN_CREDENTIAL_KEY_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 

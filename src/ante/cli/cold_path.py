@@ -5,10 +5,6 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ante.cli.formatter import OutputFormatter
 
 ACCOUNT_COLD_PATH_BLOCKED_CODE = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"
 BOT_COLD_PATH_REMOVE_BLOCKED_CODE = "BOT_COLD_PATH_REMOVE_REQUIRES_STOPPED_SERVER"
@@ -54,18 +50,3 @@ def is_active_runtime(
 
     marker_pid = _read_starting_marker_pid(config)
     return marker_pid == pid
-
-
-def assert_no_active_runtime(
-    fmt: OutputFormatter,
-    *,
-    code: str,
-    message: str,
-    kill: Callable[[int, int], None] | None = None,
-) -> None:
-    """Raise ``SystemExit(1)`` after printing ``code`` if runtime is active."""
-    if not is_active_runtime(kill=kill):
-        return
-
-    fmt.error(f"{code}: {message}", code=code)
-    raise SystemExit(1)

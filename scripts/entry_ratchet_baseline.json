@@ -1,8 +1,5 @@
 {
   "cli_error_calls": {
-    "src/ante/cli/_validators.py": 3,
-    "src/ante/cli/cold_path.py": 1,
-    "src/ante/cli/commands/account.py": 1,
     "src/ante/cli/commands/bot.py": 16,
     "src/ante/cli/commands/broker.py": 1,
     "src/ante/cli/commands/config.py": 2,
@@ -12,9 +9,6 @@
     "src/ante/cli/middleware.py": 2
   },
   "cli_exits": {
-    "src/ante/cli/_validators.py": 3,
-    "src/ante/cli/cold_path.py": 1,
-    "src/ante/cli/commands/account.py": 1,
     "src/ante/cli/commands/bot.py": 8,
     "src/ante/cli/commands/broker.py": 1,
     "src/ante/cli/commands/config.py": 1,

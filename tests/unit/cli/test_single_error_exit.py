@@ -29,6 +29,7 @@ import pytest
 from click.testing import CliRunner, Result
 
 from ante.cli.main import cli
+from ante.contracts.cli_errors import CliMissingRequiredInputError
 from ante.member.models import Member, MemberRole, MemberType
 from tests.unit.ipc.request_fixtures import NoArgsRequest
 
@@ -208,6 +209,77 @@ class TestHookCatchesUnhandledException:
         inject(("bot", "list"), _HttpLikeError("server said no"))
         result = _invoke(["--format", "json", "bot", "list"])
         _assert_json_exit(result, "EXECUTION_ERROR", "server said no")
+
+
+_IDEMPOTENT_CASES = [
+    pytest.param(
+        "CLI_MISSING_REQUIRED_INPUT: m",
+        "Error: CLI_MISSING_REQUIRED_INPUT: m\n",
+        id="same-code-prefix",
+    ),
+    pytest.param(
+        "CLI_MISSING_REQUIRED_INPUT: ",
+        "Error: CLI_MISSING_REQUIRED_INPUT: \n",
+        id="message-is-exactly-the-prefix",
+    ),
+    pytest.param(
+        "CLI_CONFIRMATION_REQUIRED: m",
+        "Error: CLI_MISSING_REQUIRED_INPUT: CLI_CONFIRMATION_REQUIRED: m\n",
+        id="other-code-prefix",
+    ),
+    pytest.param(
+        "CLI_MISSING_REQUIRED_INPUT:m",
+        "Error: CLI_MISSING_REQUIRED_INPUT: CLI_MISSING_REQUIRED_INPUT:m\n",
+        id="colon-without-space",
+    ),
+    pytest.param(
+        "cli_missing_required_input: m",
+        "Error: CLI_MISSING_REQUIRED_INPUT: cli_missing_required_input: m\n",
+        id="lowercase-code",
+    ),
+    pytest.param(
+        " CLI_MISSING_REQUIRED_INPUT: m",
+        "Error: CLI_MISSING_REQUIRED_INPUT:  CLI_MISSING_REQUIRED_INPUT: m\n",
+        id="leading-space",
+    ),
+    pytest.param(
+        "m",
+        "Error: CLI_MISSING_REQUIRED_INPUT: m\n",
+        id="no-prefix",
+    ),
+    pytest.param(
+        "",
+        "Error: CLI_MISSING_REQUIRED_INPUT: \n",
+        id="empty-message",
+    ),
+]
+
+
+class TestHookIdempotentPrefix:
+    """text 줄의 멱등 접두 (#2738).
+
+    메시지가 이미 ``<code>: ``로 시작하면 접두를 다시 붙이지 않는다.
+    """
+
+    def test_cases_are_present(self) -> None:
+        assert len(_IDEMPOTENT_CASES) == 8
+
+    @pytest.mark.parametrize(("message", "stderr"), _IDEMPOTENT_CASES)
+    def test_text_line(self, inject, message: str, stderr: str) -> None:
+        inject(("bot", "list"), CliMissingRequiredInputError(message))
+        result = _invoke(["--format", "text", "bot", "list"])
+        assert result.exit_code == 1, (result.stdout, result.stderr)
+        assert result.stdout == ""
+        assert result.stderr == stderr
+        assert isinstance(result.exception, SystemExit), repr(result.exception)
+
+    @pytest.mark.parametrize(("message", "stderr"), _IDEMPOTENT_CASES)
+    def test_json_message_is_not_normalized(
+        self, inject, message: str, stderr: str
+    ) -> None:
+        inject(("bot", "list"), CliMissingRequiredInputError(message))
+        result = _invoke(["--format", "json", "bot", "list"])
+        _assert_json_exit(result, "CLI_MISSING_REQUIRED_INPUT", message)
 
 
 class TestHookExitCodeFromRegistry:
