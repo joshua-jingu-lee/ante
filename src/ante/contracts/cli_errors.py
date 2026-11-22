@@ -5,13 +5,19 @@ __all__ = [
     "AccountTestCreateFailedError",
     "AccountTestInactiveError",
     "AlreadyRunningError",
+    "ApprovalInvalidStatusError",
+    "ApprovalInvalidTypeError",
     "BacktestDataNotFoundError",
     "BacktestError",
     "BacktestInvalidExchangeError",
     "BacktestInvalidSymbolError",
     "BacktestInvalidTimeframeError",
+    "BotInvalidParamError",
+    "BotMissingRequiredAccountError",
     "CliAlreadyInitializedError",
+    "CliBotNotFoundError",
     "CliConfirmationRequiredError",
+    "CliMissingRequiredInputError",
     "CliOptionConflictError",
     "ConfigKeyNotFoundError",
     "DataError",
@@ -31,6 +37,7 @@ __all__ = [
     "InstrumentSyncSourceUnsupportedError",
     "InvalidDateError",
     "InvalidDateRangeError",
+    "InvalidJsonError",
     "PidNotFoundError",
     "ProcessNotFoundError",
     "ReportError",
@@ -39,6 +46,7 @@ __all__ = [
     "ReportValidationError",
     "RuleNotFoundError",
     "RuleUpdateError",
+    "SignalKeyNotSetError",
     "TradeError",
     "TradeNotFoundError",
     "UpdateCheckFailedError",
@@ -66,6 +74,14 @@ class AlreadyRunningError(Exception):
     code = "ALREADY_RUNNING"
 
 
+class ApprovalInvalidStatusError(Exception):
+    code = "APPROVAL_INVALID_STATUS"
+
+
+class ApprovalInvalidTypeError(Exception):
+    code = "APPROVAL_INVALID_TYPE"
+
+
 class BacktestDataNotFoundError(Exception):
     code = "BACKTEST_DATA_NOT_FOUND"
 
@@ -86,12 +102,28 @@ class BacktestInvalidTimeframeError(Exception):
     code = "BACKTEST_INVALID_TIMEFRAME"
 
 
+class BotInvalidParamError(Exception):
+    code = "BOT_INVALID_PARAM"
+
+
+class BotMissingRequiredAccountError(Exception):
+    code = "BOT_MISSING_REQUIRED_ACCOUNT"
+
+
 class CliAlreadyInitializedError(Exception):
     code = "CLI_ALREADY_INITIALIZED"
 
 
+class CliBotNotFoundError(Exception):
+    code = "BOT_NOT_FOUND"
+
+
 class CliConfirmationRequiredError(Exception):
     code = "CLI_CONFIRMATION_REQUIRED"
+
+
+class CliMissingRequiredInputError(Exception):
+    code = "CLI_MISSING_REQUIRED_INPUT"
 
 
 class CliOptionConflictError(Exception):
@@ -170,6 +202,10 @@ class InvalidDateRangeError(Exception):
     code = "INVALID_DATE_RANGE"
 
 
+class InvalidJsonError(Exception):
+    code = "INVALID_JSON"
+
+
 class PidNotFoundError(Exception):
     code = "PID_NOT_FOUND"
 
@@ -200,6 +236,10 @@ class RuleNotFoundError(Exception):
 
 class RuleUpdateError(Exception):
     code = "RULE_UPDATE_ERROR"
+
+
+class SignalKeyNotSetError(Exception):
+    code = "SIGNAL_KEY_NOT_SET"
 
 
 class TradeError(Exception):
@@ -239,13 +279,19 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     AccountTestCreateFailedError,
     AccountTestInactiveError,
     AlreadyRunningError,
+    ApprovalInvalidStatusError,
+    ApprovalInvalidTypeError,
     BacktestDataNotFoundError,
     BacktestError,
     BacktestInvalidExchangeError,
     BacktestInvalidSymbolError,
     BacktestInvalidTimeframeError,
+    BotInvalidParamError,
+    BotMissingRequiredAccountError,
     CliAlreadyInitializedError,
+    CliBotNotFoundError,
     CliConfirmationRequiredError,
+    CliMissingRequiredInputError,
     CliOptionConflictError,
     ConfigKeyNotFoundError,
     DataError,
@@ -265,6 +311,7 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     InstrumentSyncSourceUnsupportedError,
     InvalidDateError,
     InvalidDateRangeError,
+    InvalidJsonError,
     PidNotFoundError,
     ProcessNotFoundError,
     ReportError,
@@ -273,6 +320,7 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     ReportValidationError,
     RuleNotFoundError,
     RuleUpdateError,
+    SignalKeyNotSetError,
     TradeError,
     TradeNotFoundError,
     UpdateCheckFailedError,

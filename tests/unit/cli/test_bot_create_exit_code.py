@@ -198,7 +198,9 @@ class TestBotCreateBadParamExitCode:
         )
         # text 모드: stdout 에 JSON 이 새지 않아야 한다.
         assert result.stdout.strip() == "", result.stdout
-        assert "Error: 잘못된 파라미터 형식" in result.stderr, result.stderr
+        assert "Error: BOT_INVALID_PARAM: 잘못된 파라미터 형식" in result.stderr, (
+            result.stderr
+        )
 
 
 # ── generic Exception 분기 (``ipc_send`` raise) ─────────────────────────────
@@ -284,7 +286,7 @@ class TestBotCreateIPCExceptionExitCode:
         )
         # text 모드: stdout 에 JSON 이 새지 않아야 한다.
         assert result.stdout.strip() == "", result.stdout
-        assert "Error: IPC 연결 실패" in result.stderr, result.stderr
+        assert "Error: EXECUTION_ERROR: IPC 연결 실패" in result.stderr, result.stderr
 
 
 # ── bot positions missing-bot exit code 회귀 (#1558) ────────────────────────
@@ -424,7 +426,9 @@ class TestBotPositionsMissingBotExitCode:
         )
         # text 모드: stdout 에 success/JSON 이 새지 않아야 한다.
         assert "보유 포지션 없음" not in result.stdout, result.stdout
-        assert f"Error: {_BOT_NOT_FOUND_MESSAGE}" in result.stderr, result.stderr
+        assert f"Error: BOT_NOT_FOUND: {_BOT_NOT_FOUND_MESSAGE}" in result.stderr, (
+            result.stderr
+        )
 
 
 class TestBotPositionsRealBotContractUnchanged:
@@ -530,4 +534,6 @@ class TestBotPositionsNoBotsTableNormalized:
         )
         assert "OperationalError" not in result.stdout, result.stdout
         assert "OperationalError" not in result.stderr, result.stderr
-        assert f"Error: {_BOT_NOT_FOUND_MESSAGE}" in result.stderr, result.stderr
+        assert f"Error: BOT_NOT_FOUND: {_BOT_NOT_FOUND_MESSAGE}" in result.stderr, (
+            result.stderr
+        )
