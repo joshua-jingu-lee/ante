@@ -58,11 +58,7 @@ import pytest
 # → parents[3] == repository root.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
-BASELINE_WITHOUT_TABLE: frozenset[str] = frozenset(
-    {
-        "src/ante/bot/config.py::BotStatus",
-    }
-)
+BASELINE_WITHOUT_TABLE: frozenset[str] = frozenset()
 
 MODEL_ENUM = "src/ante/strategy/registry.py::StrategyStatus"
 MODEL_TABLE = "src/ante/strategy/registry.py 의 _ALLOWED_TRANSITIONS"
