@@ -240,11 +240,6 @@
     }
   },
   "mypy": {
-    "src/ante/cli/commands/account.py": {
-      "no-untyped-call": 9,
-      "no-untyped-def": 1,
-      "type-arg": 5
-    },
     "src/ante/cli/commands/feed.py": {
       "no-untyped-call": 3,
       "no-untyped-def": 2,
@@ -254,12 +249,6 @@
     "src/ante/cli/commands/ipc_helpers.py": {
       "no-any-return": 1,
       "type-arg": 2
-    },
-    "src/ante/cli/commands/member.py": {
-      "no-any-return": 1,
-      "no-untyped-call": 12,
-      "no-untyped-def": 3,
-      "type-arg": 13
     },
     "src/ante/cli/middleware.py": {
       "no-any-return": 1,
