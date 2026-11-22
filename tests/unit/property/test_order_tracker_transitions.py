@@ -82,6 +82,7 @@ class OrderTrackerMachine(RuleBasedStateMachine):
         self.rows: dict[str, Row] = {}
         self.steps = 0
         self.last_restart = 0
+        self.last_expire = 0
         self.tracker = self._boot()
 
     # ── 대역 ────────────────────────────────────────────────────────
@@ -171,7 +172,7 @@ class OrderTrackerMachine(RuleBasedStateMachine):
         before = self._cache_view()
         self._open(order_id, row["bot_id"], 1, row["submitted_date"])
         assert self._cache_view() == before, "중복 seed가 캐시를 바꿨다"
-        self._observe("open")
+        self._observe("reopen")
         assert self.rows[order_id] == row, "중복 seed가 행을 바꿨다"
 
     @precondition(lambda self: bool(self.ordered))
@@ -214,13 +215,27 @@ class OrderTrackerMachine(RuleBasedStateMachine):
                 self._run(self.tracker.mark_terminal(order_id, status))
         self._observe("mark_terminal")
 
-    @rule(before_date=st.sampled_from(DAYS))
-    def expire_stale(self, before_date: str) -> None:
-        count = self._run(self.tracker.expire_stale(ACCOUNT_ID, before_date))
+    # 전제가 없으면 걸음의 6할이 만료였다(전제가 없는 규칙을 hypothesis가 자주 고른다).
+    @precondition(lambda self: self.steps - self.last_expire >= 3)
+    @rule(before_date=st.sampled_from(DAYS), own=st.booleans())
+    def expire_stale(self, before_date: str, own: bool) -> None:
+        """장 마감 만료. 다른 계좌를 주면 이 계좌의 행은 그대로다."""
+        account = ACCOUNT_ID if own else "overseas"
+        count = self._run(self.tracker.expire_stale(account, before_date))
+        self.last_expire = self.steps
         prev = self.rows
         self._observe("expire_stale")
         expired = [o for o, r in self.rows.items() if prev[o]["status"] != r["status"]]
         assert count == len(expired), f"만료 건수 {count} != {expired}"
+        if not own:
+            assert expired == [], f"다른 계좌의 만료가 이 계좌를 바꿨다 {expired}"
+        else:
+            left = [
+                o
+                for o, r in self.rows.items()
+                if r["status"] == OrderStatus.OPEN and r["submitted_date"] < before_date
+            ]
+            assert left == [], f"만료되지 않은 open {left}"
         for o in expired:
             assert prev[o]["status"] == OrderStatus.OPEN, f"{o}: open이 아닌 행"
             assert prev[o]["submitted_date"] < before_date
