@@ -236,8 +236,10 @@ def submit(ctx: click.Context, path: str) -> None:
                     "error": str(e),
                 }
             )
-        else:
+        elif error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:
             raise
+        else:
+            raise CliStrategyError(str(e)) from e
         raise SystemExit(1)
 
     if fmt.is_json:
