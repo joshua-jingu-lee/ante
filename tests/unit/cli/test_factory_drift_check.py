@@ -20,13 +20,13 @@
 
 * Family C — CLI registry ``execution`` class ↔ factory 사용 정합
   :data:`ante.contracts.cli_registry.CLI_COMMAND_REGISTRY` 의 94 leaf 를
-  순회해, ``execution`` Literal 과 callback module 의 factory/IPC 사용
+  순회해, ``execution`` Literal 과 callback module 의 factory 사용
   패턴이 정렬되어 있는지 검증한다.
 
   - ``offline`` / ``cold_path`` → callback module 이 ``open_cli_db`` 또는
     ``_create_*_service`` 를 사용 (또는 module/callsite 가 baseline 등록).
-  - ``runtime_ipc`` → callback module 이 ``ipc_send`` 를 사용. 직접
-    Database 생성은 baseline (cold_path fallback) 에 한해 허용.
+  - ``runtime_ipc`` → 본 drift test 가 판정하지 않는다. CLI 계약 대조 테스트
+    (``test_cli_ipc_request_contract.py``)가 실제 호출로 판정한다 (#2683 ⑧).
   - ``long_running`` / ``bootstrap`` → skip (lifecycle 이 다르므로 본
     drift test scope 밖).
 
@@ -205,10 +205,10 @@ class TestGetDbPathWithoutCtxLegacyCountReport:
 
 # Family C 가 검사 대상으로 삼는 execution class.
 # - offline / cold_path: factory (open_cli_db 또는 _create_*_service) 사용 필요.
-# - runtime_ipc: ipc_send 사용 필요. 직접 Database 는 baseline 에서만 허용.
+# - runtime_ipc: CLI 계약 대조 테스트가 실제 호출로 판정한다 (skip, #2683 ⑧).
 # long_running / bootstrap 은 본 drift test scope 밖 (skip).
 _FACTORY_REQUIRED_EXECUTIONS = frozenset({"offline", "cold_path"})
-_IPC_REQUIRED_EXECUTIONS = frozenset({"runtime_ipc"})
+_CONTRACT_TEST_EXECUTIONS = frozenset({"runtime_ipc"})
 _SKIPPED_EXECUTIONS = frozenset({"long_running", "bootstrap"})
 
 
@@ -279,14 +279,6 @@ def _module_uses_factory(module_path: Path) -> bool:
     return False
 
 
-def _module_uses_ipc(module_path: Path) -> bool:
-    """module 본문에 ``ipc_send`` 사용 자취가 있는지."""
-    text = _read_module_text(module_path)
-    if not text:
-        return False
-    return "ipc_send" in text
-
-
 def _module_has_direct_database_in_baseline(
     module_path: Path,
     baseline: set[tuple[str, int]],
@@ -318,14 +310,14 @@ def _module_has_direct_database_in_baseline(
 
 
 class TestCliExecutionClassMatchesFactoryUsage:
-    """Family C: registry ``execution`` ↔ callback module factory/IPC 정합."""
+    """Family C: registry ``execution`` ↔ callback module factory 정합."""
 
     def test_cli_execution_class_matches_factory_usage(self) -> None:
-        """``execution`` class 가 callback module 의 factory/IPC 사용과 정합.
+        """``execution`` class 가 callback module 의 factory 사용과 정합.
 
         - ``offline`` / ``cold_path`` → module 이 factory 사용 (open_cli_db
           또는 _create_*_service).
-        - ``runtime_ipc`` → module 이 ipc_send 사용.
+        - ``runtime_ipc`` → skip (CLI 계약 대조 테스트가 판정한다).
         - ``long_running`` / ``bootstrap`` → skip.
 
         module 이 baseline 등록된 직접 Database 생성 callsite 만 보유하면
@@ -353,7 +345,7 @@ class TestCliExecutionClassMatchesFactoryUsage:
 
         for path, contract in CLI_COMMAND_REGISTRY.items():
             execution = contract.execution
-            if execution in _SKIPPED_EXECUTIONS:
+            if execution in _SKIPPED_EXECUTIONS | _CONTRACT_TEST_EXECUTIONS:
                 skipped += 1
                 continue
 
@@ -366,7 +358,6 @@ class TestCliExecutionClassMatchesFactoryUsage:
 
             checked += 1
             module_uses_factory = _module_uses_factory(module_path)
-            module_uses_ipc = _module_uses_ipc(module_path)
             module_baseline_only = _module_has_direct_database_in_baseline(
                 module_path, baseline
             )
@@ -380,18 +371,6 @@ class TestCliExecutionClassMatchesFactoryUsage:
                         f"factory (open_cli_db / _create_*_service) 미사용이며 "
                         f"baseline 외 direct Database 생성 존재."
                     )
-            elif execution in _IPC_REQUIRED_EXECUTIONS:
-                # IPC 사용 OR (baseline-only direct DB) 가 OK.
-                # broker 4 commands 는 spec primary 가 runtime_ipc 이고
-                # cold_path fallback (baseline 등록) 으로 직접 DB 를 사용한다.
-                # module 이 ipc_send 토큰을 보유하면 정합 OK.
-                if not (module_uses_ipc or module_baseline_only):
-                    mismatches.append(
-                        f"  - {' '.join(path)} (execution={execution!r}, "
-                        f"module={_to_repo_relative(module_path)}): "
-                        f"ipc_send 사용이 발견되지 않고 baseline 외 direct Database "
-                        f"생성 존재."
-                    )
 
         # sanity: 94 entry 중 4 long_running + 0 bootstrap = 4 skip 기대.
         # 본 카운트는 정보용 (assertion 아님) — registry 변경 시 자동 조정.
@@ -403,11 +382,11 @@ class TestCliExecutionClassMatchesFactoryUsage:
         if mismatches:
             lines = "\n".join(mismatches)
             pytest.fail(
-                "CLI execution class ↔ factory/IPC 사용 정합 mismatch.\n"
-                "registry 의 execution class 가 callback module 의 factory 또는 IPC\n"
+                "CLI execution class ↔ factory 사용 정합 mismatch.\n"
+                "registry 의 execution class 가 callback module 의 factory\n"
                 "사용 패턴과 어긋난다. 다음 중 하나를 적용하라:\n"
-                "  1) module 본문을 factory (open_cli_db / _create_*_service) 또는\n"
-                "     ipc_send 로 마이그레이션.\n"
+                "  1) module 본문을 factory (open_cli_db / _create_*_service) 로\n"
+                "     마이그레이션.\n"
                 "  2) registry 의 execution class 를 실제 구현 lifecycle 에 맞춰 조정\n"
                 "     (스펙 SSOT 와 일치해야 함).\n"
                 "  3) 직접 Database 생성이 long-running/bootstrap/live-state 와 엮여\n"
