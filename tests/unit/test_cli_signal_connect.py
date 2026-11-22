@@ -29,6 +29,7 @@ import pytest
 from click.testing import CliRunner
 
 from ante.cli.main import cli
+from ante.ipc.registry import CommandRegistry, register_all_handlers
 from ante.member.models import Member, MemberRole, MemberType
 
 _MOCK_MASTER = Member(
@@ -767,3 +768,23 @@ async def test_pump_in_swallows_write_eof_error() -> None:
         stdin.close()
     assert returned is None
     assert _EofFailingWriter.eof_attempts == 1
+
+
+def test_handshake_frame_args_pass_the_request_model(runner: CliRunner) -> None:
+    """핸드셰이크 첫 프레임의 ``args``가 요청 모델을 통과한다 (#2683)."""
+    with _patch_ipc(
+        response_frames=[_error_frame("INVALID_SIGNAL_KEY", "Invalid signal key")]
+    ) as writer:
+        runner.invoke(
+            cli, ["signal", "connect", "--key", "sig-key-1", "--format", "json"]
+        )
+    (length,) = struct.unpack("!I", bytes(writer.written[:4]))
+    frame = json.loads(bytes(writer.written[4 : 4 + length]))
+    assert frame["command"] == "signal.connect"
+    registry = CommandRegistry()
+    register_all_handlers(registry)
+    spec = registry.get("signal.connect")
+    assert spec is not None and spec.request_model is not None
+    request = spec.request_model.model_validate(frame["args"])
+    assert request.model_dump(mode="json") == {"key": "**********"}
+    assert request.model_dump()["key"].get_secret_value() == "sig-key-1"

@@ -16,6 +16,7 @@ from ante.bot.exceptions import BotSignalChannelBusy, SignalChannelRegistryFroze
 from ante.bot.signal_channel_registry import SignalChannelRegistry
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import _handle_signal_connect
+from ante.ipc.requests import SignalConnectRequest
 
 pytestmark = pytest.mark.asyncio
 
@@ -50,7 +51,7 @@ def _svc(reg: SignalChannelRegistry | None) -> ServiceRegistry:
 async def test_first_connect_registers_and_returns_session() -> None:
     reg = SignalChannelRegistry()
     svc = _svc(reg)
-    result = await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+    result = await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
     assert result["bot_id"] == "bot-1"
     assert result["_stream"] == "signal.connect"
     assert "session_id" in result
@@ -60,9 +61,9 @@ async def test_first_connect_registers_and_returns_session() -> None:
 async def test_second_connect_raises_busy() -> None:
     reg = SignalChannelRegistry()
     svc = _svc(reg)
-    await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+    await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
     with pytest.raises(BotSignalChannelBusy) as ei:
-        await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+        await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
     assert ei.value.code == "BOT_SIGNAL_CHANNEL_BUSY"
 
 
@@ -81,7 +82,7 @@ async def test_busy_envelope_via_dispatch_redacts_identifiers() -> None:
         _handle_signal_connect,
         is_mutating=False,
         required_services=frozenset({"bot_manager"}),
-        account_id_policy="none",
+        request_model=SignalConnectRequest,
     )
     server = IPCServer("/tmp/unused.sock", svc, cmd_reg)
     # _dispatch lifecycle gate 통과를 위해 RUNNING 으로 둔다(start() 없이 단위).
@@ -110,13 +111,13 @@ async def test_frozen_registry_rejects_connect() -> None:
     reg.freeze()
     svc = _svc(reg)
     with pytest.raises(SignalChannelRegistryFrozen):
-        await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+        await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
     assert reg.has_active_session("bot-1") is False
 
 
 async def test_headless_no_registry_returns_session_no_register() -> None:
     """reg=None → register 스킵, session_id 만 전달(crash 없음)."""
     svc = _svc(None)
-    result = await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+    result = await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
     assert "session_id" in result
     assert result["_stream"] == "signal.connect"

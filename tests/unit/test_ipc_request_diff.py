@@ -298,11 +298,14 @@ def register_all_handlers(registry):
 """
 
 
-def _build(tmp_path: Path, extra: str) -> tuple[int, str, str]:
+def _build(
+    tmp_path: Path, extra: str, cli_args: list[dict[str, Any]] | None = None
+) -> tuple[int, str, str]:
     registry = tmp_path / "src" / "ante" / "ipc" / "registry.py"
     registry.parent.mkdir(parents=True)
     registry.write_text(REGISTRY_SOURCE.format(extra=extra), encoding="utf-8")
-    cli = [{"command": "demo.run", "args": {"name": "a1", "n": 2.5}, "row": "r"}]
+    rows = [{"name": "a1", "n": 2.5}] if cli_args is None else cli_args
+    cli = [{"command": "demo.run", "args": a, "row": "r"} for a in rows]
     (tmp_path / "cli.json").write_text(json.dumps(cli), encoding="utf-8")
     return _run(
         "--root",
@@ -345,6 +348,67 @@ def test_build_writes_the_candidates_of_each_read_key(tmp_path: Path) -> None:
     assert same["demo.run:value:n:int7"] is True
     assert same["demo.run:value:name:str5"] is True
     assert same["demo.run:value:name:int7"] is False
+
+
+def _same_types(tmp_path: Path) -> dict[str, bool]:
+    data = json.loads((tmp_path / "requests.json").read_text(encoding="utf-8"))
+    return {
+        r["name"]: r["same_type"]
+        for r in data["commands"]["demo.run"]
+        if "same_type" in r
+    }
+
+
+def test_build_same_type_reads_a_key_sent_only_by_a_later_cli_row(
+    tmp_path: Path,
+) -> None:
+    code, _, err = _build(tmp_path, "", [{"name": "a1"}, {"name": "a1", "n": 2.5}])
+    assert (code, err) == (0, "")
+    same = _same_types(tmp_path)
+    assert same["demo.run:value:n:int7"] is True
+    assert same["demo.run:value:n:str5"] is False
+    assert same["demo.run:value:n:true"] is False
+    assert same["demo.run:value:n:null"] is False
+
+
+def test_build_same_type_takes_the_json_type_of_every_cli_row(
+    tmp_path: Path,
+) -> None:
+    code, _, err = _build(
+        tmp_path, "", [{"name": "a1", "n": 2.5}, {"name": "a1", "n": "x"}]
+    )
+    assert (code, err) == (0, "")
+    same = _same_types(tmp_path)
+    assert same["demo.run:value:n:int7"] is True
+    assert same["demo.run:value:n:str5"] is True
+    assert same["demo.run:value:n:true"] is False
+    assert same["demo.run:value:n:null"] is False
+
+
+def test_build_replaces_a_clock_value_with_a_fixed_marker(tmp_path: Path) -> None:
+    rows = [
+        {"name": "a1", "expires_at": ""},
+        {"name": "a1", "expires_at": "2026-11-25T02:22:59.691054+00:00"},
+    ]
+    code, _, err = _build(tmp_path, "", rows)
+    assert (code, err) == (0, "")
+    data = json.loads((tmp_path / "requests.json").read_text(encoding="utf-8"))
+    cli = [r["args"] for r in data["commands"]["demo.run"] if r["kind"] == "cli"]
+    assert cli == [
+        {"name": "a1", "expires_at": ""},
+        {"name": "a1", "expires_at": "2030-01-01T00:00:00+00:00"},
+    ]
+
+
+def test_build_keeps_the_cli_key_order(tmp_path: Path) -> None:
+    code, _, err = _build(tmp_path, "", [{"name": "a1", "n": 2.5}])
+    assert (code, err) == (0, "")
+    data = json.loads((tmp_path / "requests.json").read_text(encoding="utf-8"))
+    rows = data["commands"]["demo.run"]
+    assert list(rows[0]) == ["args", "kind", "name"]
+    assert list(rows[0]["args"]) == ["name", "n"]
+    assert list(rows[1]) == ["args", "key", "kind", "name", "same_type"]
+    assert list(rows[1]["args"]) == ["name", "n"]
 
 
 def test_build_rejects_another_use_of_the_args(tmp_path: Path) -> None:
@@ -396,6 +460,51 @@ def test_a_narrowed_field_may_change_code(tmp_path: Path) -> None:
         command="strategy.set_status",
     )
     assert (code, _count(out, "코드 바뀜")) == (0, 1)
+
+
+@pytest.mark.parametrize(
+    ("command", "key", "args", "after", "cls", "exit_code"),
+    [
+        pytest.param(
+            "bot.list",
+            "account_id",
+            {"account_id": "5"},
+            "bot.list 인자 검증 실패: account_id(invalid_account_id)",
+            "메시지 바뀜",
+            0,
+            id="nullable-account-id",
+        ),
+        pytest.param(
+            "bot.start",
+            "bot_id",
+            {"bot_id": "5"},
+            "bot.start 인자 검증 실패: bot_id(string_type)",
+            "다름",
+            1,
+            id="plain-str",
+        ),
+    ],
+)
+def test_a_nullable_narrowed_field_may_change_message(
+    tmp_path: Path,
+    command: str,
+    key: str,
+    args: dict[str, Any],
+    after: str,
+    cls: str,
+    exit_code: int,
+) -> None:
+    name = f"{command}:value:{key}:str5"
+    row = _request(name, "value", args, key=key, same_type=True)
+    before = {**REJECTED, "message": "invalid account_id: '5'"}
+    code, out, _ = _compare(
+        tmp_path,
+        [row],
+        {name: before},
+        {name: {**REJECTED, "message": after}},
+        command=command,
+    )
+    assert (code, _count(out, cls)) == (exit_code, 1)
 
 
 @pytest.mark.parametrize(

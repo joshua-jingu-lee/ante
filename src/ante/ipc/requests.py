@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, SecretStr
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr
 from pydantic_core import PydanticCustomError
 
 from ante.core.account_id import is_invalid_account_id
@@ -17,6 +17,18 @@ __all__ = [
     "ApprovalRejectRequest",
     "ApprovalReopenRequest",
     "ApprovalRequestRequest",
+    "BotCreateRequest",
+    "BotInfoRequest",
+    "BotListRequest",
+    "BotPositionsRequest",
+    "BotRemoveRequest",
+    "BotSignalKeyRequest",
+    "BotSignalKeyRotateRequest",
+    "BotStartRequest",
+    "BotStatusRequest",
+    "BotStopRequest",
+    "BotUpdateFields",
+    "BotUpdateRequest",
     "IPCRequest",
     "MemberReactivateRequest",
     "MemberRegenerateRecoveryKeyRequest",
@@ -27,6 +39,7 @@ __all__ = [
     "MemberSetEmojiRequest",
     "MemberSuspendRequest",
     "MemberUpdateScopesRequest",
+    "SignalConnectRequest",
     "StrategySetStatusRequest",
     "SystemClearHaltRequest",
     "SystemHaltRequest",
@@ -147,3 +160,69 @@ class ApprovalReopenRequest(IPCRequest):
     id: str
     body: str | None = None
     params: dict[str, Any] | None = None
+
+
+class BotCreateRequest(IPCRequest):
+    strategy_id: str
+    account_id: AccountId
+    bot_id: str = ""
+    name: str = ""
+    interval_seconds: int = 60
+
+
+class BotRemoveRequest(IPCRequest):
+    bot_id: str
+
+
+class BotSignalKeyRotateRequest(IPCRequest):
+    bot_id: str
+
+
+class BotStartRequest(IPCRequest):
+    bot_id: str
+
+
+class BotStopRequest(IPCRequest):
+    bot_id: str
+
+
+class BotUpdateFields(IPCRequest):
+    name: str | None = None
+    strategy_id: str | None = None
+    interval_seconds: int | None = None
+    budget: float | None = None
+    auto_restart: bool | None = None
+    max_restart_attempts: int | None = None
+    restart_cooldown_seconds: int | None = None
+    step_timeout_seconds: int | None = None
+    max_signals_per_step: int | None = None
+    account_id: str | None = None
+
+
+class BotUpdateRequest(IPCRequest):
+    bot_id: str
+    updates: BotUpdateFields = Field(default_factory=BotUpdateFields)
+
+
+class BotStatusRequest(IPCRequest):
+    bot_id: str
+
+
+class BotListRequest(IPCRequest):
+    account_id: AccountId | None = None
+
+
+class BotInfoRequest(IPCRequest):
+    bot_id: str
+
+
+class BotPositionsRequest(IPCRequest):
+    bot_id: str
+
+
+class BotSignalKeyRequest(IPCRequest):
+    bot_id: str
+
+
+class SignalConnectRequest(IPCRequest):
+    key: SecretStr

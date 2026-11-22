@@ -216,7 +216,7 @@ class TestBotCreateIpc:
     )
     @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_bot_create_with_params(self, mock_ipc_cls, mock_socket) -> None:
-        """--param 옵션이 IPC args에 포함된다."""
+        """--param 옵션은 IPC args에 실리지 않는다(핸들러가 읽지 않는다. #2684)."""
         mock_client = AsyncMock()
         mock_client.send.return_value = {
             "id": "req-1",
@@ -244,7 +244,12 @@ class TestBotCreateIpc:
 
         assert result.exit_code == 0
         sent_args = mock_client.send.call_args[0][1]
-        assert sent_args["params"] == {"threshold": 0.5, "window": 20}
+        assert sent_args == {
+            "name": "테스트봇",
+            "strategy_id": "strat-1",
+            "account_id": "acc-1",
+            "interval_seconds": 60,
+        }
 
 
 class TestBotRemoveIpc:

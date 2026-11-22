@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import types
@@ -23,7 +24,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import annotated_types
 import pytest
-from pydantic import AfterValidator, Field, SecretStr, field_validator
+from pydantic import AfterValidator, BaseModel, Field, SecretStr, field_validator
 from pydantic.fields import FieldInfo
 
 from ante.core.registry import ServiceRegistry
@@ -46,6 +47,7 @@ ACCEPTED_KINDS = {
     "secret": {"string"},
     "list": {"array"},
     "dict": {"object"},
+    "nested": {"object"},
 }
 WRONG_TYPE = {
     "str": "string_type",
@@ -57,6 +59,7 @@ WRONG_TYPE = {
     "secret": "string_type",
     "list": "list_type",
     "dict": "dict_type",
+    "nested": "model_type",
 }
 CONSTRAINT_TYPE = {
     "ge": "greater_than_equal",
@@ -79,6 +82,7 @@ SECRET_FIELDS: frozenset[tuple[str, str]] = frozenset(
         ("MemberResetPasswordRequest", "recovery_key"),
         ("MemberResetPasswordRequest", "new_password"),
         ("MemberRegenerateRecoveryKeyRequest", "password"),
+        ("SignalConnectRequest", "key"),
     }
 )
 
@@ -162,11 +166,20 @@ def _is_unbounded(annotation: Any) -> bool:
     return inner in (Any, object) or inner is dict or origin is dict
 
 
+def _annotated(info: FieldInfo) -> tuple[Any, list[Any]]:
+    inner = _inner(info.annotation)
+    if _nullable(info) and typing.get_origin(inner) is Annotated:
+        annotation, *metadata = typing.get_args(inner)
+        return annotation, metadata
+    return info.annotation, list(info.metadata)
+
+
 def _validated(info: FieldInfo) -> ValidatedType | None:
-    found = [m for m in info.metadata if isinstance(m, AfterValidator)]
+    annotation, metadata = _annotated(info)
+    found = [m for m in metadata if isinstance(m, AfterValidator)]
     if not found:
         return None
-    if len(found) != 1 or len(info.metadata) != 1 or info.annotation is not str:
+    if len(found) != 1 or len(metadata) != 1 or annotation is not str:
         raise UnsupportedFieldError(f"unsupported validated field: {info!r}")
     entry = VALIDATED_TYPES.get(found[0].func)
     if entry is None:
@@ -180,6 +193,10 @@ def _kind(info: FieldInfo) -> str:
         raise UnsupportedFieldError(f"constrained nullable field: {info!r}")
     if _validated(info) is not None:
         return "validated"
+    if isinstance(annotation, type) and issubclass(annotation, IPCRequest):
+        if _nullable(info):
+            raise UnsupportedFieldError(f"nullable nested model: {info!r}")
+        return "nested"
     if annotation == dict[str, Any]:
         return "dict"
     if _is_unbounded(annotation):
@@ -269,6 +286,8 @@ def _base_value(info: FieldInfo) -> Any:
         return ["w"] if default == ["v"] else ["v"]
     if kind == "dict":
         return {"k": "w"} if default == {"k": "v"} else {"k": "v"}
+    if kind == "nested":
+        return base_args(_nested(info))
     entry = _validated(info)
     if entry is not None:
         if _has_default(info) and info.default == entry.base:
@@ -281,6 +300,10 @@ def _base_value(info: FieldInfo) -> Any:
             f"no Literal member other than the default: {members}"
         )
     return candidates[0]
+
+
+def _nested(info: FieldInfo) -> type[IPCRequest]:
+    return cast(type[IPCRequest], _inner(info.annotation))
 
 
 def base_args(model: type[IPCRequest]) -> dict[str, Any]:
@@ -364,6 +387,34 @@ def _field_variants(
     if kind == "float":
         for label, value in NOT_FINITE:
             one(label, "finite_number", value, None)
+    if kind == "nested":
+        model = _nested(info)
+        if EXTRA_KEY in model.model_fields:
+            raise UnsupportedFieldError(
+                f"{model.__name__} has a field named {EXTRA_KEY}"
+            )
+        inner = base[name]
+        for sub_name, sub_info in model.model_fields.items():
+            for v in _field_variants(sub_name, sub_info, inner, markers):
+                out.append(
+                    Variant(
+                        f"{name}.{v.loc}",
+                        v.kind,
+                        v.expected,
+                        {**base, name: v.args},
+                        v.marker,
+                    )
+                )
+        marker = markers.next()
+        out.append(
+            Variant(
+                f"{name}.{EXTRA_KEY}",
+                "extra",
+                "extra_forbidden",
+                {**base, name: {**inner, EXTRA_KEY: marker}},
+                marker,
+            )
+        )
     return out
 
 
@@ -413,10 +464,20 @@ def inside_values(model: type[IPCRequest]) -> list[Inside]:
                 )
         if _nullable(info):
             out.append(Inside(name, "null", {**base, name: None}, None))
+        if kind == "nested":
+            for i in inside_values(_nested(info)):
+                out.append(
+                    Inside(f"{name}.{i.loc}", i.kind, {**base, name: i.args}, i.value)
+                )
     return out
 
 
 # ── 대상: 등록된 명령과 생성기 표의 픽스처 ─────────────────────────────────
+
+
+class _TableInner(IPCRequest):
+    size: int = Field(ge=1)
+    tag: str | None = None
 
 
 class _TableRequest(IPCRequest):
@@ -433,6 +494,16 @@ class _TableRequest(IPCRequest):
     note: str | None = None
     payload: dict[str, Any] | None = None
     meta: dict[str, Any] = {}
+    owner: AccountId | None = None
+    inner: _TableInner
+
+
+class _PlainModel(BaseModel):
+    size: int
+
+
+class _ExtraNamed(IPCRequest):
+    zz_extra: int
 
 
 class _SecretRequest(IPCRequest):
@@ -452,6 +523,23 @@ def _registered_specs() -> list[CommandSpec]:
 
 def _modeled_specs() -> list[CommandSpec]:
     return [spec for spec in _registered_specs() if spec.request_model is not None]
+
+
+def _all_fields() -> list[tuple[type[IPCRequest], str, FieldInfo]]:
+    found: list[tuple[type[IPCRequest], str, FieldInfo]] = []
+    pending = [spec.request_model for spec in _modeled_specs()]
+    seen: set[type[IPCRequest]] = set()
+    while pending:
+        model = pending.pop(0)
+        if model is None or model in seen:
+            continue
+        seen.add(model)
+        for name, info in model.model_fields.items():
+            found.append((model, name, info))
+            inner = _inner(info.annotation)
+            if isinstance(inner, type) and issubclass(inner, IPCRequest):
+                pending.append(inner)
+    return found
 
 
 TABLE_COMMAND = "table.fixture"
@@ -578,10 +666,8 @@ def test_targets_are_every_command_outside_the_ratchet_baseline() -> None:
 
 def test_no_field_without_a_domain() -> None:
     unbounded = {
-        (spec.request_model.__name__, name)
-        for spec in _modeled_specs()
-        if spec.request_model is not None
-        for name, info in spec.request_model.model_fields.items()
+        (model.__name__, name)
+        for model, name, info in _all_fields()
         if _is_unbounded(info.annotation)
     }
     assert unbounded == UNBOUNDED_FIELDS
@@ -594,17 +680,27 @@ def test_no_field_without_a_domain() -> None:
 
 
 def test_nullable_fields_accept_null_and_reject_other_types() -> None:
-    nullable = [
-        (spec.request_model, name)
-        for spec in _modeled_specs()
-        if spec.request_model is not None
-        for name, info in spec.request_model.model_fields.items()
-        if _nullable(info)
-    ]
+    nullable = [(model, name) for model, name, info in _all_fields() if _nullable(info)]
     assert {(model.__name__, name) for model, name in nullable} == {
         ("ApprovalRequestRequest", "params"),
         ("ApprovalReopenRequest", "body"),
         ("ApprovalReopenRequest", "params"),
+        ("BotListRequest", "account_id"),
+        *(
+            ("BotUpdateFields", name)
+            for name in (
+                "name",
+                "strategy_id",
+                "interval_seconds",
+                "budget",
+                "auto_restart",
+                "max_restart_attempts",
+                "restart_cooldown_seconds",
+                "step_timeout_seconds",
+                "max_signals_per_step",
+                "account_id",
+            )
+        ),
     }
     for model, name in nullable:
         insides = {(i.loc, i.kind) for i in inside_values(model)}
@@ -626,12 +722,18 @@ def _secret_fields() -> list[tuple[CommandSpec, str]]:
 
 def test_secret_fields_are_exactly_the_declared_set() -> None:
     found = {
+        (model.__name__, name)
+        for model, name, info in _all_fields()
+        if _inner(info.annotation) is SecretStr
+    }
+    assert found
+    assert found == SECRET_FIELDS
+    top = {
         (spec.request_model.__name__, name)
         for spec, name in _secret_fields()
         if spec.request_model is not None
     }
-    assert found
-    assert found == SECRET_FIELDS
+    assert top == SECRET_FIELDS
 
 
 # ── 생성기 자체의 표 ─────────────────────────────────────────────────────────
@@ -702,6 +804,32 @@ def test_generator_table_for_each_field_kind() -> None:
             ("meta", f"wrong:{k}", "dict_type")
             for k in ("string", "int", "float", "bool", "null", "array")
         ),
+        *(
+            ("owner", f"wrong:{k}", "string_type")
+            for k in ("int", "float", "bool", "array", "object")
+        ),
+        ("owner", "reject:reserved", "invalid_account_id"),
+        ("owner", "reject:empty", "invalid_account_id"),
+        ("owner", "reject:short", "invalid_account_id"),
+        ("owner", "reject:long", "invalid_account_id"),
+        ("owner", "reject:pattern", "invalid_account_id"),
+        ("owner", "reject:marker", "invalid_account_id"),
+        ("inner", "missing", "missing"),
+        *(
+            ("inner", f"wrong:{k}", "model_type")
+            for k in ("string", "int", "float", "bool", "null", "array")
+        ),
+        ("inner.size", "missing", "missing"),
+        *(
+            ("inner.size", f"wrong:{k}", "int_type")
+            for k in ("string", "float", "bool", "null", "array", "object")
+        ),
+        ("inner.size", "ge", "greater_than_equal"),
+        *(
+            ("inner.tag", f"wrong:{k}", "string_type")
+            for k in ("int", "float", "bool", "array", "object")
+        ),
+        ("inner.zz_extra", "extra", "extra_forbidden"),
         ("zz_extra", "extra", "extra_forbidden"),
         ("args", "not_object:string", "model_type"),
         ("args", "not_object:int", "model_type"),
@@ -722,6 +850,8 @@ def test_generator_table_for_each_field_kind() -> None:
         "note": "v",
         "payload": {"k": "v"},
         "meta": {"k": "v"},
+        "owner": "acct-1",
+        "inner": {"size": 1, "tag": "v"},
     }
     assert [(i.loc, i.kind, i.value) for i in inside_values(_TableRequest)] == [
         ("level", "ge", 1),
@@ -732,6 +862,12 @@ def test_generator_table_for_each_field_kind() -> None:
         ("account_id", "accept:longest", "a" * 30),
         ("note", "null", None),
         ("payload", "null", None),
+        ("owner", "accept:bootstrap", "test"),
+        ("owner", "accept:shortest", "abc"),
+        ("owner", "accept:longest", "a" * 30),
+        ("owner", "null", None),
+        ("inner.size", "ge", 1),
+        ("inner.tag", "null", None),
     ]
 
 
@@ -766,8 +902,20 @@ def test_generator_rejects_fields_it_cannot_bound() -> None:
     class _BoundedNullable(IPCRequest):
         name: str | None = Field(default=None, min_length=1)
 
-    class _NullableAccount(IPCRequest):
-        account_id: AccountId | None = None
+    class _NullableUnlisted(IPCRequest):
+        name: Annotated[str, AfterValidator(lambda v: v)] | None = None
+
+    class _NullableBoundedAccount(IPCRequest):
+        account_id: AccountId | None = Field(default=None, max_length=10)
+
+    class _PlainNested(IPCRequest):
+        inner: _PlainModel
+
+    class _NullableNested(IPCRequest):
+        inner: _TableInner | None = None
+
+    class _NestedWithExtraKey(IPCRequest):
+        inner: _ExtraNamed
 
     class _Listed(IPCRequest):
         items: list[int]
@@ -793,7 +941,11 @@ def test_generator_rejects_fields_it_cannot_bound() -> None:
         _BareMapping,
         _Union,
         _BoundedNullable,
-        _NullableAccount,
+        _NullableUnlisted,
+        _NullableBoundedAccount,
+        _PlainNested,
+        _NullableNested,
+        _NestedWithExtraKey,
         _Listed,
         _ShortList,
         _BoundedSecret,
@@ -832,7 +984,8 @@ async def test_value_inside_a_bound_is_accepted(
     server, recorder = _server(command, model, spec)
     response = await _send(server, command, inside.args)
     assert response["status"] == "ok", response
-    assert getattr(recorder.calls[0], inside.loc) == inside.value
+    got = functools.reduce(getattr, inside.loc.split("."), recorder.calls[0])
+    assert got == inside.value
 
 
 @pytest.mark.asyncio

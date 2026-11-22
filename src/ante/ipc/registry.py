@@ -16,6 +16,17 @@ from ante.ipc.requests import (
     ApprovalRejectRequest,
     ApprovalReopenRequest,
     ApprovalRequestRequest,
+    BotCreateRequest,
+    BotInfoRequest,
+    BotListRequest,
+    BotPositionsRequest,
+    BotRemoveRequest,
+    BotSignalKeyRequest,
+    BotSignalKeyRotateRequest,
+    BotStartRequest,
+    BotStatusRequest,
+    BotStopRequest,
+    BotUpdateRequest,
     IPCRequest,
     MemberReactivateRequest,
     MemberRegenerateRecoveryKeyRequest,
@@ -26,6 +37,7 @@ from ante.ipc.requests import (
     MemberSetEmojiRequest,
     MemberSuspendRequest,
     MemberUpdateScopesRequest,
+    SignalConnectRequest,
     StrategySetStatusRequest,
     SystemClearHaltRequest,
     SystemHaltRequest,
@@ -203,17 +215,16 @@ async def _handle_account_activate(
 
 
 async def _handle_bot_create(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BotCreateRequest, actor: str
+) -> dict[str, Any]:
     from pathlib import Path
 
-    from ante.account.scoping import require_account_id
     from ante.bot.config import BotConfig
     from ante.strategy.loader import StrategyLoader
 
-    account_id = require_account_id(args.get("account_id"), context="ipc.bot.create")
+    account_id = request.account_id
 
-    strategy_id = args["strategy_id"]
+    strategy_id = request.strategy_id
     record = await svc.strategy_registry.get(strategy_id)
     if record is None:
         msg = f"전략을 찾을 수 없습니다: {strategy_id}"
@@ -222,11 +233,11 @@ async def _handle_bot_create(
     strategy_cls = StrategyLoader.load(Path(record.filepath))
 
     config = BotConfig(
-        bot_id=args.get("bot_id", ""),
+        bot_id=request.bot_id,
         strategy_id=strategy_id,
-        name=args.get("name", ""),
+        name=request.name,
         account_id=account_id,
-        interval_seconds=args.get("interval_seconds", 60),
+        interval_seconds=request.interval_seconds,
     )
 
     bot = await svc.bot_manager.create_bot(
@@ -245,10 +256,10 @@ async def _handle_bot_create(
 
 
 async def _handle_bot_remove(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BotRemoveRequest, actor: str
+) -> dict[str, Any]:
     """봇 제거 IPC handler."""
-    bot_id = args["bot_id"]
+    bot_id = request.bot_id
     await svc.bot_manager.remove_bot(bot_id)
     return {
         "bot_id": bot_id,
@@ -262,10 +273,10 @@ async def _handle_bot_remove(
 
 
 async def _handle_bot_signal_key_rotate(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BotSignalKeyRotateRequest, actor: str
+) -> dict[str, Any]:
     """봇 시그널 키 재발급 IPC handler."""
-    bot_id = args["bot_id"]
+    bot_id = request.bot_id
     new_key = await svc.bot_manager.rotate_signal_key(bot_id)
     return {
         "bot_id": bot_id,
@@ -280,8 +291,8 @@ async def _handle_bot_signal_key_rotate(
 
 
 async def _handle_bot_start(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BotStartRequest, actor: str
+) -> dict[str, Any]:
     """봇 시작 IPC handler."""
     from ante.bot.exceptions import (
         BotAccountCredentialsNotConfigured,
@@ -290,7 +301,7 @@ async def _handle_bot_start(
         BotStateConflict,
     )
 
-    bot_id = args["bot_id"]
+    bot_id = request.bot_id
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
@@ -317,8 +328,8 @@ async def _handle_bot_start(
 
 
 async def _handle_bot_stop(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BotStopRequest, actor: str
+) -> dict[str, Any]:
     """봇 중지 IPC handler."""
     from ante.bot.exceptions import (
         BotError,
@@ -326,7 +337,7 @@ async def _handle_bot_stop(
         BotStateConflict,
     )
 
-    bot_id = args["bot_id"]
+    bot_id = request.bot_id
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
@@ -347,13 +358,13 @@ async def _handle_bot_stop(
 
 
 async def _handle_bot_status(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BotStatusRequest, actor: str
+) -> dict[str, Any]:
     """봇 상태 조회 IPC handler."""
     from ante.bot.exceptions import BotNotFoundError
     from ante.bot.info import enrich_bot_info
 
-    bot_id = args["bot_id"]
+    bot_id = request.bot_id
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
@@ -387,10 +398,10 @@ _BOT_LIST_KEYS = (
 
 
 async def _handle_bot_list(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BotListRequest, actor: str
+) -> dict[str, Any]:
     """봇 목록 조회 IPC handler (read-only)."""
-    account_id = args.get("account_id")
+    account_id = request.account_id
     bots = svc.bot_manager.list_bots()
     result: list[dict[str, Any]] = []
     for info in bots:
@@ -401,12 +412,12 @@ async def _handle_bot_list(
 
 
 async def _handle_bot_info(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BotInfoRequest, actor: str
+) -> dict[str, Any]:
     """봇 상세 정보 조회 IPC handler (read-only)."""
     from ante.bot.exceptions import BotNotFoundError
 
-    bot_id = args["bot_id"]
+    bot_id = request.bot_id
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
@@ -414,12 +425,12 @@ async def _handle_bot_info(
 
 
 async def _handle_bot_positions(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BotPositionsRequest, actor: str
+) -> dict[str, Any]:
     """봇 보유 포지션 조회 IPC handler (read-only)."""
     from ante.bot.exceptions import BotNotFoundError
 
-    bot_id = args["bot_id"]
+    bot_id = request.bot_id
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
@@ -445,12 +456,12 @@ async def _handle_bot_positions(
 
 
 async def _handle_bot_signal_key(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BotSignalKeyRequest, actor: str
+) -> dict[str, Any]:
     """봇 시그널 키 조회 IPC handler (read-only)."""
     from ante.bot.exceptions import BotNotFoundError
 
-    bot_id = args["bot_id"]
+    bot_id = request.bot_id
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
@@ -460,8 +471,8 @@ async def _handle_bot_signal_key(
 
 
 async def _handle_signal_connect(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: SignalConnectRequest, actor: str
+) -> dict[str, Any]:
     """``signal.connect`` 핸드셰이크 IPC handler (read-only)."""
     from uuid import uuid4
 
@@ -473,10 +484,7 @@ async def _handle_signal_connect(
         InvalidSignalKey,
     )
 
-    key = args.get("key")
-    if not isinstance(key, str):
-        raise InvalidSignalKey()
-    bot_id = await svc.bot_manager.validate_signal_key(key)
+    bot_id = await svc.bot_manager.validate_signal_key(request.key.get_secret_value())
     if bot_id is None:
         raise InvalidSignalKey()
 
@@ -521,13 +529,13 @@ async def _handle_signal_connect(
 
 
 async def _handle_bot_update(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BotUpdateRequest, actor: str
+) -> dict[str, Any]:
     """봇 업데이트 IPC handler."""
     from ante.bot.exceptions import BotError
 
-    bot_id = args["bot_id"]
-    updates = dict(args.get("updates") or {})
+    bot_id = request.bot_id
+    updates = request.updates.model_dump(exclude_unset=True)
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         from ante.bot.exceptions import BotNotFoundError
@@ -1203,8 +1211,8 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         required_services=frozenset(
             {"strategy_registry", "bot_manager", "audit_logger"}
         ),
-        account_id_policy="required",
         audit_action="bot.create",
+        request_model=BotCreateRequest,
     )
     registry.register(
         "bot.remove",
@@ -1212,6 +1220,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"bot_manager", "audit_logger"}),
         audit_action="bot.delete",
+        request_model=BotRemoveRequest,
     )
     registry.register(
         "bot.signal_key.rotate",
@@ -1219,6 +1228,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"bot_manager", "audit_logger"}),
         audit_action="bot.signal_key.rotate",
+        request_model=BotSignalKeyRotateRequest,
     )
     registry.register(
         "bot.start",
@@ -1226,6 +1236,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"bot_manager", "account", "audit_logger"}),
         audit_action="bot.start",
+        request_model=BotStartRequest,
     )
     registry.register(
         "bot.stop",
@@ -1233,6 +1244,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"bot_manager", "audit_logger"}),
         audit_action="bot.stop",
+        request_model=BotStopRequest,
     )
     registry.register(
         "bot.update",
@@ -1240,6 +1252,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"bot_manager", "audit_logger"}),
         audit_action="bot.update",
+        request_model=BotUpdateRequest,
     )
     registry.register(
         "treasury.allocate",
@@ -1446,36 +1459,40 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         _handle_bot_status,
         is_mutating=False,
         required_services=frozenset({"bot_manager"}),
+        request_model=BotStatusRequest,
     )
     registry.register(
         "bot.list",
         _handle_bot_list,
         is_mutating=False,
         required_services=frozenset({"bot_manager"}),
-        account_id_policy="optional_filter",
+        request_model=BotListRequest,
     )
     registry.register(
         "bot.info",
         _handle_bot_info,
         is_mutating=False,
         required_services=frozenset({"bot_manager"}),
+        request_model=BotInfoRequest,
     )
     registry.register(
         "bot.positions",
         _handle_bot_positions,
         is_mutating=False,
         required_services=frozenset({"bot_manager"}),
+        request_model=BotPositionsRequest,
     )
     registry.register(
         "bot.signal_key",
         _handle_bot_signal_key,
         is_mutating=False,
         required_services=frozenset({"bot_manager"}),
+        request_model=BotSignalKeyRequest,
     )
     registry.register(
         "signal.connect",
         _handle_signal_connect,
         is_mutating=False,
         required_services=frozenset({"bot_manager"}),
-        account_id_policy="none",
+        request_model=SignalConnectRequest,
     )
