@@ -141,8 +141,8 @@ class TestBotStart:
         import json as _json
 
         data = _json.loads(result.output)
-        # passthrough: ``{"bot": info}`` 그대로 (success wrapper 부착 금지)
-        assert data == {"bot": info}
+        # passthrough: IPC ``{"bot": info}`` 그대로 성공 봉투의 ``data``에
+        assert data["data"] == {"bot": info}
 
     @patch(
         "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
@@ -297,7 +297,7 @@ class TestBotStop:
         import json as _json
 
         data = _json.loads(result.output)
-        assert data == {"bot": info}
+        assert data["data"] == {"bot": info}
 
     @patch(
         "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
@@ -389,8 +389,8 @@ class TestBotStatus:
         import json as _json
 
         data = _json.loads(result.output)
-        # passthrough: ``{"bot": info}`` 그대로
-        assert data == {"bot": info}
+        # passthrough: IPC ``{"bot": info}`` 그대로 성공 봉투의 ``data``에
+        assert data["data"] == {"bot": info}
         mock_client.send.assert_awaited_once()
         call_args = mock_client.send.call_args
         assert call_args[0][0] == "bot.status"

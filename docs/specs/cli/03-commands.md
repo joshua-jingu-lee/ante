@@ -90,7 +90,7 @@ allowlist 후보에서 제거한다.
 | `ante account activate <account_id>` | `runtime IPC` | 서버 AccountService + EventBus |
 | `ante bot list [--account <account_id>]` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
 | `ante bot info <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
-| `ante bot status <bot_id>` | `runtime IPC` | live `BotManager.get_bot()` 조회. read-only. 응답은 `{bot: ...}` envelope |
+| `ante bot status <bot_id>` | `runtime IPC` | live `BotManager.get_bot()` 조회. read-only. 응답 payload는 `{bot: ...}`(CLI `--format json`에서는 `data.bot`) |
 | `ante bot positions <bot_id>` | `runtime IPC + snapshot fallback` | live 포지션 조회 우선 |
 | `ante bot signal-key <bot_id>` | `runtime IPC + snapshot fallback` | live signal key 상태 조회 우선 |
 | `ante bot create --name <name> --strategy <strategy_id> ...` | `runtime IPC` | 서버 BotManager 생성 |
@@ -362,13 +362,15 @@ fallback이 없다 — 서버가 정지된 상태에서는 `BotManager`가 부�
 - `ante bot start <bot_id>`: live
   `BotManager.get_bot(bot_id)`로 존재 확인 후, `account_service.get(bot.config.account_id)`로
   `app_key` 사전 검증. `BotManager.start_bot()` 호출 후 audit action `bot.start`를 기록한다.
-  성공 응답은 `{"bot": bot.get_info()}` envelope이다. cold-path
-  fallback은 없다.
+  성공 응답 payload는 `{"bot": bot.get_info()}`다(IPC `result`에서는 최상위,
+  CLI `--format json`에서는 `data.bot`). cold-path fallback은 없다.
 - `ante bot stop <bot_id>`: live
   `BotManager.get_bot(bot_id)` 후 `BotManager.stop_bot()` 호출, audit action `bot.stop`을
-  기록한다. 응답은 `{"bot": bot.get_info()}` envelope. cold-path fallback은 없다.
+  기록한다. 응답 payload는 `{"bot": bot.get_info()}`(위와 같이 CLI JSON에서는
+  `data.bot`). cold-path fallback은 없다.
 - `ante bot status <bot_id>`: read-only live
-  `BotManager.get_bot(bot_id)` 조회. 응답은 `{"bot": info}` envelope이며 가능한 경우
+  `BotManager.get_bot(bot_id)` 조회. 응답 payload는 `{"bot": info}`(CLI JSON에서는
+  `data.bot`)이며 가능한 경우
   `strategy_name`/`strategy_author_name`/`strategy_author_id`/
   `strategy` (`strategy_registry` 보유 시), `budget` (`treasury_manager` 보유 시),
   `positions` (`trade_service` 보유 시)를 보강한다. read-only audit 대상은 아니다.

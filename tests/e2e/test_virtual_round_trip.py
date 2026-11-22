@@ -110,8 +110,8 @@ def test_virtual_round_trip(daemon: DaemonHarness) -> None:
     daemon.cli("treasury", "allocate", BOT_ID, "500000", "--account", "test")
 
     started = daemon.cli("bot", "start", BOT_ID)
-    assert started["bot"]["status"] == "running"
-    assert started["bot"]["trading_mode"] == "virtual"
+    assert started["data"]["bot"]["status"] == "running"
+    assert started["data"]["bot"]["trading_mode"] == "virtual"
 
     fills = _wait_for_fills(daemon, len(EXPECTED_FILLS))
     assert fills["total"] == len(EXPECTED_FILLS), fills
@@ -124,7 +124,7 @@ def test_virtual_round_trip(daemon: DaemonHarness) -> None:
     assert budget["returned"] == pytest.approx(EXPECTED_RETURNED, abs=1e-6)
 
     stopped = daemon.cli("bot", "stop", BOT_ID)
-    assert stopped["bot"]["status"] == "stopped", stopped
+    assert stopped["data"]["bot"]["status"] == "stopped", stopped
 
     assert daemon.stop() == 0
     assert not daemon.socket_path.exists()
