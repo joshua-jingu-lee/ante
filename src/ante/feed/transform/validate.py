@@ -275,7 +275,7 @@ def _check_temporal_parseable(
 
 
 def _validate_time_series(records: list[dict[str, Any]], warnings: list[str]) -> None:
-    """시계열 연속성을 검증한다."""
+    """시계열의 날짜 중복과 순서 역전을 감지한다."""
     date_field = "timestamp" if "timestamp" in records[0] else "date"
     if date_field not in records[0]:
         return

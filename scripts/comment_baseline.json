@@ -14,8 +14,6 @@
     "src/ante/cli/commands/config.py": 21,
     "src/ante/cli/commands/member.py": 25,
     "src/ante/cli/middleware.py": 57,
-    "src/ante/contracts/error_registry.py": 4,
-    "src/ante/feed/pipeline/backfill_runner.py": 16,
     "src/ante/gateway/gateway.py": 11,
     "src/ante/gateway/stop_order.py": 12,
     "src/ante/gateway/stream_integration.py": 15,
@@ -24,12 +22,11 @@
     "src/ante/main.py": 130,
     "src/ante/rule/engine.py": 47,
     "src/ante/rule/global_rules.py": 8,
-    "src/ante/strategy/validator.py": 71,
     "src/ante/trade/fill_applier.py": 17,
     "src/ante/trade/order_tracker.py": 1,
     "src/ante/trade/performance.py": 12,
     "src/ante/trade/reconciler.py": 6,
     "src/ante/treasury/treasury.py": 36
   },
-  "docstring_lines": 6561
+  "docstring_lines": 6470
 }
