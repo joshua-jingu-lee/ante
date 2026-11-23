@@ -197,8 +197,8 @@ StrategyContext에 주입되어 전략이 데이터를 조회할 때 사용.
 | 클래스 | 메서드 | 설명 |
 |--------|--------|------|
 | `LiveDataProvider` | `get_current_price(symbol) → float` | 현재가 조회 (APIGateway 캐시 활용, account_id 기반 라우팅) |
-| `LiveDataProvider` | `get_ohlcv(symbol, timeframe, limit) → list[dict]` | OHLCV 데이터 조회 (추후 DataPipeline 연동 시 확장, 현재 빈 리스트 반환) |
-| `LiveDataProvider` | `get_indicator(symbol, indicator, params) → dict[str, Any]` | 기술 지표 계산 (추후 구현, 현재 빈 dict 반환) |
+| `LiveDataProvider` | `get_ohlcv(symbol, timeframe, limit) → DataFrame` | OHLCV 데이터 조회. ParquetStore가 주입된 경우 먼저 읽고, 비었거나 읽기에 실패하면 APIGateway로 내려간다. APIGateway도 빈 결과를 내면 빈 DataFrame |
+| `LiveDataProvider` | `get_indicator(symbol, indicator, params) → dict[str, Any]` | 기술 지표 계산. `get_ohlcv`로 OHLCV를 읽어 IndicatorCalculator로 계산한다. OHLCV가 비면 `{}` |
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조
 
