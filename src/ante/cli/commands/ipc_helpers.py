@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from ante.contracts.ipc_client_errors import (
     IPCClientTimeoutError,
@@ -34,19 +34,21 @@ def get_socket_path(config_dir: Path | None = None) -> str:
 
 _get_socket_path = get_socket_path
 
+_MALFORMED_RESPONSE_MESSAGE = "IPC 응답이 계약과 다릅니다"
+
 
 async def ipc_send(
     command: str,
     args: dict[str, Any],
     actor: str = "cli",
     config_dir: Path | None = None,
+    *,
+    required: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """IPC 커맨드 전송. 서버 미기동 시 사용자 친화적 에러 출력.
+    """IPC 커맨드를 보내고 성공 응답의 ``result``를 돌려준다.
 
-    Returns:
-        서버 응답 dict.
-        - "result" 키가 존재하면 해당 값만 반환 (변경 커맨드).
-        - 그 외에는 전체 응답을 반환 (기존 호환).
+    응답 모양이 계약과 다르거나 ``required`` 키가 ``result``에 없으면
+    ``UNKNOWN``인 ``IPCRemoteError``로 실패한다.
 
     Raises:
         IPCServerNotRunningError | IPCClientTimeoutError | IPCRemoteError
@@ -61,10 +63,22 @@ async def ipc_send(
     except IPCTimeoutError:
         raise IPCClientTimeoutError("서버 응답 시간 초과")
 
+    if not isinstance(response, dict):
+        raise IPCRemoteError("UNKNOWN", _MALFORMED_RESPONSE_MESSAGE)
+
     if response.get("status") == "error":
-        error = response.get("error", {})
+        error = response.get("error")
+        if not isinstance(error, dict):
+            error = {}
         code = error.get("code", "UNKNOWN")
         message = error.get("message", "알 수 없는 오류")
         raise IPCRemoteError(code, message)
 
-    return cast("dict[str, Any]", response.get("result", response))
+    result = response.get("result")
+    if (
+        response.get("status") != "ok"
+        or not isinstance(result, dict)
+        or any(key not in result for key in required)
+    ):
+        raise IPCRemoteError("UNKNOWN", _MALFORMED_RESPONSE_MESSAGE)
+    return result
