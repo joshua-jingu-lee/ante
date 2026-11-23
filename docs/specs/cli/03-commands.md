@@ -517,7 +517,7 @@ strict zero-padded 검증). 어댑터 경계가 요구하는 압축 `YYYYMMDD`�
 `--from`이 `--to`보다 뒤이면(inverted date range) 서비스/IPC 호출 이전에
 `INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(빈 결과 반환 금지).
 한쪽만 지정·둘 다 미지정·동일 날짜는 정상 처리한다 — `audit list`/`trade list`/
-`treasury snapshot`/`report performance`와 동일 계약이다.
+`report performance`와 동일 계약이다.
 
 폴백 경계는 형제 명령과 같다. `IPC_SERVER_NOT_RUNNING`에서만 직접 연결로 내려가고,
 `IPC_TIMEOUT`과 서버 error envelope은 폴백 없이 원본 코드/메시지로 노출한다.
