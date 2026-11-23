@@ -291,14 +291,10 @@ class BotManager:
         config_data = json.loads(row["config_json"] or "{}")
         if not isinstance(config_data, dict):
             raise ValueError(f"config_json is not an object: {config_data!r}")
-        config = _bot_config_from_row(row, config_data)
-        validate_interval(config.interval_seconds)
-        validate_runtime_controls(
-            max_restart_attempts=config.max_restart_attempts,
-            restart_cooldown_seconds=config.restart_cooldown_seconds,
-            step_timeout_seconds=config.step_timeout_seconds,
-            max_signals_per_step=config.max_signals_per_step,
-        )
+        try:
+            config = _bot_config_from_row(row, config_data)
+        except TypeError as e:
+            raise ValueError(f"invalid bot config: {e}") from e
         account = None
         if self._account_service is not None:
             account = await self._account_service.get(config.account_id)

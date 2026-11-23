@@ -404,7 +404,13 @@ class TestBrokenRowIsSkipped:
             "UPDATE accounts SET status = 'deleted' WHERE account_id = 'acc-del'"
         )
         await _create(before, "ctxfail", await _register(db, tmp_path, "s_ctx"))
+        await _create(before, "badtype", await _register(db, tmp_path, "s_type"))
+        await db.execute(
+            'UPDATE bots SET config_json = \'{"interval_seconds": "x"}\''
+            " WHERE bot_id = 'badtype'"
+        )
         broken = ["nostrat", "nofile", "badjson", "listjson", "badacc", "noacc"]
+        broken += ["badtype"]
         broken += ["delacc", "ctxfail"]
 
         with caplog.at_level(logging.WARNING, logger="ante.bot.manager"):
