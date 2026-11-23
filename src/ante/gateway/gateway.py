@@ -366,7 +366,7 @@ class APIGateway:
         return await broker.cancel_order(record.broker_order_id)
 
     async def _on_order_approved(self, event: object) -> None:
-        """증권사에 주문 제출(stop 계열은 StopOrderManager로 라우팅)."""
+        """stop 계열은 StopOrderManager에 등록, 그 밖은 non-LIVE·virtual 아니면 제출."""
         from ante.eventbus.events import (
             OrderApprovedEvent,
             OrderFailedEvent,
