@@ -329,9 +329,10 @@ class BackfillRunner:
                 if stored_ok:
                     ctx.data_types.update(["ohlcv", "fundamental"])
 
-                store_merge_failed = self._drain_store_warnings(store, ctx)
+                if self._drain_store_warnings(store, ctx):
+                    halt = True
 
-                if not halt and stored_ok and not store_merge_failed:
+                if not halt and stored_ok:
                     checkpoint.save(target_date)
 
             except (DataGoKrDailyLimitError, DataGoKrCriticalError) as exc:
