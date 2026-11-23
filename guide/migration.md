@@ -116,7 +116,7 @@ ante member register --id agent-2 --type agent --name "새 에이전트" --forma
 - `instrument list`의 빈 결과: `.data.instruments`(빈 배열)와 `.data.count`.
 - `instrument search`의 빈 결과: `.data.results`(빈 배열)와 `.data.count`. 행이 있을 때(`.data.instruments`)와 키가 다릅니다.
 
-`treasury snapshot`은 옵션에 따라 모양이 다릅니다. `--from`/`--to`는 배열이라 `.data.snapshots` 아래에 들어갑니다. 날짜 하나를 조회하면(`--date` 또는 생략 시 오늘) 전부터 객체를 냈고, 그 객체가 `.data` 아래에 키 그대로 들어갑니다.
+`treasury snapshot`은 옵션에 따라 모양이 다릅니다. `--from`/`--to`는 배열이라 `.data.snapshots` 아래에 들어갑니다. 날짜 하나를 조회하면(`--date` 또는 생략 시 가장 최근 스냅샷) 전부터 객체를 냈고, 그 객체가 `.data` 아래에 키 그대로 들어갑니다.
 
 ```bash
 # 전
