@@ -560,6 +560,7 @@ async def _init_trading(s: Services) -> None:
         gateway=None,
         runtime_readiness=s.runtime_readiness,
         account_service=s.account_service,
+        fill_applier=s.fill_applier,
     )
     s.virtual_executor.subscribe()
 

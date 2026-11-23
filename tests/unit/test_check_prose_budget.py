@@ -173,3 +173,16 @@ def test_missing_trailing_newline_matches_wc(tmp_path: Path) -> None:
     path.write_bytes(b"a\nb\nc")
 
     assert budget.measure(tmp_path) == 2
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"), [("0", 0), ("12\n", 12), ("  7 \n\n", 7)]
+)
+def test_parse_baseline_reads_one_number(text: str, expected: int) -> None:
+    assert budget.parse_baseline(text) == expected
+
+
+@pytest.mark.parametrize("text", ["", "abc\n", "12 lines\n", "-3\n", "1.5\n", "١٢\n"])
+def test_parse_baseline_rejects_malformed_text(text: str) -> None:
+    with pytest.raises(budget.BaselineError, match="must hold one non-negative"):
+        budget.parse_baseline(text)

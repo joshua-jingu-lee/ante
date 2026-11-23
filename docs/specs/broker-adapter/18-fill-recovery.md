@@ -224,7 +224,8 @@ commit 성공 = 이벤트 영속 보장이므로, commit-후-crash에서도 재�
   **follow-up 후보**다. TradeRecorder의 `trades` insert(`INSERT OR IGNORE`)는
   이미 DB-멱등이나 `NotificationEvent` 재발행이 effect 비멱등이라 가드 대상이다.
 - **Gateway = 무변경**(cache invalidate 멱등). **빈키(`""`) = dedup 비대상**
-  (VirtualProvider 직접발행·outbox 미주입 fallback = 재전달 없는 단발 경로).
+  (VirtualProvider의 FillApplier direct 적용 후 직접발행·outbox 미주입 fallback
+  = 재전달 없는 단발 경로).
 
 ## 6. FillReconcileScheduler — 백스톱 폴러
 
@@ -440,11 +441,13 @@ crash window가 잔존하고 빈 `fill_dedup_key`를 쓴다.)
 
 ### 10.5 VirtualProvider 빈키 정책
 
-`VirtualExecutor`(`src/ante/bot/providers/virtual.py`)는 가상 체결을 즉시 1회
-직접 발행하며 FillApplier/OrderTracker(CAS)·outbox를 거치지 않는다. 결정적 키의
-산출 기반(CAS 확정 누적값)이 없고 at-least-once 재전달도 없으므로 dedup 비대상
-이다 → `fill_dedup_key`는 **빈키(`""`)**로 발행한다. 소비자(#1957)는 빈키를
-"dedup 비대상"으로 본다.
+`VirtualExecutor`(`src/ante/bot/providers/virtual.py`)는 가상 체결의 durable 적용
+(`TradeRecord` + positions)을 `FillApplier`의 direct 진입점(`apply_direct_fill`)
+으로 수행한 뒤, 이벤트를 즉시 1회 직접 발행한다(#2611). OrderTracker(CAS)·outbox는
+거치지 않는다. direct 진입점의 멱등 키는 내부 `order_id`(결정적 `trade_id`)다.
+이벤트에는 결정적 키의 산출 기반(CAS 확정 누적값)이 없고 at-least-once 재전달도
+없으므로 dedup 비대상이다 → `fill_dedup_key`는 **빈키(`""`)**로 발행한다.
+소비자(#1957)는 빈키를 "dedup 비대상"으로 본다.
 
 ## 11. position-derived bounded fallback (모의 당일 체결, #2314)
 

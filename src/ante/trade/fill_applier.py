@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from datetime import UTC
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -13,6 +14,8 @@ from ante.core import clock
 from ante.trade.models import TradeRecord, TradeStatus
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.trade.fill_outbox import FillOutbox, FillOutboxPublisher
@@ -20,6 +23,8 @@ if TYPE_CHECKING:
     from ante.trade.position import PositionHistory
 
 logger = logging.getLogger(__name__)
+
+_VIRTUAL_TRADE_NAMESPACE = uuid.UUID("5b0c7f3e-2611-4a5e-9d1c-7f3a2b8e6c41")
 
 
 class FillApplier:
@@ -302,3 +307,88 @@ class FillApplier:
                 exchange=record.exchange or "KRX",
             )
         )
+
+    async def apply_direct_fill(
+        self,
+        *,
+        account_id: str,
+        order_id: str,
+        bot_id: str,
+        strategy_id: str,
+        symbol: str,
+        side: str,
+        quantity: float,
+        price: float,
+        commission: float,
+        order_type: str,
+        exchange: str,
+        timestamp: datetime,
+    ) -> bool:
+        validated = require_account_id(
+            account_id, context="fill_applier.apply_direct_fill"
+        )
+        if not order_id:
+            raise ValueError("apply_direct_fill: order_id must not be empty")
+        if quantity <= 0 or price <= 0:
+            raise ValueError(
+                f"apply_direct_fill: quantity and price must be positive "
+                f"(quantity={quantity}, price={price})"
+            )
+        trade = TradeRecord(
+            trade_id=uuid.uuid5(_VIRTUAL_TRADE_NAMESPACE, f"virtual:{order_id}"),
+            bot_id=bot_id,
+            strategy_id=strategy_id,
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            price=price,
+            status=TradeStatus.FILLED,
+            order_type=order_type,
+            commission=commission,
+            timestamp=timestamp,
+            order_id=order_id,
+            account_id=validated,
+            exchange=exchange or "KRX",
+        )
+        async with self._lock:
+            async with self._db.transaction():
+                inserted = await self._db.execute_fetch_one(
+                    """INSERT INTO trades
+                           (trade_id, bot_id, strategy_id, symbol, side, quantity,
+                            price, status, order_type, reason, commission,
+                            timestamp, order_id, account_id, currency, exchange)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT DO NOTHING
+                       RETURNING trade_id""",
+                    (
+                        str(trade.trade_id),
+                        trade.bot_id,
+                        trade.strategy_id,
+                        trade.symbol,
+                        trade.side,
+                        trade.quantity,
+                        trade.price,
+                        trade.status.value,
+                        trade.order_type,
+                        trade.reason,
+                        trade.commission,
+                        timestamp.isoformat(),
+                        trade.order_id,
+                        trade.account_id,
+                        trade.currency,
+                        trade.exchange,
+                    ),
+                )
+                if inserted is None:
+                    return False
+                await self._position_history.on_trade(trade)
+        logger.info(
+            "가상 체결 기록: order=%s %s %s qty=%s @ %s commission=%s",
+            order_id,
+            side,
+            symbol,
+            quantity,
+            price,
+            commission,
+        )
+        return True

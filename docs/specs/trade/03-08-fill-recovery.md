@@ -9,9 +9,10 @@
 
 체결(fill)의 durable 적용 — `recorded_filled_qty` advance + `TradeRecord` insert +
 `PositionHistory.on_trade`(positions) — 은 **`FillApplier` 단일 권위자**가 단일
-DB 트랜잭션으로 수행한다. 빠른 경로(실시간 체결 통보 스트림)와 백스톱 경로(REST
-`get_order_history` 폴)가 모두 `FillApplier`로 수렴하여 같은 체결을 몇 번
-관측하든 포지션은 정확히 한 번 반영된다 (#1946).
+DB 트랜잭션으로 수행한다. 빠른 경로(실시간 체결 통보 스트림), 백스톱 경로(REST
+`get_order_history` 폴), 가상 체결(`VirtualExecutor`, #2611)의 세 입력이 모두
+`FillApplier`로 수렴하여 같은 체결을 몇 번 관측하든 포지션은 정확히 한 번
+반영된다 (#1946).
 
 ## OrderTracker
 
@@ -63,6 +64,22 @@ DB 트랜잭션으로 수행한다. 빠른 경로(실시간 체결 통보 스트
    account_id는 tracker 복원, `fill_dedup_key` 포함). outbox 미주입 fallback
    경로는 commit 직후 직접 1회 발행한다(crash window 잔존, #1949 이전 동작).
 
+### 가상 체결 direct 진입점 (#2611)
+
+`apply_direct_fill(account_id, order_id, bot_id, strategy_id, symbol, side,
+quantity, price, commission, order_type, exchange, timestamp) -> bool`:
+
+- 입력: `VirtualExecutor`가 산정한 가상 체결 1건(전량, 수수료 포함). `order_id`가
+  비었거나 `quantity`·`price`가 0 이하면 거부(예외)한다.
+- 멱등: `trade_id`를 내부 `order_id`에서 결정적으로 만들고(UUID5),
+  `trades`에 `ON CONFLICT DO NOTHING RETURNING`으로 insert한다. 새 행일 때만
+  `PositionHistory.on_trade`를 부르고 `True`, 이미 있으면 `False`를 반환한다.
+- 트랜잭션: 같은 `asyncio.Lock` 안에서 단일 `Database.transaction()`으로 insert와
+  포지션 반영을 묶는다. 실패하면 rollback되고 예외가 호출자에게 전파된다.
+- 미발행: OrderTracker CAS·outbox enqueue·`OrderFilledEvent` 발행을 하지 않는다.
+  반환 시점에 락과 트랜잭션은 모두 풀려 있고, 발행은 호출자(`VirtualExecutor`)가
+  그 밖에서 한다(빈키 정책: `broker-adapter/18-fill-recovery.md` §10.5).
+
 ### crash 원자성
 
 CAS advance와 trade insert·position update가 단일 트랜잭션으로 묶이므로, 적용
@@ -81,8 +98,8 @@ notification)이다. **#1949 transactional outbox로 commit↔publish crash wind
 
 `TradeRecorder._on_filled`는 더 이상 fill 경로의 position을 갱신하지 않는다.
 fill의 position 갱신은 **FillApplier(트랜잭션 내)가 단일 권위자**로 수행한다
-(이중 적용 방지). TradeRecorder는 rejected/failed/cancelled 등 비-fill 상태
-기록과 알림을 유지한다.
+(이중 적용 방지). 가상 체결도 같다(direct 진입점). TradeRecorder는
+rejected/failed/cancelled 등 비-fill 상태 기록과 알림을 유지한다.
 
 position 소유는 Trade 모듈 내(FillApplier도 `trade/`)에 유지된다 — position
 ownership invariant.

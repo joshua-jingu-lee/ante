@@ -993,3 +993,194 @@ def test_entry_ratchet_baseline_change_requires_review(repo: Repo, head: str) ->
     assert result.returncode == 1, result.stdout + result.stderr
     assert f"review\tM\t{ENTRY_BASELINE}" in result.stdout
     assert "baseline-lowered" not in result.stdout
+
+
+# ── 산문 기준선 감소 (#2572) ──────────────────────────────────────────────
+
+PROSE_BASELINE = ".agent/prose-baseline.txt"
+PROSE_DOC = ".agent/commands/x.md"
+
+PROSE_CASES = [
+    pytest.param("9\n", True, id="lowered"),
+    pytest.param("0\n", True, id="lowered-to-zero"),
+    pytest.param("  10 \n\n", True, id="values-equal-whitespace"),
+    pytest.param("11\n", False, id="raised"),
+    pytest.param("ten\n", False, id="not-a-number"),
+    pytest.param("", False, id="empty"),
+    pytest.param("-1\n", False, id="negative"),
+    pytest.param("١\n", False, id="non-ascii-digit"),
+    pytest.param("9 lines\n", False, id="trailing-word"),
+]
+
+
+@pytest.mark.parametrize(("head", "lowered"), PROSE_CASES)
+def test_prose_baseline_lowered_in_process(head: str, lowered: bool) -> None:
+    assert scope.prose_baseline_lowered(b"10\n", head.encode()) is lowered
+
+
+@pytest.mark.parametrize(("head", "lowered"), PROSE_CASES)
+def test_prose_baseline_lowered_subprocess(
+    repo: Repo, head: str, lowered: bool
+) -> None:
+    repo.write(PROSE_BASELINE, "10\n")
+    repo.commit("baseline")
+    repo.mark_base()
+    repo.write(PROSE_BASELINE, head)
+    repo.commit("change baseline")
+    result = repo.check()
+    if lowered:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert f"baseline-lowered\tM\t{PROSE_BASELINE}" in result.stdout
+        assert "verdict: SKIP (baseline-lowered)" in result.stdout
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert f"review\tM\t{PROSE_BASELINE}" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "old",
+    [
+        pytest.param(b"ten\n", id="base-not-a-number"),
+        pytest.param(b"-5\n", id="base-negative"),
+        pytest.param(b"\xff\xfe", id="base-not-utf8"),
+    ],
+)
+def test_malformed_prose_base_is_not_lowered(old: bytes) -> None:
+    assert not scope.prose_baseline_lowered(old, b"3\n")
+
+
+def test_malformed_prose_base_requires_review(repo: Repo) -> None:
+    repo.write(PROSE_BASELINE, "ten\n")
+    repo.commit("bad baseline")
+    repo.mark_base()
+    repo.write(PROSE_BASELINE, "3\n")
+    repo.commit("fix baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tM\t{PROSE_BASELINE}" in result.stdout
+
+
+def test_prose_baseline_path_matches_checker() -> None:
+    checker_path = REPO_ROOT / "scripts" / "check_prose_budget.py"
+    spec = importlib.util.spec_from_file_location("_prose_path_probe", checker_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    assert module.BASELINE_PATH.as_posix() == scope.PROSE_BASELINE_PATH
+    assert scope.PROSE_BASELINE_PATH == PROSE_BASELINE
+    assert scope.CHECK_PROSE_BUDGET_PATH == checker_path
+
+
+def test_prose_baseline_load_removes_its_module_name() -> None:
+    assert scope.prose_baseline_lowered(b"10\n", b"10\n")
+    assert "_check_review_scope_prose" not in sys.modules
+
+
+def test_prose_baseline_parser_load_failure_is_not_lowered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scope, "CHECK_PROSE_BUDGET_PATH", tmp_path / "missing.py")
+    assert not scope.prose_baseline_lowered(b"10\n", b"9\n")
+
+
+def test_prose_baseline_added_or_deleted_requires_review(repo: Repo) -> None:
+    repo.write(PROSE_BASELINE, "10\n")
+    repo.commit("add baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tA\t{PROSE_BASELINE}" in result.stdout
+
+    repo.mark_base()
+    repo.git("rm", "-q", PROSE_BASELINE)
+    repo.commit("delete baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tD\t{PROSE_BASELINE}" in result.stdout
+
+
+def test_prose_baseline_mode_change_requires_review(repo: Repo) -> None:
+    repo.write(PROSE_BASELINE, "10\n")
+    repo.commit("baseline")
+    repo.mark_base()
+    repo.write(PROSE_BASELINE, "9\n")
+    repo.git("add", PROSE_BASELINE)
+    repo.git("update-index", "--chmod=+x", PROSE_BASELINE)
+    repo.git("commit", "-q", "-m", "lower and chmod")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tM\t{PROSE_BASELINE}" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        pytest.param(PROSE_BASELINE, ".agent/prose-baseline-old.txt", id="from"),
+        pytest.param(".agent/prose-baseline-old.txt", PROSE_BASELINE, id="to"),
+    ],
+)
+def test_prose_baseline_rename_requires_review(repo: Repo, old: str, new: str) -> None:
+    repo.write(old, "10\n")
+    repo.commit("baseline")
+    repo.mark_base()
+    repo.git("mv", old, new)
+    repo.commit("rename baseline")
+    result = repo.check()
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"review\tR\t{old} -> {new}" in result.stdout
+
+
+def test_other_agent_doc_change_stays_doc(repo: Repo) -> None:
+    repo.write(PROSE_DOC, "a\n")
+    repo.commit("doc")
+    repo.mark_base()
+    repo.write(PROSE_DOC, "a\nb\n")
+    repo.commit("grow doc")
+    result = repo.check()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"doc\tM\t{PROSE_DOC}" in result.stdout
+
+
+def _with_prose(repo: Repo) -> None:
+    repo.write(PROSE_BASELINE, "2\n")
+    repo.write(PROSE_DOC, "a\nb\n")
+    repo.commit("prose and baseline")
+    repo.mark_base()
+
+
+def test_prose_growth_with_raised_baseline_requires_review(repo: Repo) -> None:
+    _with_prose(repo)
+    repo.write(PROSE_DOC, "a\nb\nc\n")
+    repo.write(PROSE_BASELINE, "3\n")
+    repo.commit("grow prose")
+    result = repo.check()
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"doc\tM\t{PROSE_DOC}" in result.stdout
+    assert f"review\tM\t{PROSE_BASELINE}" in result.stdout
+    assert "verdict: REVIEW" in result.stdout
+
+
+def test_prose_shrink_with_lowered_baseline_skips(repo: Repo) -> None:
+    _with_prose(repo)
+    repo.write(PROSE_DOC, "a\n")
+    repo.write(PROSE_BASELINE, "1\n")
+    repo.write(".agent/agents/y.md", "other\n")
+    repo.commit("shrink prose")
+    result = repo.check()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"doc\tM\t{PROSE_DOC}" in result.stdout
+    assert f"baseline-lowered\tM\t{PROSE_BASELINE}" in result.stdout
+    assert "verdict: SKIP (baseline-lowered, doc)" in result.stdout
+
+
+def test_prose_rewrite_keeping_line_count_skips(repo: Repo) -> None:
+    """Known limit: same line count, baseline untouched, still ``doc``."""
+    _with_prose(repo)
+    repo.write(PROSE_DOC, "x\ny\n")
+    repo.commit("rewrite prose")
+    result = repo.check()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "verdict: SKIP (doc)" in result.stdout
