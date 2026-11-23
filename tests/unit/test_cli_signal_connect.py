@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import struct
 from collections.abc import Iterator
@@ -541,7 +542,7 @@ class TestSignalConnectIpcTerminals:
         assert result.stdout == ""
 
     def test_server_not_running_file_not_found_json(self, runner: CliRunner) -> None:
-        # ``FileNotFoundError`` ⊂ ``OSError`` — 동일 terminal 로 매핑.
+        # 연결 직전에 소켓이 사라진 경우 — 연결 거부와 같은 terminal 로 매핑.
         with _patch_ipc(connect_exc=FileNotFoundError()):
             result = runner.invoke(
                 cli,
@@ -552,6 +553,24 @@ class TestSignalConnectIpcTerminals:
         payload = json.loads(result.stdout)
         assert payload["code"] == "IPC_SERVER_NOT_RUNNING"
         assert payload["message"] == _SERVER_DOWN_MSG
+        assert result.stderr == ""
+
+    def test_connect_permission_error_is_not_server_down(
+        self, runner: CliRunner
+    ) -> None:
+        denied = PermissionError(errno.EACCES, "권한 거부")
+        with _patch_ipc(connect_exc=denied):
+            result = runner.invoke(
+                cli,
+                ["signal", "connect", "--key", "sk_ok", "--format", "json"],
+            )
+
+        assert result.exit_code == 1, (result.stdout, result.stderr)
+        assert json.loads(result.stdout) == {
+            "status": "error",
+            "code": "EXECUTION_ERROR",
+            "message": "[Errno 13] 권한 거부",
+        }
         assert result.stderr == ""
 
     def test_server_missing_socket_precheck_json(self, runner: CliRunner) -> None:
