@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import signal
@@ -321,6 +322,56 @@ class TestSessionFailureReason:
     )
     def test_passes(self, results: list[tuple[str, str]]) -> None:
         assert session_failure_reason(results) is None
+
+
+E2E_DIR = Path(__file__).resolve().parents[1] / "e2e"
+SMOKE_TEST_NAME = "test_boot_and_stop"
+MIN_SCENARIOS = 5
+
+
+def _daemon_scenarios(e2e_dir: Path) -> list[str]:
+    """``daemon`` fixture를 인자로 받는 모듈 최상위 테스트 함수(스모크 제외)."""
+    found: list[str] = []
+    for path in sorted(e2e_dir.glob("test_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            if not node.name.startswith("test_") or node.name == SMOKE_TEST_NAME:
+                continue
+            args = node.args.posonlyargs + node.args.args + node.args.kwonlyargs
+            if any(a.arg == "daemon" for a in args):
+                found.append(f"{path.name}::{node.name}")
+    return found
+
+
+class TestScenarioCount:
+    def test_e2e_has_at_least_five_scenarios(self) -> None:
+        found = _daemon_scenarios(E2E_DIR)
+        assert len(found) >= MIN_SCENARIOS, (
+            f"데몬 시나리오가 {len(found)}개로 {MIN_SCENARIOS}개보다 적다: {found}"
+        )
+
+    def test_counter_skips_smoke_and_non_daemon_tests(self, tmp_path: Path) -> None:
+        (tmp_path / "test_a.py").write_text(
+            textwrap.dedent(
+                """
+                def test_boot_and_stop(daemon): ...
+                def test_one(daemon): ...
+                async def test_two(tmp_path, daemon): ...
+                def test_no_daemon(tmp_path): ...
+                def helper(daemon): ...
+                class TestX:
+                    def test_method(self, daemon): ...
+                """
+            ),
+            encoding="utf-8",
+        )
+        (tmp_path / "other.py").write_text("def test_x(daemon): ...\n")
+        assert _daemon_scenarios(tmp_path) == [
+            "test_a.py::test_one",
+            "test_a.py::test_two",
+        ]
 
 
 @pytest.mark.parametrize(
