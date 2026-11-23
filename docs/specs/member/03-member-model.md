@@ -4,27 +4,25 @@
 
 # Member 모델
 
-```python
-@dataclass
-class Member:
-    member_id: str              # 고유 식별자 (예: "owner", "strategy-dev-01")
-    type: str                   # "human" | "agent"
-    role: str                   # "master" | "admin" | "default"
-    org: str                    # 소속 조직 (예: "default", "strategy-lab")
-    name: str                   # 표시 이름 (예: "대표", "전략 리서치 1호")
-    emoji: str = ""             # 아바타 이모지 (단일 이모지, 멤버 간 고유)
-    status: str                 # "active" | "suspended" | "revoked"
-    scopes: list[str]           # 권한 범위 (예: ["strategy:write", "report:write"])
-    token_hash: str = ""        # 토큰 해시 (SHA-256)
-    password_hash: str = ""     # 패스워드 해시 (human만, PBKDF2-SHA256)
-    recovery_key_hash: str = "" # 복구 키 해시 (human만, PBKDF2-SHA256)
-    created_at: str = ""        # 생성 시각
-    created_by: str = ""        # 생성자 member_id
-    last_active_at: str = ""    # 마지막 활동 시각
-    suspended_at: str = ""      # 정지 시각
-    revoked_at: str = ""        # 폐기 시각
-    token_expires_at: str = ""  # 토큰 만료 시각 (기본 90일 TTL)
-```
+정의: `ante.member.models.Member` (코드가 정본이다).
+
+- `member_id`: 고유 식별자 (예: "owner", "strategy-dev-01")
+- `type`: "human" | "agent"
+- `role`: "master" | "admin" | "default"
+- `org`: 소속 조직 (예: "default", "strategy-lab")
+- `name`: 표시 이름 (예: "대표", "전략 리서치 1호")
+- `emoji`: 아바타 이모지 (단일 이모지, 멤버 간 고유)
+- `status`: "active" | "suspended" | "revoked"
+- `scopes`: 권한 범위 (예: ["strategy:write", "report:write"])
+- `token_hash`: 토큰 해시 (SHA-256)
+- `password_hash`: 패스워드 해시 (human만, PBKDF2-SHA256)
+- `recovery_key_hash`: 복구 키 해시 (human만, PBKDF2-SHA256)
+- `created_at`: 생성 시각
+- `created_by`: 생성자 member_id
+- `last_active_at`: 마지막 활동 시각
+- `suspended_at`: 정지 시각
+- `revoked_at`: 폐기 시각
+- `token_expires_at`: 토큰 만료 시각 (기본 90일 TTL)
 
 ### 공개 응답 노출 계약
 
