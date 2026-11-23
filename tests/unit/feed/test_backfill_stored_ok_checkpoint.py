@@ -202,6 +202,42 @@ async def test_store_merge_failure_blocks_advance(tmp_path: Path) -> None:
     assert any(w.get("type") == "store_merge" for w in ctx.warnings)
 
 
+@pytest.mark.asyncio
+async def test_inner_store_merge_failure_freezes_later_advance(tmp_path: Path) -> None:
+    """중간 날짜의 store-merge 실패 뒤 날짜는 checkpoint를 넘기지 않는다(#2578)."""
+    feed_dir = tmp_path / ".feed"
+    dates = ["2026-01-02", "2026-01-03", "2026-01-05"]
+    collector = _ScriptedCollector(
+        net_delta_by_date={"2026-01-02": 1, "2026-01-03": 1, "2026-01-05": 1},
+        stored_ok_by_date={},
+    )
+    store = _ScriptedStore(merge_fail_dates={"2026-01-03"})
+
+    checkpoint, ctx = await _run(feed_dir, collector, store, dates)
+
+    assert checkpoint.get_last_date() == "2026-01-02"
+    assert collector.calls == dates
+    assert any(w.get("type") == "store_merge" for w in ctx.warnings)
+
+
+@pytest.mark.asyncio
+async def test_inner_empty_response_does_not_freeze_later_advance(
+    tmp_path: Path,
+) -> None:
+    """빈 응답으로 건너뛴 중간 날짜는 뒤 날짜의 전진을 막지 않는다(#2578 대조군)."""
+    feed_dir = tmp_path / ".feed"
+    dates = ["2026-01-02", "2026-01-03", "2026-01-05"]
+    collector = _ScriptedCollector(
+        net_delta_by_date={"2026-01-02": 1, "2026-01-05": 1},
+        stored_ok_by_date={"2026-01-03": False},
+    )
+    store = _ScriptedStore(merge_fail_dates=set())
+
+    checkpoint, _ctx = await _run(feed_dir, collector, store, dates)
+
+    assert checkpoint.get_last_date() == "2026-01-05"
+
+
 # ── (k) partial multi-write → rows_written 반영 + checkpoint 미전진 ───────────
 
 
