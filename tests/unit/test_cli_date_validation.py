@@ -347,6 +347,7 @@ class TestTreasurySnapshotOmitDates:
         # `_create_treasury` async flow를 mock하여 실제 DB 접근을 방지.
         mock_treasury = AsyncMock()
         mock_treasury.get_daily_snapshot = AsyncMock(return_value=None)
+        mock_treasury.get_latest_snapshot = AsyncMock(return_value=None)
         mock_db = MagicMock()
         mock_db.close = AsyncMock()
 

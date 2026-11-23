@@ -694,7 +694,7 @@ async def test_stop_order_held_by_gateway_expires_in_session_expiry_loop(
     monkeypatch.setattr(
         StopOrderManager,
         "_is_session_type_active_now",
-        lambda self, session_type: session_open["value"],
+        lambda self, session_type, now: session_open["value"],
     )
     real_loop = main_module._stop_session_expiry_loop
     sweeps: list[Any] = []

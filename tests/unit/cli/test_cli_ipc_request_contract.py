@@ -55,7 +55,12 @@ ROWS: tuple[Row, ...] = (
         ("--id", "m1", "--type", "agent", "--org", "o", "--name", "n"),
     ),
     *_rows("member set-emoji", ("m1", "X")),
-    *_rows("member update-scopes", ("m1", "--scopes", "a,b"), ("m1", "--scopes", "")),
+    *_rows(
+        "member update-scopes",
+        ("m1", "--scopes", "a,b"),
+        ("m1", "--scopes", ""),
+        ("m1", "--scopes", " "),
+    ),
     *_rows("member suspend", ("m1",)),
     *_rows("member reactivate", ("m1",)),
     *_rows("member revoke", ("m1", "--yes")),
@@ -312,3 +317,14 @@ def test_an_empty_scopes_option_sends_an_explicit_empty_list(
         if item.row.path == ("member", "update-scopes") and "" in item.row.argv
     ]
     assert args == [{"member_id": "m1", "scopes": []}]
+
+
+def test_a_blank_scopes_option_sends_a_blank_scope_not_an_empty_list(
+    sent: list[Sent],
+) -> None:
+    args = [
+        item.args
+        for item in sent
+        if item.row.path == ("member", "update-scopes") and " " in item.row.argv
+    ]
+    assert args == [{"member_id": "m1", "scopes": [""]}]

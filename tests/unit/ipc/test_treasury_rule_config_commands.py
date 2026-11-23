@@ -27,7 +27,11 @@ from tests.unit.ipc.validation_messages import validation_message
 
 ACTOR = "ops-lead"
 CLI_MEMBER = "cli-master-7"
-RULE_RESULT = {"account_id": "acct-2", "rule_type": "daily_loss_limit"}
+RULE_RESULT = {
+    "account_id": "acct-2",
+    "rule_type": "daily_loss_limit",
+    "rule": {"type": "daily_loss_limit", "enabled": False, "params": {}},
+}
 
 
 class _Harness:
@@ -252,19 +256,23 @@ async def test_rule_update_passes_every_field_and_audits() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rule_update_without_enabled_and_params_enables_with_no_params() -> None:
+@pytest.mark.parametrize("enabled", [{}, {"enabled": None}], ids=["missing", "null"])
+async def test_rule_update_without_enabled_passes_none_and_audits_the_saved_value(
+    enabled: dict[str, Any],
+) -> None:
     harness = _Harness()
     response = await harness.send(
-        "rule.update", {"account_id": "acct-2", "rule_type": "daily_loss_limit"}
+        "rule.update",
+        {"account_id": "acct-2", "rule_type": "daily_loss_limit", **enabled},
     )
     assert response == _ok(dict(RULE_RESULT))
     kwargs = harness.rule_update.await_args.kwargs
-    assert (_typed(kwargs["enabled"]), kwargs["params"]) == (("bool", True), {})
+    assert (kwargs["enabled"], kwargs["params"]) == (None, {})
     harness.audit_logger.log.assert_awaited_once_with(
         member_id=ACTOR,
         action="account.rule.update",
         resource="account:acct-2:rule:daily_loss_limit",
-        detail="rule update: daily_loss_limit enabled=True",
+        detail="rule update: daily_loss_limit enabled=False",
         ip="",
     )
 
@@ -338,7 +346,6 @@ def _without(args: dict[str, Any], key: str) -> dict[str, Any]:
         ),
         ("rule.update", {**RULE, "enabled": "false"}, "enabled", "bool_type"),
         ("rule.update", {**RULE, "enabled": 0}, "enabled", "bool_type"),
-        ("rule.update", {**RULE, "enabled": None}, "enabled", "bool_type"),
         ("rule.update", {**RULE, "params": None}, "params", "dict_type"),
         ("rule.update", {**RULE, "params": []}, "params", "dict_type"),
         ("rule.update", _without(RULE, "rule_type"), "rule_type", "missing"),
@@ -565,10 +572,26 @@ def test_cli_rule_update_sends_every_field() -> None:
     assert (kwargs["enabled"], kwargs["params"]) == (False, {"max_loss_pct": 3.5})
 
 
-def test_cli_rule_update_without_a_flag_sends_enabled() -> None:
+def test_cli_rule_update_without_a_flag_leaves_enabled_out() -> None:
     harness = _Harness()
     sent, _output = _run_cli(
         harness, ["rule", "update", "daily_loss_limit", "--account", "acct-2"]
+    )
+    assert sent == [
+        (
+            "rule.update",
+            {"account_id": "acct-2", "rule_type": "daily_loss_limit", "params": {}},
+            CLI_MEMBER,
+        )
+    ]
+    assert harness.rule_update.await_args.kwargs["enabled"] is None
+
+
+def test_cli_rule_update_with_the_enabled_flag_sends_true() -> None:
+    harness = _Harness()
+    sent, _output = _run_cli(
+        harness,
+        ["rule", "update", "daily_loss_limit", "--account", "acct-2", "--enabled"],
     )
     assert sent == [
         (
@@ -582,6 +605,7 @@ def test_cli_rule_update_without_a_flag_sends_enabled() -> None:
             CLI_MEMBER,
         )
     ]
+    assert harness.rule_update.await_args.kwargs["enabled"] is True
 
 
 def test_cli_config_set_of_a_number_sends_a_string() -> None:
