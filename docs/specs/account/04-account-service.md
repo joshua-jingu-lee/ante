@@ -24,8 +24,8 @@
 | `get_broker` | `account_id: str` | `BrokerAdapter` | 계좌의 BrokerAdapter 인스턴스 반환. lazy init. 최초 호출 시 생성하고 `connect()`를 수행하여 **연결에 성공한 경우에만 캐싱**한다. 연결 실패 시 캐시에 남기지 않고 예외를 전파하므로(미연결 어댑터 잔존 차단), 일시적 인증/네트워크 실패는 다음 호출에서 자연 회복한다. cache-hit은 connect 없이 즉시 반환. cache-miss는 per-account lock으로 직렬화하여 동시 호출 시에도 단일 인스턴스·단일 connect를 보장한다 |
 | `get_cached_broker` | `account_id: str` | `BrokerAdapter \| None` | 이미 캐시된 BrokerAdapter만 반환(build/connect 없음). 미캐시면 `None`. 종료 루프처럼 "이미 연결된 어댑터만 끊는" 경로 전용 — 미캐시 계좌를 끊기 위해 새로 연결하는 회귀를 차단한다. **async 메서드**: per-account lock으로 in-flight 초기 연결을 drain한 뒤 조회하므로, 종료 중 in-flight connect가 끝난 직후 캐시되어 disconnect를 놓치는 세션 잔존을 막는다 |
 | `create_default_test_account` | — | `Account` | 테스트 계좌 자동 생성 (`ante init` 시 호출). 이미 존재하면 스킵 |
-| `suspend_all` | `reason: str, suspended_by: str` | `int` | 모든 ACTIVE 계좌를 SUSPENDED로 전환. 전환된 수 반환 (시스템 전체 Kill Switch) |
-| `activate_all` | `activated_by: str` | `int` | 모든 SUSPENDED 계좌를 ACTIVE로 복구. DELETED 계좌는 대상 제외 |
+| `suspend_all` | `reason: str, suspended_by: str` | `list[dict]` | 모든 ACTIVE 계좌를 SUSPENDED로 전환 (시스템 전체 Kill Switch). DELETED를 뺀 ACTIVE·SUSPENDED 계좌별 결과(`account_id`·`previous_status`·`status`·`changed`)를 반환한다. 이미 목표 상태인 계좌는 `changed: false` |
+| `activate_all` | `activated_by: str` | `list[dict]` | 모든 SUSPENDED 계좌를 ACTIVE로 복구. DELETED를 뺀 ACTIVE·SUSPENDED 계좌별 결과(`account_id`·`previous_status`·`status`·`changed`)를 반환한다. 이미 목표 상태인 계좌는 `changed: false` |
 
 `activate`·`delete`는 상태 UPDATE가 실패하면(작업 취소 포함) 캐시에 든 그 계좌 객체의 `status`·`updated_at`을 호출 전 값으로 제자리에서 되돌리고 같은 예외를 다시 올린다. 이벤트는 UPDATE가 성공한 뒤에만 발행한다: `activate`의 `AccountActivatedEvent`·알림, 그리고 활성 계좌를 지울 때 `delete`가 내는 `AccountSuspendedEvent`(캐시에서 계좌를 뺀 뒤 발행). UPDATE가 커밋된 뒤에 취소가 닿으면 DB는 바뀐 채 캐시만 되돌아갈 수 있다 — `activate`라면 캐시가 정지로 남아 주문이 막히고, 재시작하면 DB 값을 따른다.
 
