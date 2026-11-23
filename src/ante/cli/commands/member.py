@@ -76,7 +76,8 @@ def _resolve_secret_non_interactive(
         value = os.environ.get(env_name)
         if value is None or value.strip() == "":
             raise MemberPasswordEnvNotSetError(
-                f"환경변수 {env_name}이(가) 설정되어 있지 않거나 공란입니다."
+                f"{env_option_label}가 가리키는 환경변수가 "
+                "설정되어 있지 않거나 공란입니다."
                 f" {env_option_label}는 비밀값이 든 환경변수의 *이름*만 받습니다."
             )
         return value.strip()
@@ -87,12 +88,12 @@ def _resolve_secret_non_interactive(
         raw = path.read_text(encoding="utf-8")
     except OSError as e:
         raise MemberPasswordFileNotFoundError(
-            f"{file_option_label} 파일을 읽을 수 없습니다: {file_path} ({e})"
+            f"{file_option_label} 파일을 읽을 수 없습니다."
         ) from e
     value = raw.strip()
     if value == "":
         raise MemberPasswordFileNotFoundError(
-            f"{file_option_label} 파일이 비어 있습니다: {file_path}"
+            f"{file_option_label} 파일이 비어 있습니다."
         )
     return value
 
