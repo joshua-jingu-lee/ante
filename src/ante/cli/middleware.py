@@ -578,6 +578,8 @@ class AuthenticatedGroup(_LeafPathMixin):
         i = 0
         while i < len(tokens):
             tok = tokens[i]
+            if tok == "--":
+                break
             if tok == "--format" and i + 1 < len(tokens):
                 result = tokens[i + 1]
                 i += 2

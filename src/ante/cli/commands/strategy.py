@@ -423,15 +423,13 @@ def _info_risks_lines(risks: list[str] | None) -> Iterator[str]:
         yield f"    - {r}"
 
 
-def _info_params_lines(
-    params: dict[str, Any] | None, schema: dict[str, Any]
-) -> Iterator[str]:
+def _info_params_lines(params: dict[str, Any] | None, schema: object) -> Iterator[str]:
     """파라미터 섹션 줄을 만든다."""
     if not params:
         return
     yield f"  {'파라미터':15s}:"
     for key, value in params.items():
-        desc = schema.get(key, "")
+        desc = schema.get(key, "") if isinstance(schema, dict) else ""
         line = f"    {key} = {value}"
         if desc:
             line += f"  ({desc})"
