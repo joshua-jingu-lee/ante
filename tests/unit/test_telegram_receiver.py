@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time as time_mod
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -653,15 +652,19 @@ class TestConfirmation:
         result = await receiver._handle_confirm(12345)
         assert "대기 중인 명령이 없습니다" in result
 
-    async def test_confirm_timeout(self, receiver):
+    async def test_confirm_timeout(self, receiver, manual_clock):
         """확인 시간이 초과되면 실행 거부."""
-        receiver._pending_confirm[12345] = ("halt", [], time_mod.time() - 60)
+        await receiver._execute("halt", [], 12345, 100)
+        manual_clock.advance(60)
         result = await receiver._handle_confirm(12345)
         assert "시간이 초과" in result
 
-    async def test_confirm_within_timeout(self, receiver, account_service):
+    async def test_confirm_within_timeout(
+        self, receiver, account_service, manual_clock
+    ):
         """타임아웃 내에 확인하면 실행."""
-        receiver._pending_confirm[12345] = ("halt", [], time_mod.time() - 5)
+        await receiver._execute("halt", [], 12345, 100)
+        manual_clock.advance(5)
         result = await receiver._handle_confirm(12345)
         assert "중지되었습니다" in result
 
@@ -674,8 +677,8 @@ class TestConfirmation:
     async def test_different_users_independent(self, receiver):
         """서로 다른 사용자의 확인 대기는 독립적이다."""
         receiver._allowed_user_ids.add(67890)
-        receiver._pending_confirm[12345] = ("halt", [], time_mod.time())
-        receiver._pending_confirm[67890] = ("stop", ["bot-1"], time_mod.time())
+        receiver._pending_confirm[12345] = ("halt", [], clock.monotonic())
+        receiver._pending_confirm[67890] = ("stop", ["bot-1"], clock.monotonic())
 
         result = await receiver._handle_confirm(12345)
         assert "중지되었습니다" in result
