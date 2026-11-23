@@ -17,7 +17,7 @@ import pytest
 
 from ante.bot import BotConfig, BotImmutableFieldError, BotManager
 from ante.bot.config import BotStatus
-from ante.bot.exceptions import BOT_IMMUTABLE_FIELD_CODE
+from ante.bot.exceptions import BOT_IMMUTABLE_FIELD_CODE, BotNotFoundError
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.strategy import (
@@ -852,3 +852,86 @@ class TestUpdateBotBudgetRollback:
 
         # treasury.update_budget 은 정확히 1회 (A 의 호출 1회) 만 일어났다.
         assert sleep_treasury.update_budget_calls == [(bot_id, 100_000.0)]
+
+
+async def _manager_with_treasury(eventbus, db, ctx):
+    treasury = Treasury(db=db, eventbus=eventbus, account_id="acc-test")
+    await treasury.initialize()
+    await treasury.set_account_balance(1_000_000)
+    tm = _FakeTreasuryManager()
+    tm.register("acc-test", treasury)
+    manager = BotManager(eventbus=eventbus, db=db, treasury_manager=tm)
+    await manager.initialize()
+    await _make_stopped_bot(manager, ctx, account_id="acc-test")
+    return manager, treasury
+
+
+class TestUpdateBotRacingDelete:
+    """수정이 기다리는 사이에 삭제가 끼면 환수된 봇에 예산을 주지 않는다 (#2698)."""
+
+    @pytest.mark.parametrize("hard", [False, True])
+    async def test_budget_not_reallocated_to_bot_deleted_during_save(
+        self, eventbus, db, ctx, monkeypatch, hard
+    ) -> None:
+        manager, treasury = await _manager_with_treasury(eventbus, db, ctx)
+        original_save = manager._save_bot_config
+
+        async def _save_then_delete(config):
+            await original_save(config)
+            await manager.delete_bot("bot1", hard=hard)
+
+        monkeypatch.setattr(manager, "_save_bot_config", _save_then_delete)
+        with pytest.raises(Exception) as exc_info:
+            await manager.update_bot("bot1", budget=200_000.0)
+
+        assert type(exc_info.value) is BotNotFoundError
+        assert treasury.get_budget("bot1") is None
+        assert treasury.unallocated == pytest.approx(1_000_000.0)
+
+    async def test_budget_not_allocated_while_delete_is_releasing(
+        self, eventbus, db, ctx, monkeypatch
+    ) -> None:
+        manager, treasury = await _manager_with_treasury(eventbus, db, ctx)
+        await manager.update_bot("bot1", budget=100_000.0)
+        entered = asyncio.Event()
+        gate = asyncio.Event()
+        original_release = treasury.release_budget
+
+        async def _paused_release(bot_id):
+            released = await original_release(bot_id)
+            entered.set()
+            await gate.wait()
+            return released
+
+        monkeypatch.setattr(treasury, "release_budget", _paused_release)
+        original_save = manager._save_bot_config
+        deleting: list[asyncio.Task[None]] = []
+
+        async def _save_then_start_delete(config):
+            await original_save(config)
+            deleting.append(asyncio.create_task(manager.delete_bot("bot1")))
+            await entered.wait()
+
+        monkeypatch.setattr(manager, "_save_bot_config", _save_then_start_delete)
+        try:
+            with pytest.raises(Exception) as exc_info:
+                await manager.update_bot("bot1", budget=200_000.0)
+        finally:
+            gate.set()
+            await asyncio.wait_for(deleting[0], timeout=5.0)
+
+        assert type(exc_info.value) is BotNotFoundError
+        assert treasury.get_budget("bot1") is None
+        assert treasury.unallocated == pytest.approx(1_000_000.0)
+        assert manager.get_bot("bot1") is None
+
+    async def test_recreated_bot_accepts_budget_update(self, eventbus, db, ctx) -> None:
+        manager, treasury = await _manager_with_treasury(eventbus, db, ctx)
+        await manager.delete_bot("bot1", hard=True)
+        await _make_stopped_bot(manager, ctx, account_id="acc-test")
+
+        await manager.update_bot("bot1", budget=200_000.0)
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.allocated == pytest.approx(200_000.0)

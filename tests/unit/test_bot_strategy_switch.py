@@ -16,7 +16,12 @@ import pytest
 
 from ante.account.models import Account, AccountStatus
 from ante.bot import BotConfig, BotManager, BotStatus
-from ante.bot.exceptions import BotError, BotNotAcceptingSignals, BotStateConflict
+from ante.bot.exceptions import (
+    BotError,
+    BotNotAcceptingSignals,
+    BotNotFoundError,
+    BotStateConflict,
+)
 from ante.bot.signal_key import SignalKeyManager
 from ante.core import Database
 from ante.eventbus import EventBus
@@ -605,3 +610,145 @@ class TestStoppingRefusesSwitch:
         assert bot._bound_strategy_id == a
         assert type(bot.strategy).meta.name == "strat_a"
         assert await _db_strategy_ids(db) == (a, a)
+
+
+async def _db_row(db):
+    return await db.fetch_one("SELECT status FROM bots WHERE bot_id = 'bot1'")
+
+
+def _started_events(eventbus) -> list[BotStartedEvent]:
+    seen: list[BotStartedEvent] = []
+    eventbus.subscribe(BotStartedEvent, seen.append)
+    return seen
+
+
+class TestSwitchRacingDelete:
+    """교체·배정·수정이 기다리는 사이에 삭제가 끼면 삭제된 봇에 쓰지 않는다 (#2698)."""
+
+    @pytest.mark.parametrize("hard", [False, True])
+    async def test_assign_does_not_restart_bot_deleted_during_save(
+        self, manager, ctx, db, orders, eventbus, strategies, monkeypatch, hard
+    ):
+        a, b = strategies
+        bot = await _running_on_a(manager, ctx, db, orders, a)
+        started = _started_events(eventbus)
+        original_save = manager._save_bot_config
+
+        async def _save_then_delete(config):
+            await original_save(config)
+            await manager.delete_bot("bot1", hard=hard)
+
+        generation = bot._generation
+        monkeypatch.setattr(manager, "_save_bot_config", _save_then_delete)
+        with pytest.raises(Exception) as exc_info:
+            await manager.assign_strategy("bot1", b)
+
+        assert type(exc_info.value) is BotNotFoundError
+        assert bot.status == BotStatus.DELETED
+        assert started == []
+        assert bot._generation == generation
+        assert bot._task is None or bot._task.done()
+        row = await _db_row(db)
+        if hard:
+            assert row is None
+        else:
+            assert row["status"] == "deleted"
+
+    @pytest.mark.parametrize("path", ["assign_strategy", "change_strategy"])
+    async def test_switch_does_not_recreate_row_hard_deleted_during_prepare(
+        self, manager, ctx, db, orders, strategies, monkeypatch, path
+    ):
+        a, b = strategies
+        bot = await _running_on_a(manager, ctx, db, orders, a)
+        if path == "change_strategy":
+            await manager.stop_bot("bot1")
+        original_prepare = manager._prepare_strategy
+
+        async def _prepare_then_delete(*args, **kwargs):
+            cls = await original_prepare(*args, **kwargs)
+            await manager.delete_bot("bot1", hard=True)
+            return cls
+
+        monkeypatch.setattr(manager, "_prepare_strategy", _prepare_then_delete)
+        with pytest.raises(Exception) as exc_info:
+            await getattr(manager, path)("bot1", b)
+
+        assert type(exc_info.value) is BotNotFoundError
+        assert await _db_row(db) is None
+        assert bot._bound_strategy_id == a
+        assert bot.status == BotStatus.DELETED
+
+    async def test_update_strategy_does_not_recreate_row_hard_deleted_during_prepare(
+        self, manager, ctx, db, orders, strategies, monkeypatch
+    ):
+        a, b = strategies
+        bot = await _running_on_a(manager, ctx, db, orders, a)
+        await manager.stop_bot("bot1")
+        original_prepare = manager._prepare_strategy
+
+        async def _prepare_then_delete(*args, **kwargs):
+            cls = await original_prepare(*args, **kwargs)
+            await manager.delete_bot("bot1", hard=True)
+            return cls
+
+        monkeypatch.setattr(manager, "_prepare_strategy", _prepare_then_delete)
+        with pytest.raises(Exception) as exc_info:
+            await manager.update_bot("bot1", strategy_id=b)
+
+        assert type(exc_info.value) is BotNotFoundError
+        assert await _db_row(db) is None
+        assert bot._bound_strategy_id == a
+
+    async def test_assign_does_not_start_bot_while_delete_is_in_progress(
+        self, manager, ctx, db, orders, eventbus, strategies, monkeypatch, signal_keys
+    ):
+        a, b = strategies
+        bot = await _running_on_a(manager, ctx, db, orders, a)
+        started = _started_events(eventbus)
+        entered = asyncio.Event()
+        gate = asyncio.Event()
+        original_revoke = signal_keys.revoke
+
+        async def _paused_revoke(bot_id):
+            entered.set()
+            await gate.wait()
+            return await original_revoke(bot_id)
+
+        monkeypatch.setattr(signal_keys, "revoke", _paused_revoke)
+        original_save = manager._save_bot_config
+        deleting: list[asyncio.Task[None]] = []
+
+        async def _save_then_start_delete(config):
+            await original_save(config)
+            deleting.append(asyncio.create_task(manager.delete_bot("bot1")))
+            await entered.wait()
+
+        monkeypatch.setattr(manager, "_save_bot_config", _save_then_start_delete)
+        try:
+            with pytest.raises(Exception) as exc_info:
+                await manager.assign_strategy("bot1", b)
+        finally:
+            gate.set()
+            await asyncio.wait_for(deleting[0], timeout=5.0)
+
+        assert type(exc_info.value) is BotNotFoundError
+        assert started == []
+        assert bot.status == BotStatus.DELETED
+        assert bot._task is None or bot._task.done()
+        assert manager.get_bot("bot1") is None
+
+    async def test_bot_recreated_after_delete_accepts_switch_and_update(
+        self, manager, ctx, db, orders, strategies
+    ):
+        a, b = strategies
+        await _running_on_a(manager, ctx, db, orders, a)
+        await manager.delete_bot("bot1", hard=True)
+        recreated = await _create(manager, ctx, db, a)
+
+        await manager.assign_strategy("bot1", b)
+        await manager.update_bot("bot1", interval_seconds=60)
+
+        assert recreated.config.strategy_id == b
+        assert recreated._bound_strategy_id == b
+        assert recreated.config.interval_seconds == 60
+        assert await _db_strategy_ids(db) == (b, b)
