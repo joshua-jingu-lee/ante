@@ -142,6 +142,7 @@ async def test_main_writes_marker_before_pid_and_removes_after_init_ipc(
     async def fake_init_ipc(s: main_module.Services) -> None:
         assert s.config is not None
         calls.append("init_ipc")
+        steps.append("_init_ipc")
         assert main_module._read_starting_marker_pid(s.config) == os.getpid()
         assert s.config.runtime_pid_path().exists()
         s.config.runtime_socket_path().parent.mkdir(parents=True, exist_ok=True)
@@ -153,19 +154,26 @@ async def test_main_writes_marker_before_pid_and_removes_after_init_ipc(
         assert not main_module._starting_marker_path(s.config).exists()
         assert s.config.runtime_pid_path().exists()
 
-    async def fake_init_step(s: main_module.Services) -> None:
-        return None
+    steps: list[str] = []
 
-    for name in (
+    def fake_init_step(name: str) -> Any:
+        async def _step(s: main_module.Services) -> None:
+            steps.append(name)
+
+        return _step
+
+    step_names = (
         "_init_services",
         "_init_account",
         "_init_trading",
         "_init_gateway",
+        "_restore_bots",
         "_init_feed",
         "_init_approval",
         "_init_notification",
-    ):
-        monkeypatch.setattr(main_module, name, fake_init_step)
+    )
+    for name in step_names:
+        monkeypatch.setattr(main_module, name, fake_init_step(name))
     monkeypatch.setattr(main_module, "_init_core", fake_init_core)
     monkeypatch.setattr(main_module, "_init_ipc", fake_init_ipc)
     monkeypatch.setattr(main_module, "_run", fake_run)
@@ -178,6 +186,7 @@ async def test_main_writes_marker_before_pid_and_removes_after_init_ipc(
     assert calls[:4] == ["write_marker", "write_pid", "init_core", "init_ipc"]
     assert calls[calls.index("init_ipc") + 1] == "remove_marker"
     assert calls[-1] == "remove_marker"
+    assert steps == [*step_names, "_init_ipc"]
 
 
 @pytest.mark.asyncio

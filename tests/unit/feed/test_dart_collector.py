@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 import polars as pl
 import pytest
@@ -12,6 +13,8 @@ import pytest
 from ante.data.store import ParquetStore
 from ante.feed.pipeline.checkpoint import Checkpoint
 from ante.feed.pipeline.dart_collector import REPRT_TO_QUARTER, DARTCollector
+from ante.feed.sources.base import RateLimiter
+from ante.feed.sources.dart import DARTSource
 
 
 class TestCheckpointKeyFormat:
@@ -1814,3 +1817,80 @@ class TestDartZeroByteRecoveryVsCorruptBlock:
         # 유효 파티션은 격리되지 않고 원본 보존.
         assert not (part_dir / "2015-12.corrupted").exists()
         assert valid_q4.read_bytes() == before
+
+
+class TestNonJsonResponseHaltsCollector:
+    """#2710: JSON이 아닌 응답의 실패가 예외로 올라가 수집기가 중단한다."""
+
+    async def test_non_json_quarter_does_not_save_checkpoint(
+        self, tmp_path: Path
+    ) -> None:
+        """Q2가 비JSON이면 checkpoint는 Q1에 머물고 Q2가 경고로 남는다."""
+        source = DARTSource(
+            api_key="test-dart-api-key-0123456789abcdef01",
+            rate_limiter=RateLimiter(tps_limit=1000.0, daily_limit=20_000),
+            max_retries=3,
+        )
+        calls: list[str] = []
+
+        async def mock_request(session, url, params):
+            reprt_code = params["reprt_code"]
+            calls.append(reprt_code)
+            if reprt_code == "11012":
+                raise json.JSONDecodeError("Expecting value", "<html>", 0)
+            return {"status": "000", "list": [_raw_item("2015", reprt_code)]}
+
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+        collector = DARTCollector(source=source, normalizer=_ScriptedNormalizer({}))
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                _rows, _syms, warns = await _run_collect(
+                    tmp_path, collector, checkpoint, store, {}
+                )
+
+        assert checkpoint.get_last_date() == "2015-Q1"
+        assert calls.count("11012") == 2
+        assert [w["reprt_code"] for w in warns] == ["11012"]
+
+
+class TestNullListHaltsCollector:
+    """#2939: list가 null인 응답이 일시 실패와 같은 중단 경로로 간다."""
+
+    async def test_null_list_quarter_does_not_save_checkpoint(
+        self, tmp_path: Path
+    ) -> None:
+        """Q2의 list가 null이면 한 번만 요청하고 checkpoint는 Q1에 머문다."""
+        source = DARTSource(
+            api_key="test-dart-api-key-0123456789abcdef01",
+            rate_limiter=RateLimiter(tps_limit=1000.0, daily_limit=20_000),
+            max_retries=3,
+        )
+        calls: list[str] = []
+
+        async def mock_request(session, url, params):
+            reprt_code = params["reprt_code"]
+            calls.append(reprt_code)
+            if reprt_code == "11012":
+                return {"status": "000", "message": "정상", "list": None}
+            return {"status": "000", "list": [_raw_item("2015", reprt_code)]}
+
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+        collector = DARTCollector(source=source, normalizer=_ScriptedNormalizer({}))
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                _rows, _syms, warns = await _run_collect(
+                    tmp_path, collector, checkpoint, store, {}
+                )
+
+        assert checkpoint.get_last_date() == "2015-Q1"
+        assert calls.count("11012") == 1
+        assert [w["reprt_code"] for w in warns] == ["11012"]
+        assert "NoneType" not in warns[0]["message"]
