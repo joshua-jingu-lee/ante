@@ -20,6 +20,7 @@ import pytest
 from click.testing import CliRunner, Result
 
 from ante.cli.main import cli
+from ante.core.database import OperationalError
 from ante.member.models import Member, MemberRole, MemberType
 
 _MASTER = Member(
@@ -114,6 +115,12 @@ def _empty_performance() -> tuple[Any, Any]:
         patch("ante.cli.commands.report.open_cli_db", new=_db_yielding(MagicMock())),
         patch("ante.trade.performance.PerformanceTracker", new=tracker),
     )
+
+
+def _locked_performance_db() -> Any:
+    db = MagicMock()
+    db.fetch_all = AsyncMock(side_effect=OperationalError("database is locked"))
+    return patch("ante.cli.commands.report.open_cli_db", new=_db_yielding(db))
 
 
 def _failing_database_class(message: str) -> Any:
@@ -421,6 +428,29 @@ class TestReportPerformance:
             "data": {"message": "집계 데이터가 없습니다.", "summaries": []},
         }
         assert result.stderr == ""
+
+    @pytest.mark.parametrize("period", ["daily", "monthly"])
+    def test_db_locked_json(self, period: str) -> None:
+        result = _invoke(
+            ["--format", "json", "report", "performance", "--period", period],
+            _locked_performance_db(),
+        )
+        _assert_json(
+            result,
+            {
+                "status": "error",
+                "code": "EXECUTION_ERROR",
+                "message": "database is locked",
+            },
+        )
+
+    @pytest.mark.parametrize("period", ["daily", "monthly"])
+    def test_db_locked_text(self, period: str) -> None:
+        result = _invoke(
+            ["--format", "text", "report", "performance", "--period", period],
+            _locked_performance_db(),
+        )
+        _assert_text(result, ["Error: EXECUTION_ERROR: database is locked"])
 
 
 class TestReportView:
