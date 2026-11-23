@@ -18,7 +18,8 @@ ante feed start
   │   ├─ backfill 미완료? → backfill_at 시각에 backfill 실행
   │   ├─ daily_at 시각 도달? → daily 실행
   │   └─ 방어 가드는 각 실행 안에서 확인 (아래 절)
-  │       blocked_hours: backfill은 대기, daily는 건너뜀 / blocked_days: 그 날짜 skip
+  │       backfill: data.go.kr 날짜 루프에서만 (blocked_hours 대기 / blocked_days 그 날짜 skip)
+  │       daily: blocked_hours·blocked_days 해당 시 그 실행을 건너뜀
   │       스케줄 루프는 가드로 건너뛴 daily도 그날의 실행으로 친다
   │
   └─ 종료 시그널(SIGTERM) 수신 시 체크포인트 저장 후 안전 종료
