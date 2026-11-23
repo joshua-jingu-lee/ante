@@ -32,6 +32,11 @@ _JOIN_POSITION_HISTORY = """LEFT JOIN position_history ph
                 AND ph.action = 'sell'"""
 
 
+def _is_missing_table(exc: OperationalError) -> bool:
+    """테이블이 아직 없어서 난 OperationalError인지."""
+    return "no such table" in str(exc).lower()
+
+
 class PerformanceTracker:
     """봇/전략의 성과 지표를 조회 시 계산."""
 
@@ -156,7 +161,9 @@ class PerformanceTracker:
 
         try:
             rows = await self._db.fetch_all(query, tuple(params))
-        except OperationalError:
+        except OperationalError as exc:
+            if not _is_missing_table(exc):
+                raise
             return []
         return [
             DailySummary(
@@ -218,7 +225,9 @@ class PerformanceTracker:
 
         try:
             rows = await self._db.fetch_all(query, tuple(params))
-        except OperationalError:
+        except OperationalError as exc:
+            if not _is_missing_table(exc):
+                raise
             return []
         return [
             WeeklySummary(
@@ -285,7 +294,9 @@ class PerformanceTracker:
 
         try:
             rows = await self._db.fetch_all(query, tuple(params))
-        except OperationalError:
+        except OperationalError as exc:
+            if not _is_missing_table(exc):
+                raise
             return []
         return [
             MonthlySummary(
@@ -377,7 +388,9 @@ class PerformanceTracker:
 
         try:
             rows = await self._db.fetch_all(query, tuple(params))
-        except OperationalError:
+        except OperationalError as exc:
+            if not _is_missing_table(exc):
+                raise
             logger.debug("trades 테이블 없음 — 빈 목록 반환")
             return []
         return self._rows_to_records(rows, context="_get_filled_trades")
@@ -397,7 +410,9 @@ class PerformanceTracker:
                        LIMIT 1""",
                     (str(trade.trade_id),),
                 )
-            except OperationalError:
+            except OperationalError as exc:
+                if not _is_missing_table(exc):
+                    raise
                 row = None
             if row:
                 pnl_list.append(float(row["pnl"]))
