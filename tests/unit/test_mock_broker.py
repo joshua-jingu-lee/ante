@@ -36,7 +36,6 @@ def delayed_broker() -> MockBrokerAdapter:
     return MockBrokerAdapter(
         {
             "fill_mode": "delayed",
-            "delay_seconds": 0.01,
             "initial_cash": 10_000_000,
             "default_price": 50_000,
         }
@@ -150,13 +149,100 @@ async def test_partial_fill_position(partial_broker: MockBrokerAdapter) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delayed_fill(delayed_broker: MockBrokerAdapter) -> None:
-    """지연 체결 모드에서도 최종적으로 전량 체결된다."""
+async def test_delayed_order_is_pending_until_history_is_read(
+    delayed_broker: MockBrokerAdapter,
+) -> None:
+    """지연 모드의 주문은 주문 이력이 읽히기 전에는 체결되지 않는다."""
     order_id = await delayed_broker.place_order("005930", "buy", 10)
 
     status = await delayed_broker.get_order_status(order_id)
-    assert status["status"] == "filled"
-    assert status["filled_quantity"] == 10
+    assert status["status"] == "pending"
+    assert status["filled_quantity"] == 0
+    assert await delayed_broker.get_positions() == []
+    assert (await delayed_broker.get_account_balance())["cash"] == 10_000_000
+    assert await delayed_broker.get_pending_orders() != []
+
+
+@pytest.mark.asyncio
+async def test_delayed_fill_on_second_history_call(
+    delayed_broker: MockBrokerAdapter,
+) -> None:
+    """기본 delay_polls=2: 주문 뒤 두 번째 주문 이력 조회에서 전량 체결된다."""
+    order_id = await delayed_broker.place_order("005930", "buy", 10)
+
+    (first,) = await delayed_broker.get_order_history()
+    assert (first["order_id"], first["filled_quantity"]) == (order_id, 0)
+    assert first["status"] == "pending"
+    assert await delayed_broker.get_positions() == []
+
+    (second,) = await delayed_broker.get_order_history()
+    assert second["filled_quantity"] == 10
+    assert second["status"] == "filled"
+    positions = await delayed_broker.get_positions()
+    assert [(p["symbol"], p["quantity"]) for p in positions] == [("005930", 10)]
+    assert (await delayed_broker.get_account_balance())["cash"] < 10_000_000
+
+    (third,) = await delayed_broker.get_order_history()
+    assert third["filled_quantity"] == 10
+    assert (await delayed_broker.get_positions())[0]["quantity"] == 10
+
+
+@pytest.mark.asyncio
+async def test_delayed_fill_with_one_poll() -> None:
+    """delay_polls=1이면 주문 뒤 첫 주문 이력 조회에서 체결된다."""
+    adapter = MockBrokerAdapter(
+        {"fill_mode": "delayed", "delay_polls": 1, "default_price": 50_000}
+    )
+    order_id = await adapter.place_order("005930", "buy", 3)
+
+    (first,) = await adapter.get_order_history()
+    assert (first["order_id"], first["filled_quantity"]) == (order_id, 3)
+
+
+@pytest.mark.asyncio
+async def test_delayed_order_cancelled_before_fill_never_fills(
+    delayed_broker: MockBrokerAdapter,
+) -> None:
+    """체결이 보이기 전에 취소된 주문은 뒤의 조회에서도 체결되지 않는다."""
+    order_id = await delayed_broker.place_order("005930", "buy", 10)
+    await delayed_broker.get_order_history()
+    assert await delayed_broker.cancel_order(order_id) is True
+
+    for _ in range(3):
+        (item,) = await delayed_broker.get_order_history()
+        assert item["filled_quantity"] == 0
+        assert item["status"] == "cancelled"
+    assert await delayed_broker.get_positions() == []
+    assert (await delayed_broker.get_account_balance())["cash"] == 10_000_000
+
+
+@pytest.mark.asyncio
+async def test_delayed_orders_count_their_own_calls(
+    delayed_broker: MockBrokerAdapter,
+) -> None:
+    """주문마다 자기가 접수된 뒤의 조회 횟수를 센다."""
+    early = await delayed_broker.place_order("005930", "buy", 1)
+    await delayed_broker.get_order_history()
+    late = await delayed_broker.place_order("005930", "buy", 2)
+
+    filled = {
+        i["order_id"]: i["filled_quantity"]
+        for i in await delayed_broker.get_order_history()
+    }
+    assert filled == {early: 1, late: 0}
+
+    filled = {
+        i["order_id"]: i["filled_quantity"]
+        for i in await delayed_broker.get_order_history()
+    }
+    assert filled == {early: 1, late: 2}
+
+
+@pytest.mark.parametrize("value", [0, -1, True, False, 1.0, 2.5, "2", None])
+def test_delay_polls_must_be_positive_int(value: object) -> None:
+    """delay_polls가 1 이상의 정수가 아니면 생성자의 BrokerError다."""
+    with pytest.raises(BrokerError, match="delay_polls"):
+        MockBrokerAdapter({"fill_mode": "delayed", "delay_polls": value})
 
 
 # ── 주문 거부 (REJECT) ───────────────────────────────

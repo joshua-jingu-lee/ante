@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import math
@@ -21,6 +20,12 @@ from ante.core import clock
 logger = logging.getLogger(__name__)
 
 _PRICES_FILE_KEYS = frozenset({"prices", "default_price"})
+
+
+def _valid_delay_polls(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise BrokerError(f"delay_polls는 1 이상의 정수여야 함: {value!r}")
+    return value
 
 
 def _reject_json_constant(name: str) -> NoReturn:
@@ -126,7 +131,7 @@ class MockBrokerAdapter(BrokerAdapter):
     설정 옵션:
         fill_mode: "immediate" | "partial" | "delayed" | "reject"
         partial_fill_ratio: 부분 체결 비율 (0.0~1.0, 기본 0.5)
-        delay_seconds: 지연 체결 시 대기 시간 (기본 0.1)
+        delay_polls: 지연 모드에서 주문 뒤 체결되는 주문 이력 조회 차례 (기본 2)
         initial_cash: 초기 현금 (기본 100_000_000)
         default_price: prices에 없는 종목의 현재가 (기본 50_000)
         prices: 종목별 현재가 딕셔너리 (예: {"005930": 70000})
@@ -142,7 +147,8 @@ class MockBrokerAdapter(BrokerAdapter):
 
         self._fill_mode = FillMode(config.get("fill_mode", "immediate"))
         self._partial_fill_ratio: float = config.get("partial_fill_ratio", 0.5)
-        self._delay_seconds: float = config.get("delay_seconds", 0.1)
+        self._delay_polls = _valid_delay_polls(config.get("delay_polls", 2))
+        self._polls_left: dict[str, int] = {}
 
         self._cash: float = config.get("initial_cash", 100_000_000.0)
         self._positions: dict[str, MockPosition] = {}
@@ -255,7 +261,9 @@ class MockBrokerAdapter(BrokerAdapter):
         self._orders[order_id] = order
 
         if self._fill_mode == FillMode.DELAYED:
-            await asyncio.sleep(self._delay_seconds)
+            self._polls_left[order_id] = self._delay_polls
+            logger.info("Mock 주문 접수(지연): %s %s %s", order_id, side, symbol)
+            return order_id
 
         fill_qty = self._calculate_fill_quantity(quantity)
         self._execute_fill(order, fill_qty, exec_price)
@@ -279,6 +287,7 @@ class MockBrokerAdapter(BrokerAdapter):
         if order.status in ("filled", "cancelled", "rejected"):
             return False
         order.status = "cancelled"
+        self._polls_left.pop(order_id, None)
         return True
 
     async def modify_order(
@@ -333,7 +342,8 @@ class MockBrokerAdapter(BrokerAdapter):
         from_date: str | None = None,
         to_date: str | None = None,
     ) -> list[dict[str, Any]]:
-        """주문/체결 이력 조회."""
+        """주문/체결 이력 조회. 지연 모드의 주문은 정해진 차례의 조회에서 체결된다."""
+        self._advance_delayed()
         results = []
         for order in self._orders.values():
             results.append(
@@ -387,6 +397,18 @@ class MockBrokerAdapter(BrokerAdapter):
     def set_fill_mode(self, mode: FillMode) -> None:
         """테스트용: 체결 모드 변경."""
         self._fill_mode = mode
+
+    def _advance_delayed(self) -> None:
+        """지연 주문마다 남은 조회 수를 줄이고, 0이 된 주문을 체결한다."""
+        for order_id, remaining in list(self._polls_left.items()):
+            if remaining > 1:
+                self._polls_left[order_id] = remaining - 1
+                continue
+            del self._polls_left[order_id]
+            order = self._orders[order_id]
+            self._execute_fill(
+                order, self._calculate_fill_quantity(order.quantity), order.price
+            )
 
     def _calculate_fill_quantity(self, quantity: float) -> float:
         """체결 모드에 따른 체결 수량 계산."""
