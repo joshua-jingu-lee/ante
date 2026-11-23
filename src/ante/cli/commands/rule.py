@@ -249,9 +249,8 @@ def _parse_key_value(value: str) -> tuple[str, object]:
 @click.option("--account", "account_id", required=True, help="계좌 ID")
 @click.option(
     "--enabled/--disabled",
-    default=True,
-    show_default=True,
-    help="룰 활성화 여부",
+    default=None,
+    help="룰 활성화 여부 (생략하면 저장된 값을 유지)",
 )
 @click.option(
     "--param",
@@ -268,7 +267,7 @@ def rule_update(
     ctx: click.Context,
     rule_type: str,
     account_id: str,
-    enabled: bool,
+    enabled: bool | None,
     params: tuple[str, ...],
     params_json: str | None,
 ) -> CommandResult:
@@ -287,16 +286,14 @@ def rule_update(
         from ante.cli.commands.ipc_helpers import ipc_send
 
         if is_active_runtime():
-            return await ipc_send(
-                "rule.update",
-                {
-                    "account_id": account_id,
-                    "rule_type": rule_type,
-                    "enabled": enabled,
-                    "params": param_dict,
-                },
-                actor=actor,
-            )
+            payload: dict[str, Any] = {
+                "account_id": account_id,
+                "rule_type": rule_type,
+                "params": param_dict,
+            }
+            if enabled is not None:
+                payload["enabled"] = enabled
+            return await ipc_send("rule.update", payload, actor=actor)
 
         from ante.account.service import AccountService
         from ante.audit import AuditLogger
