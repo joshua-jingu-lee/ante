@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import time as time_mod
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ante.core import clock
 from ante.notification.telegram_receiver import TelegramCommandReceiver
+from tests.conftest import DEFAULT_MANUAL_CLOCK_AT, ManualClock
 
 # ── Fixtures ──────────────────────────────────────
 
@@ -677,6 +680,52 @@ class TestConfirmation:
         result = await receiver._handle_confirm(12345)
         assert "중지되었습니다" in result
         assert 67890 in receiver._pending_confirm
+
+    async def test_confirm_expires_when_wall_clock_moves_back(
+        self, receiver, account_service
+    ):
+        """벽시계가 뒤로 조정돼도 단조 경과가 기한을 넘으면 거부한다 (#2935)."""
+        with clock.use_clock(ManualClock(DEFAULT_MANUAL_CLOCK_AT, monotonic=1000.0)):
+            await receiver._execute("halt", [], 12345, 100)
+        moved_back = ManualClock(
+            DEFAULT_MANUAL_CLOCK_AT - timedelta(hours=1), monotonic=1060.0
+        )
+        with clock.use_clock(moved_back):
+            result = await receiver._handle_confirm(12345)
+        assert "시간이 초과" in result
+        account_service.suspend_all.assert_not_called()
+
+    async def test_confirm_within_timeout_when_wall_clock_moves_forward(
+        self, receiver, account_service
+    ):
+        """벽시계가 앞으로 조정돼도 단조 경과가 기한 안이면 실행한다 (#2935)."""
+        with clock.use_clock(ManualClock(DEFAULT_MANUAL_CLOCK_AT, monotonic=1000.0)):
+            await receiver._execute("halt", [], 12345, 100)
+        moved_forward = ManualClock(
+            DEFAULT_MANUAL_CLOCK_AT + timedelta(hours=1), monotonic=1005.0
+        )
+        with clock.use_clock(moved_forward):
+            result = await receiver._handle_confirm(12345)
+        assert "중지되었습니다" in result
+
+    async def test_confirm_at_exact_timeout_executes(
+        self, receiver, account_service, manual_clock
+    ):
+        """경과가 기한과 같으면 실행한다."""
+        await receiver._execute("halt", [], 12345, 100)
+        manual_clock.advance(30)
+        result = await receiver._handle_confirm(12345)
+        assert "중지되었습니다" in result
+
+    async def test_confirm_just_past_timeout_rejected(
+        self, receiver, account_service, manual_clock
+    ):
+        """경과가 기한을 조금이라도 넘으면 거부한다."""
+        await receiver._execute("halt", [], 12345, 100)
+        manual_clock.advance(30.001)
+        result = await receiver._handle_confirm(12345)
+        assert "시간이 초과" in result
+        account_service.suspend_all.assert_not_called()
 
 
 # ── US-1: 폴링 루프 ─────────────────────────────
