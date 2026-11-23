@@ -16,7 +16,11 @@ import pytest
 import ante.broker.kis as kis_module
 from ante.broker import KISAdapter
 from ante.broker.exceptions import APIError, TokenRateLimitError
-from ante.broker.kis import _raise_token_rate_limit, _reset_token_cache
+from ante.broker.kis import (
+    _raise_token_rate_limit,
+    _record_token_cooldown,
+    _reset_token_cache,
+)
 from ante.core import clock
 
 _WALL_AT = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
@@ -226,6 +230,22 @@ class TestReauthFailureInsideRetry:
         assert len(h.sent_headers) == 1
         assert h.failures == 1
         assert h.issued == 1
+
+    async def test_cooldown_fails_before_entering_rate_limit_queue(
+        self, fake_clock: _Clock, slept: list[float]
+    ) -> None:
+        """쿨다운 중 만료 여유 안의 토큰이면 줄을 서기 전에 즉시 실패한다."""
+        h = _Harness(expires_in=timedelta(minutes=1))
+        h.fill_window()
+        _record_token_cooldown(h.adapter.app_key)
+
+        with pytest.raises(TokenRateLimitError):
+            await h.adapter._request_with_cont("GET", _URL, _QUERY_TR_ID)
+
+        assert slept == []
+        assert len(h.adapter._request_times) == 1
+        assert h.sent_headers == []
+        assert h.issued == 0
 
     async def test_order_timeout_then_reauth_failure_does_not_resend(
         self, fake_clock: _Clock, slept: list[float]
