@@ -294,7 +294,7 @@ ante config set system.log_level DEBUG --format json | jq -r '.data.value'
 
 ## ❌ 실패 출력의 변경
 
-JSON 모드의 실패는 다음 모양의 에러 봉투로 stdout에 한 줄로 나갑니다. text 모드의 실패는 stderr의 첫 줄이 `Error: <code>: <message>`입니다. 다음 자리에서는 그 앞이나 뒤로 줄이 더 나갑니다.
+JSON 모드의 실패는 다음 모양의 에러 봉투로 stdout에 한 줄로 나갑니다. text 모드의 실패는 stderr에 `Error: <code>: <message>` 줄을 냅니다. 다음 자리에서는 그 줄의 앞이나 뒤로 줄이 더 나갑니다.
 
 - `strategy validate`·`strategy submit`의 검증 실패(text): 첫 줄 뒤에 오류마다 `  - <오류>` 줄이 이어지고, `validate`는 경고마다 `  [warn] <경고>` 줄도 이어집니다.
 - `update`의 마이그레이션 실패(text): 에러 줄 앞에 마이그레이션 실패·롤백 안내 줄이 먼저 나갑니다(stderr. 롤백이 끝났다는 안내는 stdout).
