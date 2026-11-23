@@ -425,10 +425,12 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 10. RuleEngineManager 초기화               # 계좌별 RuleEngine 생성 (Config + DynamicConfig + EventBus + AccountService)
 11. APIGateway 초기화                      # AccountService 주입, 계좌별 BrokerAdapter 라우팅
 12. BotManager 초기화                      # EventBus + StrategyRegistry + APIGateway factories
-13. NotificationService 초기화             # EventBus + 알림 어댑터
-14. IPC 서버 시작                          # CommandRegistry + ServiceRegistry 주입
-15. BotManager.restore_bots()              # DB에서 봇 설정 복원 + 시작
+13. BotManager.restore_bots()              # 삭제되지 않은 봇을 created로 복원 (시작하지 않음)
+14. NotificationService 초기화             # EventBus + 알림 어댑터
+15. IPC 서버 시작                          # CommandRegistry + ServiceRegistry 주입
 ```
+
+봇 복원(13단계)은 APIGateway·컨텍스트 팩토리가 준비된 뒤, 승인·알림·IPC가 요청을 받기 전에 돈다. IPC보다 먼저 복원해야 복원 전의 틈에 같은 id의 `bot create`가 DB의 옛 행을 덮지 않는다. 복원은 봇을 시작하지 않는다(자동 시작은 후속 이슈).
 
 계좌 topology는 6~12단계에서 서버 시작 시점의 DB 상태를 기준으로 고정된다.
 계좌 생성/삭제/credentials·broker_config·commission 변경은 cold-path 전용이며, 서버 실행 중
