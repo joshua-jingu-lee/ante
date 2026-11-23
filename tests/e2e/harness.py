@@ -32,6 +32,8 @@ POLL_SECONDS = 0.05
 SOCKET_PATH_MAX_BYTES = 100
 LOG_TAIL_LINES = 80
 
+WAIT_INTERVAL_SECONDS = 0.5
+
 NETGUARD_DIR = Path(__file__).resolve().parent / "netguard"
 NETGUARD_LOG_ENV = "ANTE_E2E_NETGUARD_LOG"
 NETGUARD_MARKER_ENV = "ANTE_E2E_NETGUARD_MARKER"
@@ -210,6 +212,22 @@ def session_failure_reason(results: Sequence[tuple[str, str]]) -> str | None:
     return None
 
 
+def wait_until[T](
+    fetch: Callable[[], T],
+    done: Callable[[T], bool],
+    *,
+    seconds: float,
+    interval: float = WAIT_INTERVAL_SECONDS,
+) -> T:
+    """``done``이 참이거나 기한이 지날 때까지 ``fetch``를 부르고 마지막 값을 낸다."""
+    deadline = time.monotonic() + seconds
+    while True:
+        value = fetch()
+        if done(value) or time.monotonic() >= deadline:
+            return value
+        time.sleep(interval)
+
+
 def ante_src_dir() -> Path:
     """``ante`` 패키지를 담은 디렉터리(설정을 풀지 않고 위치만 찾는다)."""
     spec = importlib.util.find_spec("ante")
@@ -299,11 +317,17 @@ class DaemonHarness:
         self.token = payload["token"]
         return payload
 
-    def start(self) -> float:
-        """``system start``로 데몬을 띄우고 준비를 기다린다. 걸린 초를 돌려준다."""
+    def start(self, *, append_log: bool = False) -> float:
+        """``system start``로 데몬을 띄우고 준비를 기다린다. 걸린 초를 돌려준다.
+
+        ``append_log``이면 데몬 로그를 이어 쓴다(재기동). 이전 핸들은 닫는다.
+        """
         if self.token is None:
             raise HarnessError("init 전에는 데몬을 띄울 수 없다")
-        self._log_file = open(self.daemon_log_path, "wb")
+        if self.proc is not None and self.proc.poll() is None:
+            raise HarnessError("이전 데몬의 래퍼가 아직 끝나지 않았다")
+        self._close_log()
+        self._log_file = open(self.daemon_log_path, "ab" if append_log else "wb")
         started = time.monotonic()
         self.proc = subprocess.Popen(
             self.cli_argv("system", "start"),
@@ -347,6 +371,24 @@ class DaemonHarness:
                 + self.diagnostics()
             ) from exc
 
+    def restart(self) -> float:
+        """같은 루트에서 ``system stop`` → ``system start`` → 준비 대기.
+
+        래퍼가 0으로 끝나지 않으면 멈춘다. 로그는 이어 쓴다. 준비에 걸린 초를 돌려준다.
+        """
+        returncode = self.stop()
+        if returncode != 0:
+            raise HarnessError(
+                f"재기동 전 system stop의 래퍼가 {returncode}로 끝났다\n"
+                + self.diagnostics()
+            )
+        return self.start(append_log=True)
+
+    def _close_log(self) -> None:
+        if self._log_file is not None:
+            self._log_file.close()
+            self._log_file = None
+
     def guarded_pids(self) -> set[int]:
         if not self.net_marker_path.exists():
             return set()
@@ -382,8 +424,7 @@ class DaemonHarness:
                 terminate_process_group(self.proc.pid, reap=self.proc.poll)
                 self.proc.wait(timeout=GROUP_KILL_SECONDS)
         finally:
-            if self._log_file is not None:
-                self._log_file.close()
+            self._close_log()
             if self.root.exists():
                 try:
                     self._final_diagnostics = self.diagnostics()

@@ -291,6 +291,104 @@ class TestDaemonHarnessEnv:
         assert not env.root.exists()
 
 
+_FAKE_DAEMON = """
+    import os, pathlib, sys, time
+    run = pathlib.Path(sys.argv[1])
+    print("boot", os.getpid(), flush=True)
+    (run / "ante.pid").write_text(str(os.getpid()))
+    (run / "ante.sock").write_text("")
+    while not (run / "stop").exists():
+        time.sleep(0.02)
+    for name in ("stop", "ante.sock", "ante.pid"):
+        (run / name).unlink()
+    print("bye", os.getpid(), flush=True)
+"""
+
+
+@pytest.fixture
+def fake_daemon(monkeypatch: pytest.MonkeyPatch) -> Iterator[DaemonHarness]:
+    """``system start``·``system stop``을 가짜 데몬으로 바꾼 하네스."""
+    env = DaemonHarness.create()
+    run_dir = env.socket_path.parent
+    run_dir.mkdir()
+    env.token = "t"
+
+    def _argv(*args: str) -> list[str]:
+        return [sys.executable, "-c", textwrap.dedent(_FAKE_DAEMON), str(run_dir)]
+
+    def _cli(*args: str, expect_failure: bool = False) -> dict[str, object]:
+        if args == ("system", "stop"):
+            (run_dir / "stop").touch()
+        return {}
+
+    monkeypatch.setattr(env, "cli_argv", _argv)
+    monkeypatch.setattr(env, "cli", _cli)
+    try:
+        yield env
+    finally:
+        env.cleanup()
+
+
+class TestRestart:
+    def test_restart_appends_log_and_closes_previous_handle(
+        self, fake_daemon: DaemonHarness
+    ) -> None:
+        fake_daemon.start()
+        first_pid = fake_daemon.daemon_pid
+        first_log = fake_daemon._log_file
+        assert first_log is not None
+
+        fake_daemon.restart()
+
+        assert first_log.closed
+        assert fake_daemon._log_file is not None
+        assert fake_daemon._log_file is not first_log
+        assert not fake_daemon._log_file.closed
+        second_pid = fake_daemon.daemon_pid
+        assert second_pid != first_pid
+        assert fake_daemon.stop() == 0
+        lines = fake_daemon.daemon_log_path.read_text().split("\n")
+        assert lines[:4] == [
+            f"boot {first_pid}",
+            f"bye {first_pid}",
+            f"boot {second_pid}",
+            f"bye {second_pid}",
+        ]
+
+    def test_fresh_start_truncates_log(self, fake_daemon: DaemonHarness) -> None:
+        fake_daemon.daemon_log_path.write_text("stale\n")
+        fake_daemon.start()
+        assert fake_daemon.stop() == 0
+        assert "stale" not in fake_daemon.daemon_log_path.read_text()
+
+    def test_start_refuses_while_previous_wrapper_runs(
+        self, fake_daemon: DaemonHarness
+    ) -> None:
+        fake_daemon.start()
+        with pytest.raises(harness.HarnessError, match="아직 끝나지 않았다"):
+            fake_daemon.start(append_log=True)
+        assert fake_daemon.stop() == 0
+
+
+class TestWaitUntil:
+    def test_returns_first_value_that_is_done(self) -> None:
+        values = iter([1, 2, 3, 4])
+        assert (
+            harness.wait_until(
+                lambda: next(values), lambda v: v >= 3, seconds=5, interval=0
+            )
+            == 3
+        )
+
+    def test_returns_last_value_at_deadline(self) -> None:
+        started = time.monotonic()
+        value = harness.wait_until(
+            lambda: 0, lambda v: False, seconds=0.2, interval=0.05
+        )
+        assert value == 0
+        assert 0.2 <= time.monotonic() - started < 2
+
+
 E2E = "tests/e2e/test_virtual_round_trip.py::test_a"
 E2E_B = "tests/e2e/test_virtual_round_trip.py::test_b"
 UNIT = "tests/unit/test_x.py::test_a"
