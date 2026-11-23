@@ -629,12 +629,13 @@ class KISBaseAdapter(BrokerAdapter):
 
         max_retries = self._get_max_retries(url, tr_id)
         timeout = self._timeout_order if tr_id in _ORDER_TR_IDS else self._timeout_query
-        headers = self._get_headers(tr_id)
-        if cont_header:
-            headers["tr_cont"] = cont_header
         last_error: Exception | None = None
 
         for attempt in range(max_retries + 1):
+            await self._ensure_authenticated()
+            headers = self._get_headers(tr_id)
+            if cont_header:
+                headers["tr_cont"] = cont_header
             try:
                 result = await self._send_http(
                     method, url, headers, params, json_data, timeout

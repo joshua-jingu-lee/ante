@@ -289,20 +289,35 @@ def test_start_invalid_nice_value(
 
 @_MODES
 def test_start_invalid_schedule_time(mode: str) -> None:
+    _init('[schedule]\nbackfill_since = "2024-01-01"\ndaily_at = "25:00"\n')
+    loop = AsyncMock()
+    with (
+        patch("ante.feed.cli_scheduler.run_scheduler_loop", loop),
+        patch("ante.cli.commands.feed._build_orchestrator") as build,
+    ):
+        result = _invoke(mode, ["feed", "start", "--data-path", _DATA], _no_nice())
+    _check(
+        mode,
+        result,
+        "CLI_INVALID_SCHEDULE_TIME",
+        "스케줄 시간 설정이 올바르지 않습니다: 잘못된 daily_at 형식: '25:00' "
+        "(zero-padded HH:MM 필요, 예: 16:00)",
+    )
+    loop.assert_not_called()
+    build.assert_not_called()
+
+
+@_MODES
+def test_start_unrelated_value_error_is_not_schedule_error(mode: str) -> None:
     _init()
     result = _invoke(
         mode,
         ["feed", "start", "--data-path", _DATA],
         _no_nice(),
         _orchestrator(_result([])),
-        _scheduler(ValueError("daily_at 형식 오류: '25:00'")),
+        _scheduler(ValueError("boom")),
     )
-    _check(
-        mode,
-        result,
-        "CLI_INVALID_SCHEDULE_TIME",
-        "스케줄 시간 설정이 올바르지 않습니다: daily_at 형식 오류: '25:00'",
-    )
+    _check(mode, result, "EXECUTION_ERROR", "boom")
 
 
 @_MODES

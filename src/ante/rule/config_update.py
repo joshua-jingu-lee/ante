@@ -29,15 +29,33 @@ def item_to_rule_config(
     return cfg
 
 
+def _put_rule_config(
+    raw_rules: list[dict[str, Any]],
+    rule_type: str,
+    enabled: bool | None,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Replace or append the rule of ``rule_type``; ``None`` keeps stored enabled."""
+    for index, cfg in enumerate(raw_rules):
+        if cfg.get("type") == rule_type:
+            kept = cfg.get("enabled", True) if enabled is None else enabled
+            raw_rules[index] = item_to_rule_config(rule_type, kept, params)
+            return raw_rules[index]
+    new_enabled = True if enabled is None else enabled
+    new_config = item_to_rule_config(rule_type, new_enabled, params)
+    raw_rules.append(new_config)
+    return new_config
+
+
 async def update_account_rule_config(
     *,
     account_service: Any,
     dynamic_config: Any,
     account_id: str,
     rule_type: str,
-    enabled: bool,
     params: dict[str, Any],
     changed_by: str,
+    enabled: bool | None = None,
     config: Any | None = None,
     audit_logger: Any | None = None,
 ) -> dict[str, Any]:
@@ -78,13 +96,8 @@ async def update_account_rule_config(
         if isinstance(value, list):
             raw_rules = list(value)
 
-    new_config = item_to_rule_config(rule_type, enabled, params)
-    for index, cfg in enumerate(raw_rules):
-        if cfg.get("type") == rule_type:
-            raw_rules[index] = new_config
-            break
-    else:
-        raw_rules.append(new_config)
+    new_config = _put_rule_config(raw_rules, rule_type, enabled, params)
+    enabled = new_config["enabled"]
 
     await dynamic_config.set(key, raw_rules, category="rule", changed_by=changed_by)
 

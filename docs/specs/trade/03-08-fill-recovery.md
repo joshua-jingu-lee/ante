@@ -70,7 +70,7 @@ DB 트랜잭션으로 수행한다. 빠른 경로(실시간 체결 통보 스트
 quantity, price, commission, order_type, exchange, timestamp) -> bool`:
 
 - 입력: `VirtualExecutor`가 산정한 가상 체결 1건(전량, 수수료 포함). `order_id`가
-  비었거나 `quantity`·`price`가 0 이하면 거부(예외)한다.
+  비었거나 `quantity`·`price`가 유한한 양수가 아니면(0 이하·NaN·무한대) 거부(예외)한다.
 - 멱등: `trade_id`를 내부 `order_id`에서 결정적으로 만들고(UUID5),
   `trades`에 `ON CONFLICT DO NOTHING RETURNING`으로 insert한다. 새 행일 때만
   `PositionHistory.on_trade`를 부르고 `True`, 이미 있으면 `False`를 반환한다.
