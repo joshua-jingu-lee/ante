@@ -211,9 +211,7 @@ class APIGateway:
         self._cache.set(cache_key, data, ttl=60)
         return data
 
-    async def get_current_price(
-        self, symbol: str, *, account_id: str, exchange: str = "KRX"
-    ) -> float:
+    async def get_current_price(self, symbol: str, *, account_id: str) -> float:
         """현재가 조회 (캐시 우선). account_id로 브로커 라우팅.
 
         ``account_id`` required (``require_account_id``).
