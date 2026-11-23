@@ -125,10 +125,7 @@ TTL 기반 응답 캐시. 동일 시세 조회 등 중복 API 호출을 방지�
 
 **브로커 라우팅**:
 
-```python
-def _get_broker(self, account_id: str) -> BrokerAdapter:
-    return self._account_service.get_broker(account_id)
-```
+정의: `ante.gateway.gateway.APIGateway._get_broker` (코드가 정본이다).
 
 **공개 메서드**:
 
