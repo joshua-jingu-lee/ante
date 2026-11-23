@@ -24,6 +24,7 @@ from ante.feed.cli_scheduler import (
     _is_valid_hhmm,
     _validate_schedule_times,
     run_scheduler_loop,
+    validate_schedule,
 )
 
 _KST = timezone(timedelta(hours=9))
@@ -131,6 +132,25 @@ class TestValidateScheduleTimes:
         # 자정跨ぎ window 의 비교 의미 정정은 범위 밖 — 형식만 검증하므로
         # 정상 형식이면 통과한다(별도 이슈).
         _validate_schedule_times("16:00", "01:00", ["23:00-02:00"])
+
+
+class TestValidateSchedule:
+    @pytest.mark.parametrize(
+        "config",
+        [{}, {"guard": "x"}, {"guard": {}}, {"guard": {"blocked_hours": []}}],
+    )
+    def test_passes_without_blocked_hours(self, config: dict[str, Any]) -> None:
+        validate_schedule(config, "16:00", "01:00")
+
+    def test_invalid_blocked_hours_raises(self) -> None:
+        with pytest.raises(ValueError, match="잘못된 blocked_hours 항목: '9:00-15:30'"):
+            validate_schedule(
+                {"guard": {"blocked_hours": ["9:00-15:30"]}}, "16:00", "01:00"
+            )
+
+    def test_invalid_daily_at_raises(self) -> None:
+        with pytest.raises(ValueError, match="잘못된 daily_at 형식: '25:00'"):
+            validate_schedule({}, "25:00", "01:00")
 
 
 # ── run_scheduler_loop 진입 fail-fast ────────────────────────────────────

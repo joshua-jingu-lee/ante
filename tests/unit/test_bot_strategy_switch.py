@@ -521,6 +521,49 @@ class TestFailureAfterStopRollsBack:
         assert (await _next_order(orders, 1)).symbol == "AAA"
 
 
+class _RecordingRules:
+    def __init__(self) -> None:
+        self.removed: list[str] = []
+        self.loaded: list[str] = []
+
+    def remove_strategy_rules(self, strategy_id: str) -> None:
+        self.removed.append(strategy_id)
+
+    def load_strategy_rules_from_config(self, strategy_id: str, configs) -> None:
+        self.loaded.append(strategy_id)
+
+
+class TestAssignWhenOldOnStopFails:
+    """옛 전략의 on_stop 이 실패하면 배정은 중단되고 봇은 정지한다 (#2697)."""
+
+    async def test_assign_stops_bot_removes_old_rules_and_raises(
+        self, manager, ctx, db, orders, strategies, tmp_path
+    ):
+        _, b = strategies
+        failing_source = _probe_source("ProbeF", "strat_f", "AAA").replace(
+            "        type(self).stops += 1\n",
+            "        type(self).stops += 1\n"
+            '        raise RuntimeError("on_stop failed")\n',
+        )
+        f = await _register(db, tmp_path, failing_source, "f")
+        rules = _RecordingRules()
+        manager._rule_engine = rules
+        bot = await _running_on_a(manager, ctx, db, orders, f)
+        old = bot.strategy
+
+        with pytest.raises(RuntimeError) as exc:
+            await manager.assign_strategy("bot1", b)
+
+        assert type(exc.value) is RuntimeError
+        assert str(exc.value) == "on_stop failed"
+        assert type(old).stops == 1
+        assert bot.status == BotStatus.STOPPED
+        _assert_bound(bot, f, "strat_f")
+        assert bot.strategy is old
+        assert rules.removed == [f]
+        assert await _db_strategy_ids(db) == (f, f)
+
+
 def _assert_bound(bot, strategy_id: str, name: str) -> None:
     assert bot.config.strategy_id == strategy_id
     assert bot._bound_strategy_id == strategy_id

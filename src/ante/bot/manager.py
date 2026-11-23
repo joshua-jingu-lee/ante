@@ -537,8 +537,7 @@ class BotManager:
         was_running = bot.status == BotStatus.RUNNING
 
         if was_running:
-            await bot.stop()
-            self._remove_strategy_rules(bot.config.strategy_id)
+            await self._stop_and_remove_rules(bot)
 
         await self._rebind_and_save(bot, strategy_id, strategy_cls)
 
@@ -631,8 +630,7 @@ class BotManager:
             )
         if suppress_notification:
             self._suppress_notification_bot_ids.add(bot_id)
-        await bot.stop()
-        self._remove_strategy_rules(bot.config.strategy_id)
+        await self._stop_and_remove_rules(bot)
 
     async def delete_bot(
         self,
@@ -933,6 +931,13 @@ class BotManager:
             return
         self._rule_engine.remove_strategy_rules(strategy_id)
 
+    async def _stop_and_remove_rules(self, bot: Bot) -> None:
+        """봇을 중지하고, 중지가 예외를 내도 전략별 룰을 제거한다."""
+        try:
+            await bot.stop()
+        finally:
+            self._remove_strategy_rules(bot.config.strategy_id)
+
     async def _on_bot_stop_request(self, event: object) -> None:
         """BotStopEvent 수신 시 해당 봇 중지."""
         from ante.eventbus.events import BotStopEvent
@@ -955,7 +960,14 @@ class BotManager:
         stopped = []
         for bot in list(self._bots.values()):
             if bot.config.account_id == account_id and bot.status == BotStatus.RUNNING:
-                await bot.stop()
+                try:
+                    await bot.stop()
+                except Exception:
+                    logger.exception(
+                        "계좌 정지 — 봇 중지 중 예외: account=%s, bot=%s",
+                        account_id,
+                        bot.bot_id,
+                    )
                 stopped.append(bot.bot_id)
         if stopped:
             logger.warning(

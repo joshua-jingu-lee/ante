@@ -3009,16 +3009,17 @@ class TestBotOrderGateAfterStop:
         await asyncio.wait_for(eventbus.publish(_gen_signal("sig-C")), timeout=5.0)
         assert [e.reason for e, _ in orders] == ["sig-C"]
 
-    async def test_failing_self_stop_after_signal_overflow_goes_to_error(
+    async def test_failing_self_stop_after_signal_overflow_goes_to_stopped(
         self, eventbus, ctx, monkeypatch
     ):
-        """초과로 스스로 정지하다 on_stop 이 실패하면 봇은 ERROR 가 된다."""
+        """초과로 스스로 정지하다 on_stop 이 실패해도 봇은 STOPPED 가 된다 (#2697)."""
 
         async def yielding_sleep(delay: float) -> None:
             await _real_sleep(0 if delay == 17 else delay)
 
         monkeypatch.setattr("ante.bot.bot.asyncio.sleep", yielding_sleep)
         errors = _collect(eventbus, BotErrorEvent)
+        stops = _collect(eventbus, BotStoppedEvent)
         orders = _collect(eventbus, OrderRequestEvent)
         bot = Bot(
             config=BotConfig(
@@ -3035,11 +3036,17 @@ class TestBotOrderGateAfterStop:
         await bot.start()
         loop = bot._task
         assert loop is not None
-        await asyncio.wait_for(loop, timeout=5.0)
+        await asyncio.wait({loop}, timeout=5.0)
 
-        assert bot.status == BotStatus.ERROR
-        assert bot.error_message == "on_stop failed"
-        assert [e.error_message for e, _ in errors][-1] == "on_stop failed"
+        assert loop.done()
+        assert bot.status == BotStatus.STOPPED
+        assert bot.error_message is None
+        assert [e.error_message for e, _ in errors] == [
+            "Signal count exceeded: 2 > 1",
+            "Signal count exceeded: 2 > 1",
+            "Signal count exceeded: 2 > 1",
+        ]
+        assert [type(e).__name__ for e, _ in stops] == ["BotStoppedEvent"]
         assert orders == []
 
     async def test_on_data_finishing_while_stop_waits_for_loop_is_dropped(
@@ -3192,7 +3199,7 @@ class TestBotOrderGateAfterStop:
 
         with pytest.raises(RuntimeError, match="on_stop failed"):
             await asyncio.wait_for(bot.stop(), timeout=5.0)
-        assert bot.status == BotStatus.STOPPING
+        assert bot.status == BotStatus.STOPPED
 
         strategy_cls.hold_data["sig-A"].set()
         await asyncio.wait_for(publisher, timeout=5.0)

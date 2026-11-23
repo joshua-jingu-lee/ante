@@ -287,6 +287,29 @@ class TestSniffPriority:
         # None args → ``sys.argv[1:]`` fallback (간접 검증: 빈 list 와 동일 결과 보장).
         assert AuthenticatedGroup._sniff_output_format([]) == "text"
 
+    def test_sniff_stops_at_first_dashdash(self) -> None:
+        """``--`` 뒤의 ``--format`` 은 Click 처럼 위치 인자로 보고 읽지 않는다."""
+        sniff = AuthenticatedGroup._sniff_output_format
+        assert sniff(["account", "info", "--", "--format", "json"]) == "text"
+        assert sniff(["account", "info", "--", "--format=json"]) == "text"
+        assert (
+            sniff(["--format", "json", "account", "info", "--", "--format", "text"])
+            == "json"
+        )
+        assert sniff(["account", "info", "--format", "--"]) == "--"
+
+    def test_known_limit_group_level_dashdash_differs_from_click(self) -> None:
+        """알려진 한계: 그룹 단계 ``--`` 뒤의 leaf ``--format`` 을 Click 은 읽는다."""
+        sniff = AuthenticatedGroup._sniff_output_format
+        assert sniff(["--", "account", "list", "--format", "json"]) == "text"
+        assert sniff(["account", "--", "list", "--format", "json"]) == "text"
+
+    def test_known_limit_option_value_slot_differs_from_click(self) -> None:
+        """알려진 한계: Click 은 옵션 값 자리의 ``--format``·``--`` 를 값으로 먹는다."""
+        sniff = AuthenticatedGroup._sniff_output_format
+        assert sniff(["--config-dir", "--format", "json", "account", "list"]) == "json"
+        assert sniff(["bot", "create", "--name", "--", "--format", "json"]) == "text"
+
     def test_subcommand_format_text_overrides_root_format_json(
         self, runner: CliRunner
     ) -> None:

@@ -11,8 +11,10 @@
 - ``stopped``: ``start_bot`` 뒤 ``stop_bot``
 - ``error``: ``on_step`` 이 실패하는 전략으로 ``start_bot`` 하고 실행 루프가
   끝나기를 기다린다(``auto_restart=False`` 라 재시작 태스크가 생기지 않는다)
-- ``stopping``: ``on_stop`` 이 실패하는 전략으로 ``start_bot`` 뒤 ``stop_bot``
-  (그 호출은 전략의 예외를 그대로 올리고 상태가 ``stopping`` 에 남는다)
+- ``stopping``: ``start_bot`` 으로 실행 중인 봇(루프 태스크와 전략이 살아 있다)의
+  상태만 ``stopping`` 으로 직접 대입한다. 공개 API로는 닿지 않는다(#2697: ``on_stop``
+  이 실패해도 정지는 ``stopped`` 로 끝난다). DB의 오래된 행과 정지가 취소되는 경로가
+  아직 이 상태에 닿는다
 - ``deleted``: ``delete_bot`` 뒤의 객체
 
 실행 루프의 대기는 ``ante.bot.bot`` 의 ``asyncio.sleep`` 을 대역으로 바꿔 실제
@@ -29,6 +31,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -45,6 +48,7 @@ from ante.bot.manager import BOT_SCHEMA
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
+    AccountSuspendedEvent,
     BotErrorEvent,
     BotStartedEvent,
     BotStepCompletedEvent,
@@ -199,6 +203,11 @@ async def db(tmp_path: Path) -> AsyncIterator[Database]:
 async def _drain(bots: list[Bot], tasks: list[asyncio.Task[None]]) -> None:
     pending = [t for t in tasks if not t.done()]
     pending += [b._task for b in bots if b._task is not None and not b._task.done()]
+    pending += [
+        t
+        for t in asyncio.all_tasks()
+        if t.get_name().startswith("bot_") and not t.done() and t not in pending
+    ]
     for task in pending:
         task.cancel()
     if pending:
@@ -264,10 +273,11 @@ async def _enter(manager: BotManager, ctx: StrategyContext, prior: str) -> Bot:
         await _wait_loop(bot)
         return bot
     if prior == "stopping":
-        bot = await _create(manager, ctx, _FailingStop)
+        bot = await _create(manager, ctx)
         await manager.start_bot(BOT_ID)
-        with pytest.raises(RuntimeError, match="^on_stop failed$"):
-            await manager.stop_bot(BOT_ID)
+        assert bot._task is not None and not bot._task.done()
+        assert bot.strategy is not None
+        bot.status = BotStatus.STOPPING
         return bot
     if prior == "deleted":
         bot = await _create(manager, ctx)
@@ -577,9 +587,7 @@ async def test_consecutive_signal_overflow_moves_to_stopped(eventbus, ctx, loop_
     ]
 
 
-async def test_failing_self_stop_moves_from_stopping_to_error(
-    eventbus, ctx, loop_events
-):
+async def test_failing_self_stop_moves_to_stopped(eventbus, ctx, loop_events, caplog):
     bot = _bot(eventbus, ctx, _OverflowFailingStop, max_signals_per_step=1)
     seen: list[str] = []
 
@@ -587,14 +595,93 @@ async def test_failing_self_stop_moves_from_stopping_to_error(
         seen.append(bot.status.value)
 
     eventbus.subscribe(BotErrorEvent, record_status)
-    await bot.start()
-    await _wait_loop(bot)
+    with caplog.at_level(logging.WARNING, logger="ante.bot.bot"):
+        await bot.start()
+        assert bot._task is not None
+        await asyncio.wait({bot._task}, timeout=5.0)
 
-    assert bot.status.value == "error"
-    assert bot.error_message == "on_stop failed"
-    assert seen == ["running", "running", "running", "error"]
-    assert loop_events[-2:] == ["BotStepCompletedEvent", "BotErrorEvent"]
-    assert "BotStoppedEvent" not in loop_events
+    assert bot._task.done()
+    assert bot.status.value == "stopped"
+    assert bot.stopped_at is not None
+    assert bot.error_message is None
+    assert bot.strategy is not None
+    assert bot.strategy.stop_calls == 1  # type: ignore[attr-defined]
+    assert seen == ["running", "running", "running"]
+    assert loop_events == [
+        "BotStartedEvent",
+        "BotStepCompletedEvent",
+        "BotErrorEvent",
+        "BotStepCompletedEvent",
+        "BotErrorEvent",
+        "BotStepCompletedEvent",
+        "BotErrorEvent",
+        "BotStoppedEvent",
+    ]
+    logged = [(r.levelname, r.getMessage()) for r in caplog.records]
+    assert ("ERROR", "on_stop 실패 — 정지는 마친다: bot-2699") in logged
+    assert (
+        "WARNING",
+        "루프 예외 무시: 봇 bot-2699 상태 stopped (정지 완료) — on_stop failed",
+    ) in logged
+    assert all(m != "봇 오류: bot-2699" for _, m in logged)
+
+
+# ── 정지의 on_stop 실패 (#2697) ─────────────────────────────────
+
+
+class _RecordingRules:
+    def __init__(self) -> None:
+        self.removed: list[str] = []
+
+    def remove_strategy_rules(self, strategy_id: str) -> None:
+        self.removed.append(strategy_id)
+
+
+async def test_stop_bot_finishes_stop_when_on_stop_fails(manager, ctx, events, db):
+    rules = _RecordingRules()
+    manager._rule_engine = rules
+    bot = await _create(manager, ctx, _FailingStop)
+    await manager.start_bot(BOT_ID)
+    before = len(events)
+
+    with pytest.raises(RuntimeError) as exc:
+        await manager.stop_bot(BOT_ID)
+
+    assert type(exc.value) is RuntimeError
+    assert str(exc.value) == "on_stop failed"
+    assert bot.status.value == "stopped"
+    assert bot.stopped_at is not None
+    assert bot.error_message is None
+    assert bot.strategy is not None
+    assert bot.strategy.stop_calls == 1  # type: ignore[attr-defined]
+    assert events[before:] == ["BotStoppedEvent"]
+    assert rules.removed == ["strat-bot-2699"]
+    assert await _db_status(db) == "created"
+
+    with pytest.raises(BotStateConflict) as again:
+        await manager.stop_bot(BOT_ID)
+    assert type(again.value) is BotStateConflict
+    assert str(again.value) == "중지할 수 없는 상태입니다: bot-2699 (현재: stopped)"
+    assert rules.removed == ["strat-bot-2699"]
+
+    assert await manager.resume_bot(BOT_ID) is None
+    assert bot.status.value == "running"
+
+
+async def test_account_suspension_stops_every_bot_when_one_on_stop_fails(
+    manager, ctx, events
+):
+    failing = await _create(manager, ctx, _FailingStop, bot_id="bot-a")
+    steady = await _create(manager, ctx, _Steady, bot_id="bot-b")
+    await manager.start_bot("bot-a")
+    await manager.start_bot("bot-b")
+    before = len(events)
+
+    await manager._on_account_suspended(AccountSuspendedEvent(account_id="acc-test"))
+
+    assert failing.status.value == "stopped"
+    assert steady.status.value == "stopped"
+    assert events[before:] == ["BotStoppedEvent", "BotStoppedEvent"]
 
 
 # ── 복원과 cold-path ────────────────────────────────────────────
