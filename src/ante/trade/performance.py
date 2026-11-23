@@ -307,15 +307,7 @@ class PerformanceTracker:
         pnl_list: list[float],
         bot_allocated_budget: float = 0.0,
     ) -> tuple[float, float]:
-        """MDD 계산. equity curve (할당 예산 + 누적 PnL) 기반 고점 대비 최대 하락.
-
-        Args:
-            pnl_list: 거래별 실현 손익 리스트
-            bot_allocated_budget: 봇에 할당된 예산 (equity curve 기준점)
-
-        Returns:
-            (비율, 금액) 튜플. 비율 = (Peak - Trough) / Peak
-        """
+        """MDD를 (비율, 금액) 튜플로 계산한다."""
         if not pnl_list:
             return 0.0, 0.0
 
@@ -395,11 +387,7 @@ class PerformanceTracker:
         sell_trades: list[TradeRecord],
         bot_id: str | None,
     ) -> list[float]:
-        """매도 거래별 실현 손익 계산.
-
-        position_history의 pnl 데이터를 활용하되,
-        간단하게 (매도가 - 매입가) * 수량 - 수수료로 계산.
-        """
+        """매도 거래별 실현 손익(position_history pnl, 행이 없으면 -수수료 또는 0.0)."""
         pnl_list: list[float] = []
         for trade in sell_trades:
             try:

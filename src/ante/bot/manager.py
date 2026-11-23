@@ -87,16 +87,7 @@ def _runtime_control_default(name: str) -> Any:
 
 
 def _pick_persisted_runtime_control(config_data: dict[str, Any], name: str) -> Any:
-    """``config_json`` payload 에서 runtime control 값을 안전하게 꺼낸다.
-
-    - key 가 없으면 :func:`_runtime_control_default` 로 dataclass default 복원
-      (missing legacy row 호환).
-    - key 가 있지만 값이 ``None`` 이면 ``ValueError`` 로 거부 — explicit null
-      은 데이터 손상으로 간주하고 ``load_from_db`` 의 ``except ValueError``
-      가 row 자체를 skip + warning 처리한다.
-
-    ``auto_restart`` (bool) 와 숫자 필드 모두 동일 경로로 처리한다.
-    """
+    """``config_json`` runtime control 값(key 없으면 default, null이면 ValueError)."""
 
     if name not in config_data:
         return _runtime_control_default(name)

@@ -360,23 +360,7 @@ class BackfillRunner:
 
     @staticmethod
     def _drain_store_warnings(store: ParquetStore, ctx: _RunContext) -> bool:
-        """store의 pending 경고를 즉시 drain해 ctx.warnings로 옮기고,
-
-        이번 drain에 ``store_merge`` (파티션 merge 실패 → 기존 파일 보존, 데이터
-        미반영) 경고가 있었는지 반환한다(R1).
-
-        checkpoint save 직전에 호출해야 한다 — collect/write 직후 drain해야 이번
-        날짜에서 발생한 store-merge 실패를 정확히 귀속할 수 있다(지연 drain이면
-        실패 날짜가 이미 checkpoint를 전진시킨 뒤가 된다).
-
-        반환값은 ctx 측 경고 절단과 **무관**하다 — ``drained`` 전수를
-        먼저 검사한 뒤 ctx에 적재하며, ``add_warnings`` 는 입력 리스트를
-        변형하지 않는다(결정 6). 절단된 ``store_merge`` 도 checkpoint 미전진을
-        정확히 유발한다.
-
-        Returns:
-            이번 drain에 ``type == "store_merge"`` 경고가 하나라도 있었으면 True.
-        """
+        """checkpoint save 직전에 경고를 ctx로 drain하고 store_merge 유무를 반환한다."""
         drained = store.drain_warnings()
         store_merge_failed = any(w.get("type") == "store_merge" for w in drained)
         if drained:

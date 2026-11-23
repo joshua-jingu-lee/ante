@@ -2,35 +2,9 @@
   "comments": {},
   "docstring_history": {},
   "docstring_excess": {
-    "src/ante/approval/handlers.py": 6,
-    "src/ante/bot/context_factory.py": 8,
-    "src/ante/bot/manager.py": 9,
-    "src/ante/bot/reconcile_scheduler.py": 10,
-    "src/ante/broker/kis.py": 30,
-    "src/ante/broker/kis_stream.py": 4,
-    "src/ante/broker/test.py": 3,
-    "src/ante/cli/commands/bot.py": 28,
-    "src/ante/cli/commands/broker.py": 10,
-    "src/ante/cli/commands/config.py": 21,
-    "src/ante/cli/commands/member.py": 25,
-    "src/ante/cli/middleware.py": 57,
-    "src/ante/contracts/error_registry.py": 4,
-    "src/ante/core/market_data_vocab.py": 23,
-    "src/ante/feed/pipeline/backfill_runner.py": 16,
-    "src/ante/gateway/gateway.py": 11,
-    "src/ante/gateway/stop_order.py": 12,
-    "src/ante/gateway/stream_integration.py": 15,
     "src/ante/ipc/registry.py": 15,
-    "src/ante/ipc/server.py": 4,
     "src/ante/main.py": 130,
-    "src/ante/rule/engine.py": 47,
-    "src/ante/rule/global_rules.py": 8,
-    "src/ante/strategy/validator.py": 71,
-    "src/ante/trade/fill_applier.py": 17,
-    "src/ante/trade/order_tracker.py": 1,
-    "src/ante/trade/performance.py": 12,
-    "src/ante/trade/reconciler.py": 6,
-    "src/ante/treasury/treasury.py": 36
+    "src/ante/trade/fill_applier.py": 17
   },
-  "docstring_lines": 6595
+  "docstring_lines": 6107
 }

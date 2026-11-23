@@ -40,17 +40,7 @@ async def _create_account_service() -> tuple[Any, Any]:
 
 
 async def _get_broker(account_id: str | None = None) -> tuple[Any, Any]:
-    """AccountService를 통해 브로커 어댑터를 획득한다.
-
-    account_id가 None이면 기존 Config 기반 폴백을 사용한다.
-
-    ``account_id`` 분기에서 ``account_service.get_broker`` 또는
-    ``adapter.connect`` 가 raise 하면, 호출자에 ``db`` 핸들이 전달되지 않으므로
-    여기서 ``db.close()`` 를 보장해야 한다. close 를 누락하면 aiosqlite
-    백그라운드 스레드가 살아 있어 ``asyncio.run`` 종료 후에도 프로세스가
-    수 초간 hang 한다. lifecycle 보장 — 정상 경로의 close 는 호출자
-    (``_run_balance`` 등) 가 계속 책임진다.
-    """
+    """브로커 어댑터와 db(Config 기반이면 None) 획득. 받은 db는 호출자가 close."""
     if account_id:
         account_service, db = await _create_account_service()
         try:

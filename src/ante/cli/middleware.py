@@ -145,24 +145,7 @@ def _emit_command_result(ctx: click.Context, rv: object) -> None:
 
 
 def _get_invoked_command_path(ctx: click.Context) -> tuple[str, ...] | None:
-    """호출된 서브커맨드의 전체 경로 tuple을 반환.
-
-    `ante init` → ("init",)
-    `ante member list` → ("member", "list")
-    `ante member reset-password` → ("member", "reset-password")
-    `ante feed init` → ("feed", "init")
-
-    Click 8.x의 `Group.invoke`는 root 콜백이 실행되기 직전에
-    `ctx.protected_args`/`ctx.args`를 비운다 (core.py:1680-1682). 따라서
-    root 콜백 시점에 `ctx.invoked_subcommand`는 1단계 서브커맨드 이름만
-    담고 있고, `ctx.args`/`ctx.protected_args`도 비어 있어 nested
-    subcommand path를 직접 추출할 수 없다.
-
-    대신 루트 그룹을 `LeafAwareGroup`(main.py)로 설정해, `invoke()`의
-    `super().invoke(ctx)` 호출 **전에** 전체 커맨드 경로를 tuple로
-    `ctx.obj["_leaf_command_path"]`에 저장한다. 이 값이 있으면 우선 사용하고,
-    없으면 `ctx.invoked_subcommand`로 부분 fallback한다.
-    """
+    """호출된 서브커맨드 경로 tuple(``_leaf_command_path`` 가 없으면 1단계만)."""
     obj = getattr(ctx, "obj", None)
     if isinstance(obj, dict):
         path = obj.get("_leaf_command_path")
@@ -351,53 +334,13 @@ class _LeafPathMixin(click.Group):
 class AuthenticatedGroup(_LeafPathMixin):
     """default-deny 인증 게이트가 자동으로 부착되는 ``click.Group``.
 
-    정책 SSOT:
+    정책 SSOT: D-015, ``cli/02-design-decisions.md``, ``cli/03-commands.md``(allowlist).
 
-    - `D-015 default-deny 인증 게이트 <../decisions/D-015-default-deny-auth-gate.md>`_
-    - `cli/02-design-decisions.md — default-deny CLI 인증 게이트`
-    - `cli/03-commands.md — 공개 명령 allowlist`
-
-    동작:
-
-    1. **invoke 단계 가드 (primary, H2 강화)**:
-       ``Group.invoke(ctx)`` 진입 직후 ``super().invoke(ctx)`` 호출 **전에**
-       인증 가드를 발화시킨다. click 8.1의 ``MultiCommand.invoke``는 자식
-       명령의 ``make_context``(=``parse_args``)를 ``super().invoke(ctx)`` 내부
-       에서 호출하므로, 가드를 ``super().invoke(ctx)`` 직전에 두면 자식
-       명령의 type/argument validation(예: ``click.Path(exists=True)``)이
-       발화하기 **전에** 인증 검사가 끝난다. 미인증 사용자는 어떤 형태의
-       parameter validation 응답도 받을 수 없다.
-
-       단, 다음 경로는 invoke 단계 가드를 skip한다:
-
-       - ``ctx.resilient_parsing == True``: shell completion 등 부작용 없는
-         파싱.
-       - args 토큰열에 ``--help`` / ``-h`` 메타 옵션이 포함되어 있고, 그
-         토큰이 ``--`` separator **앞**에 있는 경우 (click이 도움말로 처리해
-         callback에 도달하지 않으므로 H1 invariant 만족).
-       - ``--version`` 은 root ``@click.version_option`` 이 root callback 진입
-         이전에 ``ctx.exit()`` 시키므로 ``ante --version`` 만 면제되고, nested
-         위치(``ante bot list --version`` 등) 는 invoke 단계 가드가 정상
-         발화한다.
-       - 경로 해석이 leaf command까지 도달하지 못한 경우(=group으로 끝남):
-         click이 ``no_args_is_help`` 또는 ``Missing command`` 처리로
-         callback에 도달하지 않는다.
-       - 경로가 ``_AUTH_EXEMPT_COMMAND_PATHS`` allowlist에 포함되는 경우.
-
-    2. **callback 단계 가드 (secondary, 이중 방어)**:
-       :meth:`add_command`에서 자식 ``click.Command``의 ``callback``을
-       ``_wrap_callback_with_auth``로 감싼다. invoke 단계 가드가 어떤
-       이유로든 발화하지 못해도 callback 진입 직전에 같은 정책이 발화한다.
-       두 가드는 idempotent(sentinel marker로 dedupe)하므로
-       ``authenticate_member`` 가 한 번만 실행된다.
-
-    3. ``ante <cmd> -- --help``처럼 ``--`` 이후 위치 인자로 들어간 ``--help``는
-       click이 도움말로 해석하지 않으므로 invoke 단계에서 default-deny가
-       발화한다 — H2 invariant 만족.
-
-    자식 group이 같은 정책 클래스를 상속하지 않더라도, leaf callback wrapping은
-    ``Group.add_command``/``Group.command`` decorator 양쪽에서 자동으로 이뤄지므로
-    nested sub-group의 leaf까지 default-deny가 도달한다.
+    1. invoke 단계 가드(primary): ``super().invoke(ctx)`` 호출 **전에** 발화해 자식
+       명령의 parameter validation보다 먼저 인증 검사를 끝낸다. resilient parsing,
+       ``--`` 앞의 ``--help``/``-h``, leaf 미도달 경로, allowlist 경로는 skip한다.
+    2. callback 단계 가드(secondary): :meth:`add_command` 가 nested sub-group의
+       leaf까지 callback을 감싼다. 두 가드는 idempotent하다.
     """
 
     def invoke(self, ctx: click.Context) -> object:

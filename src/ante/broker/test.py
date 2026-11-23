@@ -255,7 +255,7 @@ class TestBrokerAdapter(BrokerAdapter):
     ) -> dict[str, float]:
         """매수가능 조회 — 보유 현금(``cash``) 기반 가상 산정.
 
-        브로커 호출 없이 보유 현금으로 산정한다. 시장가/``price=None``이면 내부
+        브로커 호출 없이 보유 현금으로 산정한다. ``price=None``이면 내부
         시뮬레이션 가격을 단가로 사용하며, 단가 0이면 수량은 0.0이다.
         """
         cash = self._cash
@@ -500,10 +500,7 @@ class TestBrokerAdapter(BrokerAdapter):
         return tick_round(slipped)
 
     def _calculate_fill_quantity(self, quantity: float) -> float:
-        """부분 체결 수량 계산.
-
-        대량 주문(>= 100주) 시 30% 확률로 부분 체결 발생.
-        """
+        """체결 수량 계산(100주 이상은 30% 확률로 부분 체결, 그 밖에는 전량)."""
         if quantity >= _PARTIAL_FILL_THRESHOLD:
             if self._rng.random() < _PARTIAL_FILL_PROBABILITY:
                 ratio = self._rng.uniform(

@@ -198,7 +198,9 @@ class OrderTracker:
     """추적 주문 영속 저장소 + 누적 체결 단조 advance.
 
     ``record_fill`` 은 ``FillApplier`` 의 단일 트랜잭션 + ``asyncio.Lock`` 안에서만
-    호출되어야 한다 (멱등·crash 원자성은 FillApplier 가 보장).
+    호출되어야 한다 (멱등·crash 원자성은 FillApplier 가 보장). ``open``/
+    ``mark_terminal``/``expire_stale`` 는 자체 commit 을 소유한다 — 외부
+    ``Database.transaction()`` 내부에서 호출하지 않는다.
 
     인메모리 open 캐시: LIVE ``ctx.get_open_orders()`` 의 sync 백엔드.
     캐시는 **commit 된 DB 상태의 미러**일 뿐 진리원이 아니다(DB 가 SSOT).
@@ -264,6 +266,8 @@ class OrderTracker:
         order_id PK 재제출(중복 이벤트)은 무시한다 (``ON CONFLICT DO NOTHING``).
         같은 ``(account_id, broker_order_id, submitted_date)`` UNIQUE 충돌도
         동일하게 무시되어 seed 멱등성을 보장한다.
+
+        **외부 ``Database.transaction()`` 안에서 호출 금지(자체 commit 소유)**.
         """
         validated = require_account_id(account_id, context="order_tracker.open")
         inserted = await self._db.execute_fetch_one(
@@ -579,16 +583,12 @@ class OrderTracker:
         return OrderTrackerRecord.from_row(row) if row else None
 
     async def expire_stale(self, account_id: str, before_date: str) -> int:
-        """``submitted_date < before_date`` 인 **genuinely-dead** ``open`` 만
-        ``expired`` 표기.
+        """``submitted_date < before_date`` 인 ``open`` 주문을 ``expired`` 로 표기한다.
 
-        spec §8: EOD 경과 open 중 **history 체결이 관측되지 않은** genuinely-dead
-        주문(pending 에도 없음)만 만료한다. 부분 체결(``partially_filled``)은
-        체결이 관측·진행 중이므로 만료 대상이 **아니다** — ``open`` 상태만
-        만료한다(I2). fill-recovery 가 poll-first 로 다운타임 체결을 먼저 복구하면
-        해당 주문은 ``filled``/``partially_filled`` 로 전이되어 자연히 이 만료에서
-        제외된다. 이로써 일중 미체결 주문의 무한 폴·phantom pending 은 막되, 미복구
-        체결분을 영구 만료/오분류하지 않는다(I7). 만료 건수를 반환한다.
+        spec §8: 부분 체결(``partially_filled``)은 만료 대상이 **아니다** — ``open``
+        상태만 만료한다(I2). fill-recovery 가 poll-first 로 다운타임 체결을 먼저
+        복구하면 해당 주문은 ``filled``/``partially_filled`` 로 전이되어 자연히 이
+        만료에서 제외된다. 만료 건수를 반환한다.
         """
         validated = require_account_id(account_id, context="order_tracker.expire_stale")
         expired = await self._db.execute_fetch_all(

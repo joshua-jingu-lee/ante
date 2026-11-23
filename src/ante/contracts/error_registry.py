@@ -1225,10 +1225,6 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     GuardPermanentlyBlockedError: _GUARD_PERMANENTLY_BLOCKED_SPEC,
     ModifyOrgnoUnavailableError: _BROKER_MODIFY_ORGNO_UNAVAILABLE_SPEC,
 }
-"""대표 fault lock registry (normative 4건).
-
-``error_spec_for_exception(exc)`` 는 ``type(exc).__mro__`` 순서로 본 dict를
-조회하여 첫 매치 ErrorSpec을 반환한다. registry miss 시 helper 는
-``getattr(exc, "code", None)`` 활용 → ``EXECUTION_ERROR`` fallback 순서로
-resolve 한다.
-"""
+"""fault lock registry. ``error_spec_for_exception(exc)`` 는 ``type(exc).__mro__``
+순서로 본 dict를 조회하여 첫 매치 ErrorSpec을 반환한다. registry miss 시 helper 는
+``getattr(exc, "code", None)`` → ``EXECUTION_ERROR`` fallback 순서로 resolve 한다."""

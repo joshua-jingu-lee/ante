@@ -266,11 +266,7 @@ class KISStreamClient:
         await self._handle_pipe_data(raw)
 
     async def _handle_pipe_data(self, raw: str) -> None:
-        """파이프(|) 구분 실시간 시세 데이터 처리.
-
-        KIS WebSocket 시세 데이터 형식:
-        0|H0STCNT0|004|005930^...^현재가^...
-        """
+        """파이프(|) 구분 실시간 데이터 처리(시세 H0STCNT0·체결 통보 H0STCNI0)."""
         parts = raw.split("|")
         if len(parts) < 4:
             return
