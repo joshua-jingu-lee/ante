@@ -310,6 +310,136 @@ class TestStartStop:
         await scheduler.stop()  # 예외 없이 완료
 
 
+# ── #2679 start() 겹침·시작 중 정지 가드 ────────────────
+
+
+def _live_loops() -> list[asyncio.Task]:
+    return [
+        t
+        for t in asyncio.all_tasks()
+        if t.get_name() == "reconcile-scheduler" and not t.done()
+    ]
+
+
+async def _cancel_live_loops() -> None:
+    for t in _live_loops():
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
+
+
+class TestStartGuard:
+    """초기 대사(await) 동안의 겹친 start()·stop()이 루프를 남기지 않는다 (#2679)."""
+
+    @pytest.fixture
+    def gate(self, reconciler):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _blocking_reconcile(**kwargs):
+            entered.set()
+            await release.wait()
+            return []
+
+        reconciler.reconcile.side_effect = _blocking_reconcile
+        return entered, release
+
+    @pytest.fixture
+    def slow_scheduler(self, reconciler, broker, bot_manager, eventbus):
+        return ReconcileScheduler(
+            reconciler=reconciler,
+            broker=broker,
+            bot_manager=bot_manager,
+            eventbus=eventbus,
+            broker_account_id="acc-test",
+            interval_seconds=3600,
+        )
+
+    async def test_overlapping_start_creates_single_loop(
+        self, slow_scheduler, reconciler, gate
+    ):
+        entered, release = gate
+        try:
+            first = asyncio.create_task(slow_scheduler.start())
+            await entered.wait()
+            second = asyncio.create_task(slow_scheduler.start())
+            await asyncio.sleep(0)
+            release.set()
+            await asyncio.gather(first, second)
+
+            assert len(_live_loops()) == 1
+            assert reconciler.reconcile.call_count == 1
+
+            await slow_scheduler.stop()
+            assert _live_loops() == []
+        finally:
+            await _cancel_live_loops()
+
+    async def test_stop_during_start_leaves_no_loop_and_allows_restart(
+        self, slow_scheduler, gate
+    ):
+        entered, release = gate
+        try:
+            starting = asyncio.create_task(slow_scheduler.start())
+            await entered.wait()
+            await slow_scheduler.stop()
+            release.set()
+            await starting
+
+            assert _live_loops() == []
+
+            await slow_scheduler.start()
+            assert len(_live_loops()) == 1
+
+            await slow_scheduler.stop()
+            assert _live_loops() == []
+        finally:
+            await _cancel_live_loops()
+
+    async def test_start_failure_releases_guard(
+        self, slow_scheduler, reconciler, bot_manager
+    ):
+        bots = bot_manager.list_bots.return_value
+        bot_manager.list_bots.side_effect = RuntimeError("boom")
+        try:
+            with pytest.raises(RuntimeError, match="boom"):
+                await slow_scheduler.start()
+            assert _live_loops() == []
+
+            bot_manager.list_bots.side_effect = None
+            bot_manager.list_bots.return_value = bots
+            await slow_scheduler.start()
+
+            assert reconciler.reconcile.call_count == 1
+            assert len(_live_loops()) == 1
+            await slow_scheduler.stop()
+        finally:
+            await _cancel_live_loops()
+
+    async def test_cancelled_start_releases_guard(
+        self, slow_scheduler, reconciler, gate
+    ):
+        entered, release = gate
+        try:
+            starting = asyncio.create_task(slow_scheduler.start())
+            await entered.wait()
+            starting.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await starting
+            assert _live_loops() == []
+
+            release.set()
+            await slow_scheduler.start()
+
+            assert reconciler.reconcile.call_count == 2
+            assert len(_live_loops()) == 1
+            await slow_scheduler.stop()
+        finally:
+            await _cancel_live_loops()
+
+
 # ── 설정 테스트 ──────────────────────────────────────
 
 
@@ -423,6 +553,12 @@ class TestBrokerAccountScoping:
             "WARNING 메시지에 scheduler의 broker_account_id(acc-A)가 포함돼야 한다"
         )
         assert {rec.name for rec in skip_logs} == {ReconcileScheduler.__module__}
+        for rec in skip_logs:
+            message = rec.getMessage()
+            assert "SPLIT-3" not in message
+            assert "bot-b" in message
+            assert "acc-B" in message
+            assert "acc-A" in message
 
     async def test_scheduler_other_account_bots_excluded_from_count(
         self, reconciler, broker, bot_manager, eventbus

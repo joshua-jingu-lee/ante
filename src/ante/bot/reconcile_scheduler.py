@@ -51,18 +51,29 @@ class ReconcileScheduler:
         self._interval = interval_seconds
         self._skip_initial_external_buy = skip_initial_external_buy
         self._task: asyncio.Task[None] | None = None
+        self._starting = False
+        self._stop_requested = False
 
     async def start(self) -> None:
         """대사 스케줄러를 시작한다. 시작 즉시 1회 대사를 수행한다."""
-        if self._task and not self._task.done():
+        if self._starting or (self._task and not self._task.done()):
             logger.warning("ReconcileScheduler 이미 실행 중")
             return
 
+        self._starting = True
+        self._stop_requested = False
         logger.info(
             "ReconcileScheduler 시작 (주기: %d초)",
             int(self._interval),
         )
-        await self.run_once(skip_external_buy=self._skip_initial_external_buy)
+        try:
+            await self.run_once(skip_external_buy=self._skip_initial_external_buy)
+        finally:
+            self._starting = False
+        if self._stop_requested:
+            self._stop_requested = False
+            logger.info("ReconcileScheduler 시작 중 정지 요청 — 루프를 만들지 않음")
+            return
         self._task = asyncio.create_task(
             self._loop(),
             name="reconcile-scheduler",
@@ -70,6 +81,8 @@ class ReconcileScheduler:
 
     async def stop(self) -> None:
         """스케줄러를 중지한다."""
+        if self._starting:
+            self._stop_requested = True
         if self._task and not self._task.done():
             self._task.cancel()
             try:
@@ -110,12 +123,10 @@ class ReconcileScheduler:
                 continue
             if bot_account_id != account_id:
                 logger.warning(
-                    "대사 스킵: scheduler is bound to %s; "
-                    "bot %s belongs to %s — "
-                    "skipping until SPLIT-3 multi-broker pool",
-                    account_id,
+                    "대사 스킵: bot %s belongs to %s; this scheduler is bound to %s",
                     b.get("bot_id"),
                     bot_account_id,
+                    account_id,
                 )
                 continue
             account_bots.append(b)

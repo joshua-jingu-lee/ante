@@ -201,7 +201,7 @@ def _resolve_credentials(
         if env_value is None or env_value == "":
             raise AccountCredentialEnvNotSetError(
                 "ACCOUNT_CREDENTIAL_ENV_NOT_SET: "
-                f"--credential-env {key}={env_name_clean}: "
+                f"--credential-env 옵션의 {position}번째 인자({key})가 가리키는 "
                 "환경변수가 설정되지 않았거나 공란입니다."
             )
         _set_or_dup(key, env_value)
@@ -220,19 +220,21 @@ def _resolve_credentials(
         except FileNotFoundError:
             raise AccountCredentialFileNotFoundError(
                 "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: "
-                f"--credential-file {key}={path_clean}: 파일을 찾을 수 없습니다."
+                f"--credential-file 옵션의 {position}번째 인자({key})가 가리키는 "
+                "파일을 찾을 수 없습니다."
             )
-        except OSError as exc:
+        except OSError:
             raise AccountCredentialFileNotFoundError(
                 "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: "
-                f"--credential-file {key}={path_clean}: "
-                f"파일을 읽을 수 없습니다 ({exc})."
+                f"--credential-file 옵션의 {position}번째 인자({key})가 가리키는 "
+                "파일을 읽을 수 없습니다."
             )
         value = content.rstrip("\r\n")
         if value == "":
             raise AccountCredentialFileNotFoundError(
                 "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: "
-                f"--credential-file {key}={path_clean}: 파일이 비어 있습니다."
+                f"--credential-file 옵션의 {position}번째 인자({key})가 가리키는 "
+                "파일이 비어 있습니다."
             )
         _set_or_dup(key, value)
 
@@ -256,6 +258,7 @@ def _resolve_broker_config(
 ) -> dict[str, Any]:
     """`--broker-config key=value` 반복 옵션을 dict로 파싱한다."""
     out: dict[str, Any] = {}
+    first_position: dict[str, int] = {}
     for position, raw in enumerate(pairs, start=1):
         key, value_str = _split_key_value(
             raw, fmt=fmt, option_label="--broker-config", position=position
@@ -263,9 +266,11 @@ def _resolve_broker_config(
         if key in out:
             raise CliMissingRequiredInputError(
                 "CLI_MISSING_REQUIRED_INPUT: "
-                f"--broker-config key {key!r}가 중복 입력되었습니다."
+                f"--broker-config 옵션의 {position}번째 인자의 key가 "
+                f"{first_position[key]}번째 인자와 중복됩니다."
             )
         out[key] = _parse_broker_config_value(value_str)
+        first_position[key] = position
     return out
 
 
