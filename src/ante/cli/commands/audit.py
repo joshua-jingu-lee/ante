@@ -82,8 +82,9 @@ def audit_list(
     result = _run(_run_list())
 
     if not result:
-        empty: dict[str, Any] = {"message": "감사 로그가 없습니다.", "logs": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "감사 로그가 없습니다."
+        empty: dict[str, Any] = {"message": message, "logs": []}
+        return CommandResult(data=empty, text=(message,))
 
     columns = ["id", "member_id", "action", "resource", "created_at"]
     return CommandResult(
