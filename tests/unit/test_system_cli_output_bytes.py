@@ -47,12 +47,17 @@ _CASES: dict[str, list[str]] = {
     "status_suspended": ["system", "status"],
     "status_no_row": ["system", "status"],
     "halt": ["system", "halt", "--reason", "drill"],
-    "halt_nested": ["system", "halt"],
+    "halt_no_reason": ["system", "halt"],
     "clear_halt": ["system", "clear-halt"],
-    "clear_halt_nested": ["system", "clear-halt", "--reason", "post-drill"],
+    "clear_halt_with_reason": ["system", "clear-halt", "--reason", "post-drill"],
 }
 
-_IPC_CALLS = {"halt": 1, "halt_nested": 1, "clear_halt": 1, "clear_halt_nested": 1}
+_IPC_CALLS = {
+    "halt": 1,
+    "halt_no_reason": 1,
+    "clear_halt": 1,
+    "clear_halt_with_reason": 1,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -94,8 +99,7 @@ def _invoke_case(
     payload = dict(_KILL_SWITCH)
     if branch.startswith("clear_halt"):
         payload["status"] = "halt_cleared"
-    response = {"data": payload} if branch.endswith("_nested") else payload
-    ipc_send = AsyncMock(return_value=response)
+    ipc_send = AsyncMock(return_value=payload)
     kill = MagicMock()
     args = list(_CASES[branch])
     full_args = ["--format", "json", *args] if mode == "json" else args
@@ -185,8 +189,8 @@ _SYSTEM_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("halt_nested", "text"): ("시스템 HALTED — 2개 계좌 거래 중지\n"),
-    ("halt_nested", "json"): (
+    ("halt_no_reason", "text"): ("시스템 HALTED — 2개 계좌 거래 중지\n"),
+    ("halt_no_reason", "json"): (
         "{\n"
         '  "status": "ok",\n'
         '  "message": "시스템 HALTED — 2개 계좌 거래 중지",\n'
@@ -240,10 +244,10 @@ _SYSTEM_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("clear_halt_nested", "text"): (
+    ("clear_halt_with_reason", "text"): (
         "시스템 정지 해제 — 2개 계좌 ACTIVE 복구 (봇은 자동 재시작되지 않음)\n"
     ),
-    ("clear_halt_nested", "json"): (
+    ("clear_halt_with_reason", "json"): (
         "{\n"
         '  "status": "ok",\n'
         '  "message": "시스템 정지 해제 — 2개 계좌 ACTIVE 복구 (봇은 자동 재시작되지 '
@@ -301,7 +305,7 @@ class TestSystemOutputBytes:
         ("branch", "method", "params"),
         [
             ("halt", "system.halt", {"reason": "drill"}),
-            ("halt_nested", "system.halt", {"reason": ""}),
+            ("halt_no_reason", "system.halt", {"reason": ""}),
             ("clear_halt", "system.clear_halt", {}),
         ],
     )

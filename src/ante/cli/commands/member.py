@@ -76,7 +76,8 @@ def _resolve_secret_non_interactive(
         value = os.environ.get(env_name)
         if value is None or value.strip() == "":
             raise MemberPasswordEnvNotSetError(
-                f"환경변수 {env_name}이(가) 설정되어 있지 않거나 공란입니다."
+                f"{env_option_label}가 가리키는 환경변수가 "
+                "설정되어 있지 않거나 공란입니다."
                 f" {env_option_label}는 비밀값이 든 환경변수의 *이름*만 받습니다."
             )
         return value.strip()
@@ -87,12 +88,12 @@ def _resolve_secret_non_interactive(
         raw = path.read_text(encoding="utf-8")
     except OSError as e:
         raise MemberPasswordFileNotFoundError(
-            f"{file_option_label} 파일을 읽을 수 없습니다: {file_path} ({e})"
+            f"{file_option_label} 파일을 읽을 수 없습니다."
         ) from e
     value = raw.strip()
     if value == "":
         raise MemberPasswordFileNotFoundError(
-            f"{file_option_label} 파일이 비어 있습니다: {file_path}"
+            f"{file_option_label} 파일이 비어 있습니다."
         )
     return value
 
@@ -401,8 +402,9 @@ def member_register(
                     "scopes": scope_list,
                 },
                 actor=actor,
+                required=("token",),
             )
-            token = payload.get("token", "")
+            token = payload["token"]
             return {
                 "member_id": payload.get("member_id", member_id),
                 "type": payload.get("type", member_type),
@@ -663,10 +665,9 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> CommandResult:
                 "member.rotate_token",
                 {"member_id": member_id},
                 actor=actor,
+                required=("token",),
             )
-            return {"member_id": payload.get("member_id", member_id)}, payload.get(
-                "token", ""
-            )
+            return {"member_id": payload.get("member_id", member_id)}, payload["token"]
 
         async with _create_service(ctx) as service:
             m, token = await service.rotate_token(member_id, rotated_by=actor)
@@ -795,8 +796,9 @@ def member_regenerate_recovery_key(
             payload = await ipc_send(
                 "member.regenerate_recovery_key",
                 {"password": password},
+                required=("recovery_key",),
             )
-            return cast("str", payload.get("recovery_key", ""))
+            return cast("str", payload["recovery_key"])
 
         async with _create_service(ctx) as service:
             members = await service.list_members(member_type="human")
