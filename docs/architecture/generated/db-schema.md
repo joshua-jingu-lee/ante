@@ -4,10 +4,10 @@ Ante 시스템의 전체 데이터베이스 스키마를 정리한 문서입니�
 
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
-> 마지막 갱신: 2026-09-01
+> 마지막 갱신: 2026-11-23
 
-- 테이블: **24**개
-- 인덱스: **32**개
+- 테이블: **25**개
+- 인덱스: **33**개
 
 ## 목차
 
@@ -66,6 +66,7 @@ erDiagram
 | 22 | [treasury_fill_dedup](#treasury_fill_dedup) | `treasury` | 체결 이벤트 멱등 dedup (#1957) | 4 |
 | 23 | [treasury_state](#treasury_state) | `treasury` | 계좌별 자산 상태 | 6 |
 | 24 | [treasury_daily_snapshots](#treasury_daily_snapshots) | `treasury` | 일간 자산 스냅샷 | 14 |
+| 25 | [treasury_reservations](#treasury_reservations) | `treasury` | 미종결 매수 주문의 잔여 예약 (#2770) | 5 |
 
 ## DDL
 
@@ -610,6 +611,23 @@ CREATE TABLE IF NOT EXISTS treasury_daily_snapshots (
 );
 ```
 
+### treasury_reservations
+
+모듈: `treasury.treasury`
+
+```sql
+CREATE TABLE IF NOT EXISTS treasury_reservations (
+    order_id     TEXT PRIMARY KEY,
+    bot_id       TEXT NOT NULL,
+    account_id   TEXT NOT NULL,
+    remaining    REAL NOT NULL,
+    updated_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_treasury_reservations_account
+    ON treasury_reservations(account_id);
+```
+
 ## 인덱스 목록
 
 | # | 인덱스명 | 테이블 | 컬럼 |
@@ -645,7 +663,8 @@ CREATE TABLE IF NOT EXISTS treasury_daily_snapshots (
 | 29 | `idx_trades_symbol` | `trades` | `symbol, timestamp` |
 | 30 | `idx_trades_status` | `trades` | `status` |
 | 31 | `idx_bot_budgets_account` | `bot_budgets` | `account_id` |
-| 32 | `idx_treasury_transactions_account` | `treasury_transactions` | `account_id` |
+| 32 | `idx_treasury_reservations_account` | `treasury_reservations` | `account_id` |
+| 33 | `idx_treasury_transactions_account` | `treasury_transactions` | `account_id` |
 
 ## 보존 정책
 
@@ -675,4 +694,5 @@ CREATE TABLE IF NOT EXISTS treasury_daily_snapshots (
 | `treasury_fill_dedup` | 영구 보존 (#1957 — prune/retention은 follow-up) |
 | `treasury_state` | 영구 보존 |
 | `treasury_daily_snapshots` | 영구 보존 |
+| `treasury_reservations` | 예약이 회수·정산으로 끝나면 삭제 (#2770) |
 
