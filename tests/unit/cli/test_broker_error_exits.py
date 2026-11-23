@@ -261,8 +261,10 @@ class _Harness:
         return list(self.get_broker.await_args_list)
 
 
-def _invoke(mode: str, name: str, harness: _Harness) -> Result:
-    harness.with_db = name == "reconcile"
+def _invoke(
+    mode: str, name: str, harness: _Harness, *, with_db: bool | None = None
+) -> Result:
+    harness.with_db = name == "reconcile" if with_db is None else with_db
     runner = CliRunner(mix_stderr=False)
     with ExitStack() as stack:
         stack.enter_context(
@@ -469,6 +471,116 @@ def test_status_fallback_broker_error_is_reported_in_the_result(mode: str) -> No
         {"connected": False, "healthy": False, "error": _RATE},
         ["  연결 상태  : 미연결", "  건강 상태  : 이상", f"  오류       : {_RATE}"],
     )
+
+
+_DISCONNECT_FAILED = "disconnect failed"
+_CLEANUP_FAILURE_OUTPUT: dict[tuple[str, str], tuple[int, str, str]] = {
+    ("status", "json"): (
+        0,
+        '{\n  "status": "ok",\n  "message": "",\n  "data": {\n'
+        '    "connected": false,\n    "healthy": false,\n'
+        '    "error": "disconnect failed"\n  }\n}\n',
+        "",
+    ),
+    ("status", "text"): (
+        0,
+        "  연결 상태  : 미연결\n  건강 상태  : 이상\n"
+        "  오류       : disconnect failed\n",
+        "",
+    ),
+    **{
+        (name, "json"): (
+            1,
+            '{"status": "error", "code": "EXECUTION_ERROR", '
+            '"message": "disconnect failed"}\n',
+            "",
+        )
+        for name in ("balance", "positions", "order-history", "reconcile")
+    },
+    **{
+        (name, "text"): (1, "", "Error: EXECUTION_ERROR: disconnect failed\n")
+        for name in ("balance", "positions", "order-history", "reconcile")
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "mode"),
+    _params(["status", "balance", "positions", "order-history", "reconcile"]),
+)
+def test_fallback_disconnect_failure_still_closes_the_db(name: str, mode: str) -> None:
+    harness = _Harness(_ERRORS["down"], None)
+    harness.adapter.disconnect.side_effect = RuntimeError(_DISCONNECT_FAILED)
+
+    result = _invoke(mode, name, harness, with_db=True)
+
+    harness.adapter.disconnect.assert_awaited_once()
+    harness.db.close.assert_awaited_once()
+    assert (result.exit_code, result.stdout, result.stderr) == (
+        _CLEANUP_FAILURE_OUTPUT[(name, mode)]
+    )
+
+
+def _own_db(connect_error: BaseException | None) -> MagicMock:
+    own_db = MagicMock()
+    own_db.connect = AsyncMock(side_effect=connect_error, return_value=None)
+    own_db.close = AsyncMock(return_value=None)
+    return own_db
+
+
+def _invoke_reconcile_with_own_db(mode: str, harness: _Harness, own_db: Any) -> Result:
+    with (
+        patch("ante.cli.main.get_db_path", return_value="unused.db"),
+        patch("ante.core.database.Database", return_value=own_db),
+    ):
+        return _invoke(mode, "reconcile", harness, with_db=False)
+
+
+@pytest.mark.parametrize("mode", _MODES)
+def test_reconcile_own_db_connect_failure_still_disconnects(mode: str) -> None:
+    harness = _Harness(_ERRORS["down"], None)
+    own_db = _own_db(RuntimeError("connect failed"))
+
+    result = _invoke_reconcile_with_own_db(mode, harness, own_db)
+
+    harness.adapter.disconnect.assert_awaited_once()
+    harness.db.close.assert_not_awaited()
+    _assert_error(
+        mode,
+        result,
+        "EXECUTION_ERROR",
+        "connect failed",
+        "Error: EXECUTION_ERROR: connect failed",
+    )
+
+
+@pytest.mark.parametrize("mode", _MODES)
+def test_reconcile_closes_its_own_db_once(mode: str) -> None:
+    harness = _Harness(_ERRORS["down"], None)
+    own_db = _own_db(None)
+
+    result = _invoke_reconcile_with_own_db(mode, harness, own_db)
+
+    own_db.connect.assert_awaited_once()
+    own_db.close.assert_awaited_once()
+    harness.adapter.disconnect.assert_awaited_once()
+    _assert_success(
+        mode,
+        "reconcile",
+        result,
+        _DIRECT_RESULTS["reconcile"],
+        _DIRECT_TEXT["reconcile"],
+    )
+
+
+def test_reconcile_adapter_db_is_closed_once() -> None:
+    harness = _Harness(_ERRORS["down"], None)
+
+    result = _invoke("json", "reconcile", harness, with_db=True)
+
+    assert result.exit_code == 0, (result.stdout, result.stderr)
+    harness.db.close.assert_awaited_once()
+    harness.adapter.disconnect.assert_awaited_once()
 
 
 @pytest.mark.parametrize("mode", _MODES)
