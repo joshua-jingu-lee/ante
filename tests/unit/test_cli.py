@@ -276,9 +276,11 @@ class TestStrategyCommands:
         assert data["status"] == "error"
         assert data["code"] == "STRATEGY_VALIDATION_FAILED"
         assert "Validation failed" in data["message"]
-        assert data["data"]["valid"] is False
-        assert isinstance(data["data"]["errors"], list)
-        assert isinstance(data["data"]["warnings"], list)
+        assert set(data) == {"status", "code", "message", "details"}
+        assert set(data["details"]) == {"errors", "warnings"}
+        assert isinstance(data["details"]["errors"], list)
+        assert data["details"]["errors"]
+        assert isinstance(data["details"]["warnings"], list)
 
     def test_validate_invalid_text_stderr(self, runner, invalid_strategy_file):
         """#1541: text 모드 invalid 입력은 stderr에 에러+상세 라인을 내보낸다."""
@@ -293,7 +295,8 @@ class TestStrategyCommands:
             ],
         )
         assert result.exit_code == 1
-        assert "Error: Validation failed" in result.output
+        assert "Error: STRATEGY_VALIDATION_FAILED: Validation failed" in result.output
+        assert "\n  - " in result.output
 
     def test_validate_nonexistent(self, runner):
         result = runner.invoke(cli, ["strategy", "validate", "/nonexistent.py"])
