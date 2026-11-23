@@ -7,7 +7,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_error_codes.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_error_codes.py --check`
 
-- 코드: **157**개 (예외 클래스 매핑 있음 **148** / 없음 **9**)
+- 코드: **157**개 (예외 클래스 매핑 있음 **149** / 없음 **8**)
 
 코드·분류·종료 코드·의미는 그 코드의 `ErrorSpec`의 `code`·`category`·`exit_code`·`description`에서, 예외 클래스는 `EXCEPTION_TO_SPEC`에서 그 코드를 가진 `ErrorSpec`에 연결된 클래스에서 얻습니다. 예외 클래스가 `—`인 코드는 `EXCEPTION_TO_SPEC`에 연결된 클래스가 없고, 의미가 `—`인 코드는 `description`이 비어 있습니다. 분류의 뜻과 명명 규칙은 [error-taxonomy.md](../../specs/contracts/error-taxonomy.md)에서 봅니다.
 
@@ -148,7 +148,7 @@
 | `STRATEGY_MISSING_REQUIRED_ACCOUNT` | `validation` | 1 | `ante.contracts.cli_errors.StrategyMissingRequiredAccountError` | — |
 | `STRATEGY_NOT_FOUND` | `not_found` | 1 | `ante.strategy.exceptions.StrategyNotFoundError` | — |
 | `STRATEGY_VALIDATION_ERROR` | `validation` | 1 | `ante.strategy.exceptions.StrategyValidationError` | strategy 명령 인자(예: `--status`) 값이 SSOT enum에 없음 |
-| `STRATEGY_VALIDATION_FAILED` | `validation` | 1 | — | — |
+| `STRATEGY_VALIDATION_FAILED` | `validation` | 1 | `ante.contracts.cli_errors.StrategyValidationFailedError` | — |
 | `TRADE_ERROR` | `internal` | 1 | `ante.contracts.cli_errors.TradeError` | — |
 | `TRADE_NOT_FOUND` | `not_found` | 1 | `ante.contracts.cli_errors.TradeNotFoundError` | — |
 | `TREASURY_ALLOCATE_FAILED` | `validation` | 1 | `ante.contracts.cli_errors.TreasuryAllocateFailedError` | — |

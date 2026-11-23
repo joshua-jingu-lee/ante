@@ -88,25 +88,38 @@ CLI 커맨드가 `--format json` 모드에서 실패한 경우 출력하는 형�
 {
   "status": "error",
   "code":   "<STABLE_ERROR_CODE>",
-  "message": "<사람이 읽는 에러 메시지>"
+  "message": "<사람이 읽는 에러 메시지>",
+  "details": {"stage": "load"}
 }
 ```
+
+`details`는 선택 키다(상세가 있는 에러만 — 예시는 `strategy submit`의 로드 실패).
 
 | 필드 | 타입 | 필수 | 의미 |
 |------|------|------|------|
 | `status` | `"error"` | 필수 | 에러 응답 식별자. 항상 문자열 `"error"`. |
 | `code` | `string` | 필수 | 안정 에러 코드. 빈 문자열 `""`은 본 1.0 계약에서 허용되는 fallback(아직 typed code가 부여되지 않은 surface). |
 | `message` | `string` | 필수 | 사람이 읽는 에러 메시지. 안내 문구는 도메인 스펙이 정한다. |
+| `details` | `object` | 선택 | 상세가 있는 에러만 싣는다. 키는 아래 표의 코드마다 정해져 있다. |
 
 규칙:
 
-- 세 필드는 항상 동시에 직렬화된다.
+- `status`·`code`·`message`는 항상 동시에 직렬화되고, `details`는 상세가 있을 때만
+  네 번째 키로 더한다(`null`로 직렬화하지 않는다). `details`를 연 근거는 [#2762](https://github.com/joshua-jingu-lee/ante/issues/2762)(유지관리자 결정)다.
 - exit code는 1 이상(non-zero)이어야 한다. exit 0 + error envelope는 본 SSOT 위반이다.
 - `--format text` 모드는 `Error: <code>: <message>`를 `stderr`로 출력한다. 메시지가
   이미 `<code>: `로 시작하면 접두를 다시 붙이지 않는다. Click 자신의 사용법 오류는
-  Click 기본 형식을 따르고, `strategy validate`·`strategy submit`의 검증 실패
-  출구(오류 줄 뒤에 상세 줄이 이어진다)는 `Error: <message>`다. JSON 모드는 `stdout`으로
-  envelope 한 줄을 출력한다.
+  Click 기본 형식을 따른다. 상세가 있는 에러는 오류 줄 뒤에 상세 줄이 `stderr`로
+  이어진다. JSON 모드는 `stdout`으로 envelope 한 줄을 출력한다.
+- `details`에도 `message`의 redaction 규칙(민감정보 금지,
+  [error-taxonomy.md](error-taxonomy.md#redaction-정책-normative))이 적용된다.
+- 지금 `details`를 싣는 출구(IPC error envelope에는 `details`가 없다):
+
+  | 명령 | `code` | `details` |
+  |------|--------|-----------|
+  | `strategy validate`의 검증 실패 | `STRATEGY_VALIDATION_FAILED` | `{errors, warnings}` |
+  | `strategy submit`의 검증 실패 | `STRATEGY_VALIDATION_ERROR` | `{stage: "validate", errors}` |
+  | `strategy submit`의 `StrategyError` 계열 로드·meta·등록 실패 | 그 예외의 코드 | `{stage}` (`load`·`meta_validation`·`register`) |
 - `code` 값의 vocabulary(taxonomy, 도메인 prefix 등)는 본 SSOT 범위가 아니다 →
   [Non-Goals](#non-goals) 참조.
 - 구현 reference: `OutputFormatter.error()` (`src/ante/cli/formatter.py`).
@@ -192,7 +205,9 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
 - **streaming 핸드셰이크 passthrough(`signal connect`)**: `signal connect`의 핸드셰이크
   단계는 데몬이 생성한 IPC error envelope의 `error.code`/`error.message`를 CLI error
   envelope으로 **1회만** 옮긴다. 이때 JSON 모드의 `message`는 **verbatim
-  passthrough**한다 — CLI가 번역·재작성하지 않는다. 데몬이 낸 거부는
+  passthrough**한다 — CLI가 번역·재작성하지 않는다. 다만 데몬이 빈 `message`를
+  내면 `<code>: `가 되고 SCREAMING_SNAKE가 아닌 `code`는 `EXECUTION_ERROR`가 된다(지금
+  데몬이 내는 코드·메시지에서는 일어나지 않는다). 데몬이 낸 거부는
   `IPCRemoteError`로, 연결 실패(소켓 없음·연결 거부·응답 끊김·시간 초과)는 위 헬퍼와
   같은 `IPCServerNotRunningError`·`IPCClientTimeoutError`로 진입점 훅에 올린다.
   따라서 JSON 모드의 데몬 핸드셰이크 검증 에러는 `{status:error, code, message}`
@@ -262,8 +277,9 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
 ## 변경 정책
 
 - 본 SSOT는 1.0 normative이며 형태 변경은 contract change다. 새 필드 추가
-  (예: `request_id`, `details`, `retryable`)는 본 문서 normative 절을 수정하지
-  말고 **별도 SSOT 이슈**로 제안한 뒤 본 문서를 갱신한다.
+  (예: `request_id`, `retryable`)는 본 문서 normative 절을 수정하지
+  말고 **별도 SSOT 이슈**로 제안한 뒤 본 문서를 갱신한다. CLI error envelope의
+  `details`는 [#2762](https://github.com/joshua-jingu-lee/ante/issues/2762)로 열었다.
 - 도메인 payload 신설/변경은 본 SSOT를 건드리지 않는다. 해당 도메인 스펙에서
   처리한다.
 - 본 문서가 lock 한 envelope 4형태와 충돌하는 normative 재정의가 다른 스펙에서

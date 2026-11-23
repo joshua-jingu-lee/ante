@@ -27,6 +27,43 @@ def _sanitize_non_finite(obj: object) -> object:
     return obj
 
 
+_DETAIL_SCALARS = (str, int, float, bool, type(None))
+
+
+def _check_detail_value(value: object) -> None:
+    if isinstance(value, _DETAIL_SCALARS):
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _check_detail_value(item)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(
+                    f"cli_details key must be str, not {type(key).__name__}"
+                )
+            _check_detail_value(item)
+        return
+    raise TypeError(f"cli_details value is not JSON: {type(value).__name__}")
+
+
+def with_cli_details(
+    exc: BaseException,
+    details: dict[str, Any] | None = None,
+    lines: tuple[str, ...] = (),
+) -> BaseException:
+    if details is not None:
+        if not details:
+            raise ValueError("cli_details must be None or a non-empty dict")
+        _check_detail_value(details)
+    if not all(isinstance(line, str) for line in lines):
+        raise TypeError("cli_detail_lines must be str")
+    setattr(exc, "cli_details", details)
+    setattr(exc, "cli_detail_lines", tuple(lines))
+    return exc
+
+
 def _checked_lines(text: object) -> tuple[str, ...]:
     if isinstance(text, str):
         raise TypeError("CommandResult.text must be a tuple of lines, not a str")
@@ -137,17 +174,19 @@ class OutputFormatter:
         for line in table_lines(rows, columns):
             click.echo(line)
 
-    def error(self, message: str, code: str = "") -> None:
-        """에러 출력."""
+    def error(
+        self, message: str, code: str = "", details: dict[str, Any] | None = None
+    ) -> None:
+        """에러 출력. JSON은 ``details``가 ``None``이 아닐 때만 네 번째 키로 싣는다."""
         if self._format == "json":
-            click.echo(
-                json.dumps(
-                    _sanitize_non_finite(
-                        {"status": "error", "code": code, "message": message}
-                    ),
-                    allow_nan=False,
-                )
-            )
+            payload: dict[str, Any] = {
+                "status": "error",
+                "code": code,
+                "message": message,
+            }
+            if details is not None:
+                payload["details"] = details
+            click.echo(json.dumps(_sanitize_non_finite(payload), allow_nan=False))
         else:
             click.echo(f"Error: {message}", err=True)
 

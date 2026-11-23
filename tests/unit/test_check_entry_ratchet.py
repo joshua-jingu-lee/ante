@@ -2301,8 +2301,16 @@ NON_ERROR_HINT = (
 )
 
 
+ALLOWED = ["SystemExit(0)", "SystemExit(proc.returncode)"]
+
+
 def test_non_error_exits_constant_lists_system_start_only() -> None:
-    assert checker.NON_ERROR_EXITS == {("src/ante/cli/commands/system.py", "start"): 2}
+    assert checker.NON_ERROR_EXITS == {
+        ("src/ante/cli/commands/system.py", "start"): (
+            "SystemExit(0)",
+            "SystemExit(proc.returncode)",
+        )
+    }
 
 
 def test_repository_has_no_non_error_exit_mismatch() -> None:
@@ -2362,7 +2370,9 @@ def test_extra_exit_in_the_listed_function_is_caught(
         capsys,
         [
             HEADER,
-            f"cli_exits\t{SYSTEM}:start: non-error exits 3, NON_ERROR_EXITS 2 (+1)",
+            f"cli_exits\t{SYSTEM}:start: non-error exits "
+            f"{['SystemExit(0)', 'SystemExit(1)', 'SystemExit(proc.returncode)']}, "
+            f"NON_ERROR_EXITS {ALLOWED}",
             NON_ERROR_HINT,
         ],
     )
@@ -2371,14 +2381,21 @@ def test_extra_exit_in_the_listed_function_is_caught(
 @pytest.mark.parametrize(
     ("source", "found"),
     [
-        (SYSTEM_SOURCE.replace("raise SystemExit(0)", "return"), 1),
-        ("def start(proc):\n    return proc\n", 0),
-        (None, 0),
+        (
+            SYSTEM_SOURCE.replace("raise SystemExit(0)", "return"),
+            ["SystemExit(proc.returncode)"],
+        ),
+        ("def start(proc):\n    return proc\n", []),
+        (None, []),
+        (
+            SYSTEM_SOURCE.replace("SystemExit(0)", "SystemExit(1)"),
+            ["SystemExit(1)", "SystemExit(proc.returncode)"],
+        ),
     ],
-    ids=["one_removed", "all_removed", "file_removed"],
+    ids=["one_removed", "all_removed", "file_removed", "zero_changed_to_one"],
 )
-def test_stale_listing_is_caught(
-    tmp_path: Path, capsys: Capsys, source: str | None, found: int
+def test_stale_or_changed_listing_is_caught(
+    tmp_path: Path, capsys: Capsys, source: str | None, found: list[str]
 ) -> None:
     root = _tree(tmp_path)
     _freeze(root)
@@ -2392,7 +2409,7 @@ def test_stale_listing_is_caught(
         [
             HEADER,
             f"cli_exits\t{SYSTEM}:start: non-error exits {found}, "
-            f"NON_ERROR_EXITS 2 ({found - 2:+d})",
+            f"NON_ERROR_EXITS {ALLOWED}",
             NON_ERROR_HINT,
         ],
     )
@@ -2410,7 +2427,7 @@ def test_renamed_listed_function_is_caught_twice(
         [
             HEADER,
             f"cli_exits\t{SYSTEM}: actual 2, baseline 0 (+2)",
-            f"cli_exits\t{SYSTEM}:start: non-error exits 0, NON_ERROR_EXITS 2 (-2)",
+            f"cli_exits\t{SYSTEM}:start: non-error exits [], NON_ERROR_EXITS {ALLOWED}",
             *ALTERNATIVE_LINES,
             MOVE_LINE,
             NON_ERROR_HINT,

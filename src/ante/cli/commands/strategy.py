@@ -14,13 +14,19 @@ import click
 from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import reject_invalid_account_id
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import CommandResult, format_option, table_lines
+from ante.cli.formatter import (
+    CommandResult,
+    format_option,
+    table_lines,
+    with_cli_details,
+)
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
     CliStrategyError,
     StrategyInvalidStatusTransitionError,
     StrategyMissingRequiredAccountError,
+    StrategyValidationFailedError,
 )
 from ante.contracts.error_registry import EXECUTION_ERROR_SPEC
 from ante.contracts.helpers import error_spec_for_exception
@@ -81,7 +87,6 @@ def validate(ctx: click.Context, path: str) -> CommandResult:
     """전략 파일 정적 검증 (AST 기반)."""
     from ante.strategy.validator import StrategyValidator
 
-    fmt = get_formatter(ctx)
     validator = StrategyValidator()
     result = validator.validate(Path(path))
 
@@ -93,33 +98,14 @@ def validate(ctx: click.Context, path: str) -> CommandResult:
 
     if result.valid:
         return CommandResult(data=data, message=f"Strategy validation passed: {path}")
-    else:
-        if fmt.is_json:
-            import json as _json
-
-            click.echo(
-                _json.dumps(
-                    {
-                        "status": "error",
-                        "code": "STRATEGY_VALIDATION_FAILED",
-                        "message": f"Validation failed: {path}",
-                        "data": data,
-                    },
-                    indent=2,
-                    default=str,
-                    ensure_ascii=False,
-                )
-            )
-        else:
-            fmt.error(
-                f"Validation failed: {path}",
-                code="STRATEGY_VALIDATION_FAILED",
-            )
-            for err in result.errors:
-                click.echo(f"  - {err}", err=True)
-            for warn in result.warnings:
-                click.echo(f"  [warn] {warn}", err=True)
-        raise SystemExit(1)
+    raise with_cli_details(
+        StrategyValidationFailedError(f"Validation failed: {path}"),
+        {"errors": result.errors, "warnings": result.warnings},
+        (
+            *(f"  - {err}" for err in result.errors),
+            *(f"  [warn] {warn}" for warn in result.warnings),
+        ),
+    )
 
 
 @strategy.command("submit")
@@ -140,20 +126,11 @@ def submit(ctx: click.Context, path: str) -> CommandResult:
     validation = validator.validate(filepath)
 
     if not validation.valid:
-        if fmt.is_json:
-            fmt.output(
-                {
-                    "submitted": False,
-                    "stage": "validate",
-                    "code": "STRATEGY_VALIDATION_ERROR",
-                    "errors": validation.errors,
-                }
-            )
-        else:
-            fmt.error(f"Validation failed: {path}", code="STRATEGY_VALIDATION_ERROR")
-            for err in validation.errors:
-                click.echo(f"  - {err}", err=True)
-        raise SystemExit(1)
+        raise with_cli_details(
+            StrategyValidationError(f"Validation failed: {path}"),
+            {"stage": "validate", "errors": validation.errors},
+            tuple(f"  - {err}" for err in validation.errors),
+        )
 
     if validation.warnings and not fmt.is_json:
         for warn in validation.warnings:
@@ -162,40 +139,19 @@ def submit(ctx: click.Context, path: str) -> CommandResult:
     try:
         strategy_cls = StrategyLoader.load(filepath)
     except StrategyLoadError as e:
-        if fmt.is_json:
-            fmt.output(
-                {
-                    "submitted": False,
-                    "stage": "load",
-                    "code": "STRATEGY_LOAD_ERROR",
-                    "error": str(e),
-                }
-            )
-        else:
-            raise StrategyLoadError(f"Load test failed: {e}") from e
-        raise SystemExit(1)
+        raise with_cli_details(
+            StrategyLoadError(f"Load test failed: {e}"), {"stage": "load"}
+        ) from e
 
     meta = strategy_cls.meta
 
     if not isinstance(meta, StrategyMeta):
-        error_message = (
-            f"meta는 StrategyMeta 인스턴스여야 합니다 "
-            f"(받은 타입: {type(meta).__name__})"
-        )
-        if fmt.is_json:
-            fmt.output(
-                {
-                    "submitted": False,
-                    "stage": "meta_validation",
-                    "code": "STRATEGY_VALIDATION_ERROR",
-                    "error": error_message,
-                }
-            )
-        else:
-            raise StrategyValidationError(
+        raise with_cli_details(
+            StrategyValidationError(
                 f"Invalid meta shape: expected StrategyMeta, got {type(meta).__name__}"
-            )
-        raise SystemExit(1)
+            ),
+            {"stage": "meta_validation"},
+        )
 
     rationale = ""
     risks: list[str] = []
@@ -232,20 +188,10 @@ def submit(ctx: click.Context, path: str) -> CommandResult:
     try:
         result = _run(_register())
     except StrategyError as e:
-        if fmt.is_json:
-            fmt.output(
-                {
-                    "submitted": False,
-                    "stage": "register",
-                    "code": getattr(e, "code", "STRATEGY_ERROR"),
-                    "error": str(e),
-                }
-            )
-        elif error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:
+        if error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:
+            with_cli_details(e, {"stage": "register"})
             raise
-        else:
-            raise CliStrategyError(str(e)) from e
-        raise SystemExit(1)
+        raise with_cli_details(CliStrategyError(str(e)), {"stage": "register"}) from e
 
     return CommandResult(
         data=result, text=(f"전략 등록 완료: {result['strategy_id']}",)

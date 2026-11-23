@@ -607,9 +607,14 @@ class AuthenticatedGroup(_LeafPathMixin):
 
             error = ipc_error_payload(e)
             if output_format == "json":
-                OutputFormatter("json").error(error["message"], code=error["code"])
+                OutputFormatter("json").error(
+                    error["message"],
+                    code=error["code"],
+                    details=getattr(e, "cli_details", None),
+                )
             else:
                 click.echo(_text_error_line(error["code"], error["message"]), err=True)
+                _echo_detail_lines(e)
             import sys as _sys
 
             _sys.exit(error_spec_for_exception(e).exit_code or 1)
@@ -641,6 +646,11 @@ class AuthenticatedGroup(_LeafPathMixin):
 
 
 _META_HELP_TOKENS: frozenset[str] = frozenset({"--help", "-h"})
+
+
+def _echo_detail_lines(exc: BaseException) -> None:
+    for line in getattr(exc, "cli_detail_lines", ()):
+        click.echo(line, err=True)
 
 
 def _text_error_line(code: str, message: str) -> str:

@@ -198,7 +198,7 @@ class TestSubmitDictMetaJson:
                 ["--format", "json", "strategy", "submit", __file__],
             )
 
-        # exit 1: 명시적 SystemExit(1) — traceback 누출 차단.
+        # exit 1: 진입점 훅의 에러 출구 — traceback 누출 차단.
         assert result.exit_code == 1, (
             f"dict meta가 exit {result.exit_code}로 통과/실패함: "
             f"stdout={result.stdout!r} stderr={result.stderr!r}"
@@ -211,13 +211,14 @@ class TestSubmitDictMetaJson:
             f"stderr에 AttributeError 누출: {stderr!r}"
         )
 
-        # JSON envelope 3-필드 단정.
+        # 에러 봉투 + details.stage. message는 받은 타입(dict)을 노출한다.
         payload = json.loads(result.stdout)
-        assert payload.get("submitted") is False, payload
-        assert payload.get("stage") == "meta_validation", payload
-        assert payload.get("code") == "STRATEGY_VALIDATION_ERROR", payload
-        # error 메시지는 받은 타입(dict)을 사용자에게 노출해야 한다.
-        assert "dict" in payload.get("error", ""), payload
+        assert payload == {
+            "status": "error",
+            "code": "STRATEGY_VALIDATION_ERROR",
+            "message": "Invalid meta shape: expected StrategyMeta, got dict",
+            "details": {"stage": "meta_validation"},
+        }, payload
 
 
 # ── R2 sanity: 정상 StrategyMeta 인스턴스는 회귀하지 않음 ─────

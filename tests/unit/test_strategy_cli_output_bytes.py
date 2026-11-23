@@ -857,7 +857,7 @@ _STRATEGY_FAILURE_BYTES: dict[tuple[str, str], tuple[str, str, int]] = {
     ("validate_invalid", "text"): (
         "",
         (
-            "Error: Validation failed: strat.py\n"
+            "Error: STRATEGY_VALIDATION_FAILED: Validation failed: strat.py\n"
             "  - 금지된 import: os\n"
             "  - on_step 누락\n"
             "  [warn] print 사용\n"
@@ -866,21 +866,10 @@ _STRATEGY_FAILURE_BYTES: dict[tuple[str, str], tuple[str, str, int]] = {
     ),
     ("validate_invalid", "json"): (
         (
-            "{\n"
-            '  "status": "error",\n'
-            '  "code": "STRATEGY_VALIDATION_FAILED",\n'
-            '  "message": "Validation failed: strat.py",\n'
-            '  "data": {\n'
-            '    "valid": false,\n'
-            '    "errors": [\n'
-            '      "금지된 import: os",\n'
-            '      "on_step 누락"\n'
-            "    ],\n"
-            '    "warnings": [\n'
-            '      "print 사용"\n'
-            "    ]\n"
-            "  }\n"
-            "}\n"
+            '{"status": "error", "code": "STRATEGY_VALIDATION_FAILED", '
+            '"message": "Validation failed: strat.py", "details": '
+            '{"errors": ["\\uae08\\uc9c0\\ub41c import: os", '
+            '"on_step \\ub204\\ub77d"], "warnings": ["print \\uc0ac\\uc6a9"]}}\n'
         ),
         "",
         1,
@@ -888,7 +877,7 @@ _STRATEGY_FAILURE_BYTES: dict[tuple[str, str], tuple[str, str, int]] = {
     ("submit_invalid", "text"): (
         "",
         (
-            "Error: Validation failed: strat.py\n"
+            "Error: STRATEGY_VALIDATION_ERROR: Validation failed: strat.py\n"
             "  - 금지된 import: os\n"
             "  - on_step 누락\n"
         ),
@@ -896,15 +885,10 @@ _STRATEGY_FAILURE_BYTES: dict[tuple[str, str], tuple[str, str, int]] = {
     ),
     ("submit_invalid", "json"): (
         (
-            "{\n"
-            '  "submitted": false,\n'
-            '  "stage": "validate",\n'
-            '  "code": "STRATEGY_VALIDATION_ERROR",\n'
-            '  "errors": [\n'
-            '    "금지된 import: os",\n'
-            '    "on_step 누락"\n'
-            "  ]\n"
-            "}\n"
+            '{"status": "error", "code": "STRATEGY_VALIDATION_ERROR", '
+            '"message": "Validation failed: strat.py", "details": '
+            '{"stage": "validate", "errors": '
+            '["\\uae08\\uc9c0\\ub41c import: os", "on_step \\ub204\\ub77d"]}}\n'
         ),
         "",
         1,
@@ -916,12 +900,9 @@ _STRATEGY_FAILURE_BYTES: dict[tuple[str, str], tuple[str, str, int]] = {
     ),
     ("submit_load_error", "json"): (
         (
-            "{\n"
-            '  "submitted": false,\n'
-            '  "stage": "load",\n'
-            '  "code": "STRATEGY_LOAD_ERROR",\n'
-            '  "error": "SyntaxError: line 3"\n'
-            "}\n"
+            '{"status": "error", "code": "STRATEGY_LOAD_ERROR", '
+            '"message": "Load test failed: SyntaxError: line 3", '
+            '"details": {"stage": "load"}}\n'
         ),
         "",
         1,
@@ -936,12 +917,9 @@ _STRATEGY_FAILURE_BYTES: dict[tuple[str, str], tuple[str, str, int]] = {
     ),
     ("submit_meta_error", "json"): (
         (
-            "{\n"
-            '  "submitted": false,\n'
-            '  "stage": "meta_validation",\n'
-            '  "code": "STRATEGY_VALIDATION_ERROR",\n'
-            '  "error": "meta는 StrategyMeta 인스턴스여야 합니다 (받은 타입: dict)"\n'
-            "}\n"
+            '{"status": "error", "code": "STRATEGY_VALIDATION_ERROR", '
+            '"message": "Invalid meta shape: expected StrategyMeta, got dict", '
+            '"details": {"stage": "meta_validation"}}\n'
         ),
         "",
         1,
@@ -953,12 +931,9 @@ _STRATEGY_FAILURE_BYTES: dict[tuple[str, str], tuple[str, str, int]] = {
     ),
     ("submit_register_error", "json"): (
         (
-            "{\n"
-            '  "submitted": false,\n'
-            '  "stage": "register",\n'
-            '  "code": "STRATEGY_ERROR",\n'
-            '  "error": "이미 등록된 전략"\n'
-            "}\n"
+            '{"status": "error", "code": "STRATEGY_ERROR", '
+            '"message": "\\uc774\\ubbf8 \\ub4f1\\ub85d\\ub41c \\uc804\\ub7b5", '
+            '"details": {"stage": "register"}}\n'
         ),
         "",
         1,

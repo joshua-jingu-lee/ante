@@ -468,8 +468,8 @@ class TestStrategySubmitEnvelopeCodeField:
         )
         payload = _parse_json_last(result.stdout)
         # validate 또는 load 단계에서 실패할 수 있으므로 둘 다 허용.
-        assert payload.get("submitted") is False, payload
-        stage = payload.get("stage")
+        assert payload.get("status") == "error", payload
+        stage = payload.get("details", {}).get("stage")
         assert stage in {"validate", "load"}, payload
         # #1789 invariant: envelope 에 typed ``code`` 가 존재해야 함.
         code = payload.get("code")
