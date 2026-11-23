@@ -8,12 +8,9 @@
 
 KISBaseAdapter를 상속하여 국내주식 전용 로직을 구현한다. 기존 `KISAdapter`를 리네이밍한 것이다.
 
-```python
-class KISDomesticAdapter(KISBaseAdapter):
-    broker_id = "kis-domestic"
-    broker_name = "한국투자증권 국내"
-    broker_short_name = "KIS"
-```
+정의: `ante.broker.kis.KISDomesticAdapter` (코드가 정본이다).
+
+식별 값: `broker_id` = `"kis-domestic"`, `broker_name` = `"한국투자증권 국내"`, `broker_short_name` = `"KIS"`.
 
 ### 분리된 국내 전용 로직
 
