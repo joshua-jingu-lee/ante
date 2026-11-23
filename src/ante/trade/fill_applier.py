@@ -151,41 +151,42 @@ class FillApplier:
 
         assert isinstance(record, OrderTrackerRecord)
         fill_dedup_key = ""
-        async with self._db.transaction():
-            result = await self._tracker.record_fill(
-                order_id, observed_cumulative, avg_price
-            )
-            delta = result.delta
-            if delta <= 0:
-                return 0.0
-            trade = TradeRecord(
-                trade_id=uuid4(),
-                bot_id=record.bot_id,
-                strategy_id=record.strategy_id,
-                symbol=record.symbol,
-                side=record.side,
-                quantity=delta,
-                price=avg_price,
-                status=TradeStatus.FILLED,
-                order_type=record.order_type,
-                timestamp=clock.now(UTC),
-                order_id=order_id,
-                account_id=account_id,
-                exchange=record.exchange or "KRX",
-            )
-            await self._save_trade(trade)
-            await self._position_history.on_trade(trade)
+        with self._position_history.defer_cache():
+            async with self._db.transaction():
+                result = await self._tracker.record_fill(
+                    order_id, observed_cumulative, avg_price
+                )
+                delta = result.delta
+                if delta <= 0:
+                    return 0.0
+                trade = TradeRecord(
+                    trade_id=uuid4(),
+                    bot_id=record.bot_id,
+                    strategy_id=record.strategy_id,
+                    symbol=record.symbol,
+                    side=record.side,
+                    quantity=delta,
+                    price=avg_price,
+                    status=TradeStatus.FILLED,
+                    order_type=record.order_type,
+                    timestamp=clock.now(UTC),
+                    order_id=order_id,
+                    account_id=account_id,
+                    exchange=record.exchange or "KRX",
+                )
+                await self._save_trade(trade)
+                await self._position_history.on_trade(trade)
 
-            if self._outbox is not None:
-                fill_dedup_key = make_fill_dedup_key(
-                    order_id, result.confirmed_cumulative
-                )
-                payload = self._build_payload(
-                    record, order_id, delta, avg_price, fill_dedup_key
-                )
-                await self._outbox.enqueue(
-                    fill_dedup_key=fill_dedup_key, payload=payload
-                )
+                if self._outbox is not None:
+                    fill_dedup_key = make_fill_dedup_key(
+                        order_id, result.confirmed_cumulative
+                    )
+                    payload = self._build_payload(
+                        record, order_id, delta, avg_price, fill_dedup_key
+                    )
+                    await self._outbox.enqueue(
+                        fill_dedup_key=fill_dedup_key, payload=payload
+                    )
 
         self._tracker.mirror_fill_to_cache(
             order_id, result.confirmed_cumulative, result.new_status
@@ -334,37 +335,39 @@ class FillApplier:
             exchange=exchange or "KRX",
         )
         async with self._lock:
-            async with self._db.transaction():
-                inserted = await self._db.execute_fetch_one(
-                    """INSERT INTO trades
-                           (trade_id, bot_id, strategy_id, symbol, side, quantity,
-                            price, status, order_type, reason, commission,
-                            timestamp, order_id, account_id, currency, exchange)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                       ON CONFLICT DO NOTHING
-                       RETURNING trade_id""",
-                    (
-                        str(trade.trade_id),
-                        trade.bot_id,
-                        trade.strategy_id,
-                        trade.symbol,
-                        trade.side,
-                        trade.quantity,
-                        trade.price,
-                        trade.status.value,
-                        trade.order_type,
-                        trade.reason,
-                        trade.commission,
-                        timestamp.isoformat(),
-                        trade.order_id,
-                        trade.account_id,
-                        trade.currency,
-                        trade.exchange,
-                    ),
-                )
-                if inserted is None:
-                    return False
-                await self._position_history.on_trade(trade)
+            with self._position_history.defer_cache():
+                async with self._db.transaction():
+                    inserted = await self._db.execute_fetch_one(
+                        """INSERT INTO trades
+                               (trade_id, bot_id, strategy_id, symbol, side,
+                                quantity, price, status, order_type, reason,
+                                commission, timestamp, order_id, account_id,
+                                currency, exchange)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT DO NOTHING
+                           RETURNING trade_id""",
+                        (
+                            str(trade.trade_id),
+                            trade.bot_id,
+                            trade.strategy_id,
+                            trade.symbol,
+                            trade.side,
+                            trade.quantity,
+                            trade.price,
+                            trade.status.value,
+                            trade.order_type,
+                            trade.reason,
+                            trade.commission,
+                            timestamp.isoformat(),
+                            trade.order_id,
+                            trade.account_id,
+                            trade.currency,
+                            trade.exchange,
+                        ),
+                    )
+                    if inserted is None:
+                        return False
+                    await self._position_history.on_trade(trade)
         logger.info(
             "가상 체결 기록: order=%s %s %s qty=%s @ %s commission=%s",
             order_id,

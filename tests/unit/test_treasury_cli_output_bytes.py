@@ -264,7 +264,7 @@ def _treasuries(branch: str) -> list[_FakeTreasury]:
     if branch == "snapshot_date":
         return [_FakeTreasury("acc-1", daily=_SNAP_UP)]
     if branch == "snapshot_today":
-        return [_FakeTreasury("acc-1", daily=_SNAP_DOWN)]
+        return [_FakeTreasury("acc-1", latest=_SNAP_DOWN)]
     if branch in ("snapshot_range", "snapshot_from_only"):
         rows = [_SNAP_FIRST, _SNAP_UP, _SNAP_DOWN]
         return [_FakeTreasury("acc-1", snapshots=rows)]

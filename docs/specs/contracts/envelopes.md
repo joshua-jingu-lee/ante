@@ -205,7 +205,10 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
   IPC 성공 응답의 `result`만 호출자에 돌려주고, 실패는 타입 예외로 올린다:
   `IPCServerNotRunningError`·`IPCClientTimeoutError`, 그리고 서버의
   `error.code`/`error.message`를 그대로 가진 `IPCRemoteError`(없으면 `UNKNOWN`/
-  `알 수 없는 오류`). CLI leaf는 이 예외를 잡지 않고, 진입점 훅이 CLI error
+  `알 수 없는 오류`. `error`가 객체가 아니어도 같다). 응답이 객체가 아니거나,
+  `status`가 `ok`도 `error`도 아니거나, `result`가 객체가 아니거나, 호출자가 요구한
+  키가 `result`에 없으면 코드가 `UNKNOWN`이고 메시지가 응답 내용을 싣지 않는 고정
+  문구인 `IPCRemoteError`로 실패한다. CLI leaf는 이 예외를 잡지 않고, 진입점 훅이 CLI error
   envelope을 1회 만든다(text 모드는 `Error: <code>: <message>` 한 줄). 다만 서버
   미기동에서 직접 실행으로 넘어가는 명령은 `IPCServerNotRunningError`만 잡고,
   `bot signal-key`(조회)는 코드가 `BOT_NOT_FOUND`인 `IPCRemoteError`만 잡으며,

@@ -337,9 +337,12 @@ async def test_member_revoke_rejects_revoked(db, eventbus, published):
         await service.revoke(TARGET_ID, revoked_by=MASTER_ID)
     _assert_exact(
         exc_info,
-        PermissionError,
-        "revoke은(는) active, suspended 상태에서만 가능합니다 (현재: revoked)",
+        MemberStateConflictError,
+        "멤버 'agent-2657' 상태 'revoked' 에서 'revoke' 작업을 수행할 수 없습니다.",
     )
+    assert exc_info.value.current_status == "revoked"
+    assert exc_info.value.requested_action == "revoke"
+    assert exc_info.value.code == "MEMBER_STATE_CONFLICT"
     assert await _member_status(db) == "revoked"
     assert published == []
 

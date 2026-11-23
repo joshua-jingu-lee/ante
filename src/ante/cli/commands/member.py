@@ -402,8 +402,9 @@ def member_register(
                     "scopes": scope_list,
                 },
                 actor=actor,
+                required=("token",),
             )
-            token = payload.get("token", "")
+            token = payload["token"]
             return {
                 "member_id": payload.get("member_id", member_id),
                 "type": payload.get("type", member_type),
@@ -664,10 +665,9 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> CommandResult:
                 "member.rotate_token",
                 {"member_id": member_id},
                 actor=actor,
+                required=("token",),
             )
-            return {"member_id": payload.get("member_id", member_id)}, payload.get(
-                "token", ""
-            )
+            return {"member_id": payload.get("member_id", member_id)}, payload["token"]
 
         async with _create_service(ctx) as service:
             m, token = await service.rotate_token(member_id, rotated_by=actor)
@@ -796,8 +796,9 @@ def member_regenerate_recovery_key(
             payload = await ipc_send(
                 "member.regenerate_recovery_key",
                 {"password": password},
+                required=("recovery_key",),
             )
-            return cast("str", payload.get("recovery_key", ""))
+            return cast("str", payload["recovery_key"])
 
         async with _create_service(ctx) as service:
             members = await service.list_members(member_type="human")

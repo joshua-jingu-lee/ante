@@ -7,7 +7,7 @@ import logging
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import UTC, timedelta
+from datetime import UTC, date, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 import click
@@ -38,6 +38,13 @@ if TYPE_CHECKING:
     from ante.treasury.treasury import Treasury
 
 logger = logging.getLogger(__name__)
+
+_KST = timezone(timedelta(hours=9))
+
+
+def _today_kst() -> date:
+    """스냅샷 키와 같은 기준(KST)의 오늘 날짜."""
+    return clock.now(_KST).date()
 
 
 @click.group()
@@ -428,8 +435,6 @@ def snapshot(
     account_id: str,
 ) -> CommandResult:
     """일별 자산 스냅샷 조회."""
-    from datetime import UTC
-
     fmt = get_formatter(ctx)
 
     reject_invalid_account_id(account_id, fmt, context="cli.treasury")
@@ -452,18 +457,17 @@ def snapshot(
             if date_str:
                 return await t.get_daily_snapshot(date_str)
             if from_date or to_date:
-                today = clock.now(UTC).strftime("%Y-%m-%d")
                 start = from_date or "2000-01-01"
-                end = to_date or today
+                end = to_date or _today_kst().isoformat()
                 return await t.get_snapshots(start, end)
-            today = clock.now(UTC).strftime("%Y-%m-%d")
-            return await t.get_daily_snapshot(today)
+            return await t.get_latest_snapshot()
 
     result = _run(_run_snapshot())
 
     if result is None:
-        target = date_str or clock.now(UTC).strftime("%Y-%m-%d")
-        raise SnapshotNotFoundError(f"{target} 날짜의 스냅샷이 없습니다.")
+        if date_str:
+            raise SnapshotNotFoundError(f"{date_str} 날짜의 스냅샷이 없습니다.")
+        raise SnapshotNotFoundError("저장된 스냅샷이 없습니다.")
 
     if isinstance(result, list):
         return CommandResult(data=result, text=tuple(_snapshot_list_lines(result)))
@@ -598,8 +602,9 @@ def portfolio_history(
         )
     reject_inverted_date_range(from_date, to_date, fmt)
 
-    end_date = to_date or clock.now(UTC).strftime("%Y-%m-%d")
-    start_date = from_date or (clock.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d")
+    today = _today_kst()
+    end_date = to_date or today.isoformat()
+    start_date = from_date or (today - timedelta(days=30)).isoformat()
 
     async def _run_history() -> dict[str, Any]:
         async def _collect_history(treasuries: list[Treasury]) -> dict[str, Any]:
