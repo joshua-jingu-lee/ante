@@ -641,20 +641,19 @@ async def _handle_rule_update(
 
     account_id = request.account_id
     rule_type = request.rule_type
-    enabled = request.enabled
     result = await update_account_rule_config(
         account_service=svc.account,
         dynamic_config=svc.dynamic_config,
         account_id=account_id,
         rule_type=rule_type,
-        enabled=enabled,
+        enabled=request.enabled,
         params=request.params,
         changed_by=actor,
         audit_logger=None,
     )
     result["_audit_detail"] = {
         "resource": f"account:{account_id}:rule:{rule_type}",
-        "detail": f"rule update: {rule_type} enabled={enabled}",
+        "detail": f"rule update: {rule_type} enabled={result['rule']['enabled']}",
         "ip": "",
     }
     return result
