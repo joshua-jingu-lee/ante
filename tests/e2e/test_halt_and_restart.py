@@ -12,6 +12,7 @@ BOT_ID = "e2e-lifecycle"
 ACCOUNT_BALANCE = 1000000
 ALLOCATION = 500000
 STATE_SECONDS = 10.0
+HOLD_SECONDS = 2.5
 FILL_SECONDS = 30.0
 UPDATE_CHECKER_MODULE = "ante.update.checker"
 BUDGET_FIELDS = ("allocated", "available", "reserved", "spent", "returned")
@@ -79,7 +80,7 @@ def test_halt_stops_bot_and_clear_halt_leaves_it_stopped(
     ]
     assert _account_status(daemon) == "suspended"
     status = wait_until(
-        lambda: _bot_status(daemon), lambda s: s != "running", seconds=STATE_SECONDS
+        lambda: _bot_status(daemon), lambda s: s == "stopped", seconds=STATE_SECONDS
     )
     assert status == "stopped"
 
@@ -89,7 +90,10 @@ def test_halt_stops_bot_and_clear_halt_leaves_it_stopped(
         ("test", "active")
     ]
     assert _account_status(daemon) == "active"
-    assert _bot_status(daemon) == "stopped"
+    held = wait_until(
+        lambda: _bot_status(daemon), lambda s: s != "stopped", seconds=HOLD_SECONDS
+    )
+    assert held == "stopped"
 
     restarted = daemon.cli("bot", "start", BOT_ID)
     assert restarted["data"]["bot"]["status"] == "running"
@@ -108,7 +112,8 @@ def _funds(daemon: DaemonHarness) -> dict[str, Any]:
     return {
         "budget": {k: budget[k] for k in BUDGET_FIELDS},
         "treasury": {k: status[k] for k in TREASURY_FIELDS},
-        "ledger": ledger,
+        "ledger_total": ledger["total"],
+        "ledger": sorted(ledger["items"], key=lambda i: i["id"]),
     }
 
 
@@ -127,7 +132,7 @@ def test_restart_preserves_budget_and_ledger(daemon: DaemonHarness) -> None:
     before = _funds(daemon)
     assert before["budget"]["reserved"] == 0
     assert before["budget"]["spent"] > 0
-    assert [i["type"] for i in before["ledger"]["items"]] == ["allocate", "fill"]
+    assert sorted(i["type"] for i in before["ledger"]) == ["allocate", "fill"]
 
     old_pid = daemon.daemon_pid
     daemon.restart()

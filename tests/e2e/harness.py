@@ -254,6 +254,7 @@ class DaemonHarness:
         self.net_marker_path = root / "netguard-pids"
         self.token: str | None = None
         self.proc: subprocess.Popen[bytes] | None = None
+        self._spawned: list[subprocess.Popen[bytes]] = []
         self.daemon_pid: int | None = None
         self._log_file: IO[bytes] | None = None
         self._final_diagnostics: str | None = None
@@ -338,6 +339,7 @@ class DaemonHarness:
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+        self._spawned.append(self.proc)
         deadline = started + READY_DEADLINE_SECONDS
         while True:
             returncode = self.proc.poll()
@@ -417,12 +419,15 @@ class DaemonHarness:
         return "\n".join(parts)
 
     def cleanup(self) -> None:
-        """타이머를 끄고, 프로세스 그룹을 비우고, 임시 루트를 지운다."""
+        """타이머를 끄고, 띄운 프로세스 그룹을 모두 비우고, 임시 루트를 지운다."""
         signal.setitimer(signal.ITIMER_REAL, 0)
         try:
-            if self.proc is not None:
-                terminate_process_group(self.proc.pid, reap=self.proc.poll)
-                self.proc.wait(timeout=GROUP_KILL_SECONDS)
+            procs = list(self._spawned)
+            if self.proc is not None and self.proc not in procs:
+                procs.append(self.proc)
+            for proc in procs:
+                terminate_process_group(proc.pid, reap=proc.poll)
+                proc.wait(timeout=GROUP_KILL_SECONDS)
         finally:
             self._close_log()
             if self.root.exists():

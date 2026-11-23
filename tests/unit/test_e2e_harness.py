@@ -292,9 +292,12 @@ class TestDaemonHarnessEnv:
 
 
 _FAKE_DAEMON = """
-    import os, pathlib, sys, time
+    import os, pathlib, subprocess, sys, time
     run = pathlib.Path(sys.argv[1])
     print("boot", os.getpid(), flush=True)
+    if (run / "leak").exists():
+        (run / "leak").unlink()
+        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     (run / "ante.pid").write_text(str(os.getpid()))
     (run / "ante.sock").write_text("")
     while not (run / "stop").exists():
@@ -302,6 +305,8 @@ _FAKE_DAEMON = """
     for name in ("stop", "ante.sock", "ante.pid"):
         (run / name).unlink()
     print("bye", os.getpid(), flush=True)
+    code = run / "exit-code"
+    sys.exit(int(code.read_text()) if code.exists() else 0)
 """
 
 
@@ -368,6 +373,30 @@ class TestRestart:
         with pytest.raises(harness.HarnessError, match="아직 끝나지 않았다"):
             fake_daemon.start(append_log=True)
         assert fake_daemon.stop() == 0
+
+    def test_cleanup_empties_every_spawned_group(
+        self, fake_daemon: DaemonHarness
+    ) -> None:
+        (fake_daemon.socket_path.parent / "leak").touch()
+        fake_daemon.start()
+        assert fake_daemon.proc is not None
+        first_pgid = fake_daemon.proc.pid
+        fake_daemon.restart()
+        assert group_alive(first_pgid)
+        fake_daemon.cleanup()
+        assert not group_alive(first_pgid)
+
+    def test_restart_does_not_start_after_failed_stop(
+        self, fake_daemon: DaemonHarness
+    ) -> None:
+        (fake_daemon.socket_path.parent / "exit-code").write_text("3")
+        fake_daemon.start()
+        first = fake_daemon.proc
+        with pytest.raises(harness.HarnessError, match="3로 끝났다"):
+            fake_daemon.restart()
+        assert fake_daemon.proc is first
+        assert not fake_daemon.socket_path.exists()
+        assert fake_daemon.daemon_log_path.read_text().count("boot") == 1
 
 
 class TestWaitUntil:
