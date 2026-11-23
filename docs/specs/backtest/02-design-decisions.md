@@ -164,36 +164,9 @@ strategy.on_stop()
 
 `to_dict()`는 기존 필드에 더해 `config`와 `datasets`를 직렬화한다:
 
-```python
-def to_dict(self) -> dict:
-    return {
-        # ... 기존 필드 ...
-        "config": {
-            "strategy_path": self.config.strategy_path,
-            "symbols": self.config.symbols,
-            "timeframe": self.config.timeframe,
-            "start_date": self.config.start_date,
-            "end_date": self.config.end_date,
-            "initial_balance": self.config.initial_balance,
-            "buy_commission_rate": self.config.buy_commission_rate,
-            "sell_commission_rate": self.config.sell_commission_rate,
-            "slippage_rate": self.config.slippage_rate,
-            "data_paths": self.config.data_paths,
-        },
-        "datasets": [
-            {
-                "symbol": d.symbol,
-                "timeframe": d.timeframe,
-                "row_count": d.row_count,
-                "start_date": d.start_date,
-                "end_date": d.end_date,
-                "data_dir": d.data_dir,
-                "file_count": d.file_count,
-            }
-            for d in self.datasets
-        ],
-    }
-```
+정의: `ante.backtest.result.BacktestResult.to_dict` (코드가 정본이다).
+
+`config`·`datasets`는 `BacktestConfig`·`DatasetInfo`의 모든 필드를 `asdict`로 담는다.
 
 **BacktestTrade 핵심 필드**:
 
@@ -257,24 +230,9 @@ def to_dict(self) -> dict:
 
 `_validate_config()`는 required keys 검증과 BacktestConfig 생성을 한 곳에서 수행한다. `run()` 실행 완료 후 `result.config = validated`, `result.datasets = data_provider.loaded_datasets`로 결과에 실행 설정을 주입한다.
 
-```python
-def _validate_config(self, config: dict[str, Any]) -> BacktestConfig:
-    try:
-        return BacktestConfig(
-            strategy_path=config["strategy_path"],
-            start_date=config["start_date"],
-            end_date=config["end_date"],
-            symbols=config.get("symbols", []),
-            timeframe=config.get("timeframe", "1d"),
-            initial_balance=config.get("initial_balance", 10_000_000),
-            buy_commission_rate=config.get("buy_commission_rate", 0.00015),
-            sell_commission_rate=config.get("sell_commission_rate", 0.00195),
-            slippage_rate=config.get("slippage_rate", 0.001),
-            data_paths=config.get("data_paths", [config.get("data_path", self._data_path)]),  # self._data_path = resolved data.path
-        )
-    except KeyError as e:
-        raise BacktestConfigError(f"Missing required config key: {e}")
-```
+정의: `ante.backtest.service.BacktestService._validate_config` (코드가 정본이다).
+
+- `data_paths`: self._data_path = resolved data.path
 
 **유관 모듈 호환성**:
 
