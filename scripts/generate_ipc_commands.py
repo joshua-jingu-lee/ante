@@ -30,6 +30,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+from annotated_types import Ge, Gt, Le, Lt
 from pydantic import AfterValidator, SecretStr
 from pydantic.fields import FieldInfo
 
@@ -41,6 +42,12 @@ GENERATE_COMMAND = (
     "PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_ipc_commands.py"
 )
 SCALARS: dict[Any, str] = {str: "str", int: "int", float: "float", bool: "bool"}
+NUMERIC_BOUNDS: dict[type, tuple[str, str]] = {
+    Gt: (">", "gt"),
+    Ge: (">=", "ge"),
+    Lt: ("<", "lt"),
+    Le: ("<=", "le"),
+}
 
 
 class UnsupportedFieldError(TypeError):
@@ -155,6 +162,36 @@ def _literal(text: str) -> str:
     return text
 
 
+def _non_null(annotation: Any) -> Any:
+    if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+        rest = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+        return rest[0] if len(rest) == 1 else annotation
+    return annotation
+
+
+def _bound(marker: Any) -> str:
+    symbol, attr = NUMERIC_BOUNDS[type(marker)]
+    value = getattr(marker, attr)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise UnsupportedFieldError(f"unsupported bound: {marker!r}")
+    return f"{symbol} {_literal(json.dumps(value))}"
+
+
+def numeric_bounds(annotation: Any, metadata: Sequence[Any]) -> str | None:
+    """숫자 제약(``gt``·``ge``·``lt``·``le``)의 표기. 숫자 제약이 없으면 ``None``.
+
+    숫자 제약은 ``int``·``float``(nullable 포함) 필드에서 다른 metadata 없이만 받는다.
+    """
+    bounds = [marker for marker in metadata if type(marker) in NUMERIC_BOUNDS]
+    if not bounds:
+        return None
+    if len(bounds) != len(metadata):
+        raise UnsupportedFieldError(f"unsupported metadata mix: {metadata!r}")
+    if _non_null(annotation) not in (int, float):
+        raise UnsupportedFieldError(f"unsupported bounded type: {annotation!r}")
+    return ", ".join(_bound(marker) for marker in bounds)
+
+
 def _escape(text: str) -> str:
     return text.replace("|", "\\|")
 
@@ -163,12 +200,15 @@ def field_cell(name: str, info: FieldInfo) -> str:
     """요청 필드 하나의 표기. 비밀값 필드는 기본값을 싣지 않는다."""
     if info.alias is not None or info.validation_alias is not None:
         raise UnsupportedFieldError(f"unsupported alias: {name}")
-    declared = f"{name}: {type_name(info.annotation, info.metadata)}"
+    bounds = numeric_bounds(info.annotation, info.metadata)
+    metadata = () if bounds is not None else info.metadata
+    declared = f"{name}: {type_name(info.annotation, metadata)}"
+    suffix = f" (`{bounds}`)" if bounds is not None else ""
     if info.is_required():
-        return _escape(f"`{declared}` (필수)")
+        return _escape(f"`{declared}` (필수){suffix}")
     if _contains(info.annotation, SecretStr):
-        return _escape(f"`{declared}` (선택)")
-    return _escape(f"`{declared} = {_default(info)}`")
+        return _escape(f"`{declared}` (선택){suffix}")
+    return _escape(f"`{declared} = {_default(info)}`{suffix}")
 
 
 def _check_model(model: Any) -> None:
