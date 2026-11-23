@@ -459,6 +459,153 @@ class TestReservation:
         assert budget is not None
         assert budget.available == 1_000_000.0
 
+    async def test_reserve_same_order_id_twice_rejected_without_change(
+        self, treasury, db
+    ):
+        """#2775: 같은 order_id의 재예약은 ValueError이고 아무것도 바꾸지 않는다."""
+        await treasury.allocate("bot1", 1_000_000.0)
+        await treasury.reserve_for_order("bot1", "ord1", 300_000.0)
+
+        with pytest.raises(ValueError, match="ord1"):
+            await treasury.reserve_for_order("bot1", "ord1", 200_000.0)
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.available == 700_000.0
+        assert budget.reserved == 300_000.0
+        assert treasury.get_reservations("bot1") == {"ord1": 300_000.0}
+        rows = await db.fetch_all(
+            "SELECT order_id, remaining FROM treasury_reservations"
+        )
+        assert [(r["order_id"], r["remaining"]) for r in rows] == [("ord1", 300_000.0)]
+
+        await treasury.release_reservation("bot1", "ord1")
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.reserved == 0.0
+        assert budget.available == 1_000_000.0
+
+    async def test_duplicate_reservation_error_is_value_error(self):
+        """#2775: 전용 예외는 ValueError의 하위 클래스다."""
+        from ante.treasury import DuplicateReservationError
+
+        assert issubclass(DuplicateReservationError, ValueError)
+
+
+class TestDuplicateValidatedEvent:
+    """#2775: 같은 order_id의 OrderValidatedEvent가 두 번 와도 발행·예약은 한 번."""
+
+    @staticmethod
+    def _validated(order_type: str, price: float | None) -> OrderValidatedEvent:
+        return OrderValidatedEvent(
+            order_id="ord-dup",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            price=price,
+            order_type=order_type,
+            account_id=ACCOUNT_ID,
+        )
+
+    @staticmethod
+    def _collect(eventbus) -> tuple[list, list]:
+        approved: list = []
+        rejected: list = []
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        return approved, rejected
+
+    @pytest.mark.parametrize("order_type", ["limit", "market"])
+    async def test_priced_buy_published_once(self, treasury, eventbus, order_type):
+        await treasury.allocate("bot1", 2_000_000.0)
+        approved, rejected = self._collect(eventbus)
+
+        await eventbus.publish(self._validated(order_type, 50_000.0))
+        await eventbus.publish(self._validated(order_type, 50_000.0))
+
+        assert len(approved) == 1
+        assert rejected == []
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.reserved == pytest.approx(500_000.0 * 1.00015)
+
+    async def test_duplicate_dropped_before_readiness_gate(self, db, eventbus):
+        """예약이 있는 id의 재도착은 준비성 게이트의 거부도 내지 않는다."""
+        registry = _gate_ready_registry()
+        t = Treasury(
+            db=db,
+            eventbus=eventbus,
+            account_id=ACCOUNT_ID,
+            currency=CURRENCY,
+            buy_commission_rate=0.00015,
+            sell_commission_rate=0.00195,
+            runtime_readiness=registry,
+        )
+        await t.initialize()
+        await t.set_account_balance(10_000_000.0)
+        await t.allocate("bot1", 1_000_000.0)
+        approved, rejected = self._collect(eventbus)
+
+        await eventbus.publish(self._validated("limit", 50_000.0))
+        registry.mark_not_ready(ACCOUNT_ID, ReadinessFlag.TREASURY_SYNC, "test")
+        await eventbus.publish(self._validated("limit", 50_000.0))
+
+        assert len(approved) == 1
+        assert rejected == []
+
+    @pytest.mark.parametrize("allocation", [1_000_000.0, 150_000.0])
+    async def test_market_buy_duplicate_during_quote_wait(
+        self, db, eventbus, allocation
+    ):
+        """기준가 조회를 기다리는 사이 같은 id가 먼저 예약해도 거부 0건·승인 1건.
+
+        ``150_000`` 은 둘째 예약이 가용 예산을 넘는 경우다 — 중복 판정이 예산
+        판정보다 먼저여야 거부가 나가지 않는다.
+        """
+        import asyncio
+
+        gate = asyncio.Event()
+        waiting = 0
+
+        async def resolver(symbol: str) -> float:
+            nonlocal waiting
+            waiting += 1
+            await gate.wait()
+            return 10_000.0
+
+        t = Treasury(
+            db=db,
+            eventbus=eventbus,
+            account_id=ACCOUNT_ID,
+            currency=CURRENCY,
+            buy_commission_rate=0.00015,
+            sell_commission_rate=0.00195,
+            order_reserve_price_resolver=resolver,
+            runtime_readiness=_gate_ready_registry(),
+        )
+        await t.initialize()
+        await t.set_account_balance(10_000_000.0)
+        await t.allocate("bot1", allocation)
+        approved, rejected = self._collect(eventbus)
+
+        first = asyncio.create_task(eventbus.publish(self._validated("market", None)))
+        second = asyncio.create_task(eventbus.publish(self._validated("market", None)))
+        while waiting < 2:
+            await asyncio.sleep(0)
+        gate.set()
+        await asyncio.gather(first, second)
+
+        assert len(approved) == 1
+        assert rejected == []
+        budget = t.get_budget("bot1")
+        assert budget is not None
+        assert budget.reserved == pytest.approx(approved[0].reserved_amount)
+        assert t.get_reservations("bot1") == {
+            "ord-dup": pytest.approx(approved[0].reserved_amount)
+        }
+
 
 # -- EventBus 통합 (account_id 필터링 포함) --------------------
 

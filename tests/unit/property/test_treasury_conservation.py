@@ -17,7 +17,8 @@
   표가 같다(#2770)
 
 거부는 연산의 정상 결과다. 다만 거부는 문서화된 Treasury 예외(``TreasuryError``)로만
-와야 한다. 그 밖의 예외는 실패다.
+와야 한다. 그 밖의 예외는 실패다. 예외: 같은 id의 재예약은
+``DuplicateReservationError``(``ValueError``)로 거부된다(#2775).
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ from ante.eventbus.events import (
     OrderFilledEvent,
 )
 from ante.trade.order_tracker import OrderTracker
-from ante.treasury.exceptions import TreasuryError
+from ante.treasury.exceptions import DuplicateReservationError, TreasuryError
 from ante.treasury.treasury import Treasury
 
 T = TypeVar("T")
@@ -243,7 +244,7 @@ class TreasuryMachine(RuleBasedStateMachine):
     def reserve_for_order(
         self, data: st.DataObject, spec: tuple[int, int, bool]
     ) -> None:
-        """매수 주문의 예약. 주문 id는 매번 새로 만든다(같은 id는 예약 표를 덮는다).
+        """매수 주문의 예약. 주문 id는 매번 새로 만든다(같은 id는 ``reserve_again``).
 
         봇은 예산이 있는 봇에서 고른다(없으면 셋 가운데에서 — 예약은 False다).
         """
@@ -271,6 +272,17 @@ class TreasuryMachine(RuleBasedStateMachine):
             )
         self.open_orders[order_id] = _Order(bot, tracked, qty, price)
         self.order_bot[order_id] = bot
+
+    @precondition(lambda self: bool(self.open_orders))
+    @rule(data=st.data(), amount=amounts)
+    def reserve_again(self, data: st.DataObject, amount: int) -> None:
+        """열린 주문의 id로 다시 예약한다. 전용 예외로 거부되고 그대로다(#2775)."""
+        order_id = data.draw(st.sampled_from(sorted(self.open_orders)), "order")
+        bot = self.open_orders[order_id].bot_id
+        before = (self._budget_values(), self._reservation_table())
+        with pytest.raises(DuplicateReservationError):
+            self._run(self.treasury.reserve_for_order(bot, order_id, float(amount)))
+        assert (self._budget_values(), self._reservation_table()) == before
 
     @precondition(lambda self: bool(self.open_orders))
     @rule(data=st.data())

@@ -107,3 +107,11 @@ class TreasuryDeallocateExceedsAvailableError(TreasuryError):
             f"treasury.deallocate: 가용 예산 초과 "
             f"(요청={amount:,.0f}, 가용={available:,.0f}, bot_id={bot_id})"
         )
+
+
+class DuplicateReservationError(ValueError):
+    """같은 ``order_id`` 의 예약 항목이 이미 있어 재예약을 거부함."""
+
+    def __init__(self, order_id: str) -> None:
+        self.order_id = order_id
+        super().__init__(f"order_id {order_id} 의 예약이 이미 있습니다")
