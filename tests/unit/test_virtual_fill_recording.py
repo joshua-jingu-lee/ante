@@ -339,6 +339,10 @@ async def test_direct_fill_rejects_invalid_account_id(
         {"quantity": -1.0},
         {"price": 0.0},
         {"price": -100.0},
+        {"quantity": float("nan")},
+        {"quantity": float("inf")},
+        {"price": float("nan")},
+        {"price": float("inf")},
         {"order_id": ""},
     ],
 )

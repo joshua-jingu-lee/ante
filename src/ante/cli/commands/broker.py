@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import AsyncIterator, Coroutine
+from contextlib import asynccontextmanager
 from typing import Any, cast
 
 import click
@@ -35,7 +36,11 @@ async def _create_account_service() -> tuple[Any, Any]:
     await db.connect()
     eventbus = EventBus()
     account_service = AccountService(db=db, eventbus=eventbus)
-    await account_service.initialize()
+    try:
+        await account_service.initialize()
+    except Exception:
+        await db.close()
+        raise
     return account_service, db
 
 
@@ -77,6 +82,20 @@ async def _get_broker(account_id: str | None = None) -> tuple[Any, Any]:
         raise ValueError(msg)
 
 
+@asynccontextmanager
+async def _direct_broker(account_id: str) -> AsyncIterator[tuple[Any, Any]]:
+    """직접 연결 어댑터와 db를 주고, 연결 해제가 실패해도 db를 닫는다."""
+    adapter, db = await _get_broker(account_id)
+    try:
+        yield adapter, db
+    finally:
+        try:
+            await adapter.disconnect()
+        finally:
+            if db:
+                await db.close()
+
+
 async def _ipc_broker_command(
     command: str,
     account_id: str,
@@ -113,20 +132,13 @@ def status(ctx: click.Context, account_id: str) -> CommandResult:
 
         async def _run_status() -> dict[str, Any]:
             try:
-                adapter, db = await _get_broker(validated_account_id)
-                try:
+                async with _direct_broker(validated_account_id) as (adapter, _):
                     healthy = await adapter.health_check()
                     return {
                         "connected": adapter.is_connected,
                         "healthy": healthy,
                         "exchange": adapter.exchange,
                     }
-                finally:
-                    try:
-                        await adapter.disconnect()
-                    finally:
-                        if db:
-                            await db.close()
             except AccountNotFoundError:
                 raise
             except Exception as e:
@@ -173,13 +185,8 @@ def balance(ctx: click.Context, account_id: str) -> CommandResult:
     except IPCServerNotRunningError:
 
         async def _run_balance() -> dict[str, Any]:
-            adapter, db = await _get_broker(validated_account_id)
-            try:
+            async with _direct_broker(validated_account_id) as (adapter, _):
                 return cast("dict[str, Any]", await adapter.get_account_balance())
-            finally:
-                await adapter.disconnect()
-                if db:
-                    await db.close()
 
         result = _run(_run_balance())
 
@@ -216,13 +223,8 @@ def positions(ctx: click.Context, account_id: str) -> CommandResult:
     except IPCServerNotRunningError:
 
         async def _run_positions() -> list[dict[str, Any]]:
-            adapter, db = await _get_broker(validated_account_id)
-            try:
+            async with _direct_broker(validated_account_id) as (adapter, _):
                 return cast("list[dict[str, Any]]", await adapter.get_positions())
-            finally:
-                await adapter.disconnect()
-                if db:
-                    await db.close()
 
         result = {"positions": _run(_run_positions())}
 
@@ -322,8 +324,7 @@ def order_history(
         async def _run_order_history() -> list[dict[str, Any]]:
             from ante.core.time import iso_to_kis_date
 
-            adapter, db = await _get_broker(validated_account_id)
-            try:
+            async with _direct_broker(validated_account_id) as (adapter, _):
                 return cast(
                     "list[dict[str, Any]]",
                     await adapter.get_order_history(
@@ -331,10 +332,6 @@ def order_history(
                         iso_to_kis_date(to_date),
                     ),
                 )
-            finally:
-                await adapter.disconnect()
-                if db:
-                    await db.close()
 
         result = {"orders": _run(_run_order_history())}
 
@@ -411,58 +408,61 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> CommandResult:
                 from ante.core.database import Database
                 from ante.trade.position import PositionHistory
 
-                adapter, adapter_db = await _get_broker(validated_account_id)
-                db = adapter_db or Database(get_db_path())
-                if not adapter_db:
-                    await db.connect()
-                try:
-                    position_history = PositionHistory(db)
-                    await position_history.initialize()
+                async with _direct_broker(validated_account_id) as (
+                    adapter,
+                    adapter_db,
+                ):
+                    db = adapter_db or Database(get_db_path())
+                    if not adapter_db:
+                        await db.connect()
+                    try:
+                        position_history = PositionHistory(db)
+                        await position_history.initialize()
 
-                    broker_positions = await adapter.get_account_positions()
-                    internal_positions = await position_history.get_all_positions(
-                        account_id=validated_account_id
-                    )
-
-                    broker_totals: dict[str, float] = {}
-                    for bp in broker_positions:
-                        b_qty = float(bp.get("quantity", 0) or 0)
-                        if b_qty != 0:
-                            sym = bp["symbol"]
-                            broker_totals[sym] = broker_totals.get(sym, 0.0) + b_qty
-                    internal_totals: dict[str, float] = {}
-                    for ip in internal_positions:
-                        internal_totals[ip.symbol] = (
-                            internal_totals.get(ip.symbol, 0.0) + ip.quantity
+                        broker_positions = await adapter.get_account_positions()
+                        internal_positions = await position_history.get_all_positions(
+                            account_id=validated_account_id
                         )
 
-                    all_symbols = set(broker_totals.keys()) | set(
-                        internal_totals.keys()
-                    )
-                    discrepancies = []
-                    for symbol in sorted(all_symbols):
-                        broker_qty = broker_totals.get(symbol, 0.0)
-                        internal_qty = internal_totals.get(symbol, 0.0)
-                        if broker_qty != internal_qty:
-                            discrepancies.append(
-                                {
-                                    "symbol": symbol,
-                                    "broker_qty": broker_qty,
-                                    "internal_qty": internal_qty,
-                                    "diff": broker_qty - internal_qty,
-                                }
+                        broker_totals: dict[str, float] = {}
+                        for bp in broker_positions:
+                            b_qty = float(bp.get("quantity", 0) or 0)
+                            if b_qty != 0:
+                                sym = bp["symbol"]
+                                broker_totals[sym] = broker_totals.get(sym, 0.0) + b_qty
+                        internal_totals: dict[str, float] = {}
+                        for ip in internal_positions:
+                            internal_totals[ip.symbol] = (
+                                internal_totals.get(ip.symbol, 0.0) + ip.quantity
                             )
 
-                    return {
-                        "total_symbols": len(all_symbols),
-                        "discrepancies": discrepancies,
-                        "match": len(discrepancies) == 0,
-                        "fix_applied": False,
-                        "corrections": 0,
-                    }
-                finally:
-                    await adapter.disconnect()
-                    await db.close()
+                        all_symbols = set(broker_totals.keys()) | set(
+                            internal_totals.keys()
+                        )
+                        discrepancies = []
+                        for symbol in sorted(all_symbols):
+                            broker_qty = broker_totals.get(symbol, 0.0)
+                            internal_qty = internal_totals.get(symbol, 0.0)
+                            if broker_qty != internal_qty:
+                                discrepancies.append(
+                                    {
+                                        "symbol": symbol,
+                                        "broker_qty": broker_qty,
+                                        "internal_qty": internal_qty,
+                                        "diff": broker_qty - internal_qty,
+                                    }
+                                )
+
+                        return {
+                            "total_symbols": len(all_symbols),
+                            "discrepancies": discrepancies,
+                            "match": len(discrepancies) == 0,
+                            "fix_applied": False,
+                            "corrections": 0,
+                        }
+                    finally:
+                        if not adapter_db:
+                            await db.close()
 
             result = _run(_run_reconcile())
 

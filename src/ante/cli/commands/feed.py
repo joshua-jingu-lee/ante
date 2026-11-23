@@ -492,7 +492,7 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
     """내장 스케줄러로 backfill/daily를 자동 실행하는 상주 프로세스를 시작한다."""
     import asyncio
 
-    from ante.feed.cli_scheduler import run_scheduler_loop
+    from ante.feed.cli_scheduler import run_scheduler_loop, validate_schedule
     from ante.feed.config import FeedConfig
 
     data_path = resolve_data_path(ctx, data_path)
@@ -510,6 +510,12 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
     backfill_at = (
         schedule.get("backfill_at", "01:00") if isinstance(schedule, dict) else "01:00"
     )
+    try:
+        validate_schedule(config, daily_at, backfill_at)
+    except ValueError as exc:
+        raise CliInvalidScheduleTimeError(
+            f"스케줄 시간 설정이 올바르지 않습니다: {exc}"
+        ) from exc
 
     orchestrator = _build_orchestrator(cfg)
 
@@ -525,10 +531,6 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
                 backfill_at=backfill_at,
             )
         )
-    except ValueError as exc:
-        raise CliInvalidScheduleTimeError(
-            f"스케줄 시간 설정이 올바르지 않습니다: {exc}"
-        ) from exc
     except KeyboardInterrupt:
         click.echo("\nDataFeed 스케줄러 종료")
 

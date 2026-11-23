@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +19,16 @@ if TYPE_CHECKING:
     from ante.trade.fill_applier import FillApplier
 
 logger = logging.getLogger(__name__)
+
+
+def _is_valid_market_price(x: object) -> bool:
+    """불리언이 아닌 유한한 수이고 0보다 큰지 — 예외 무전파."""
+    if isinstance(x, bool) or not isinstance(x, int | float):
+        return False
+    try:
+        return math.isfinite(x) and x > 0
+    except (OverflowError, TypeError, ValueError):
+        return False
 
 
 class VirtualPortfolioView(PortfolioView):
@@ -331,7 +342,7 @@ class VirtualExecutor:
             elif event.price is not None:
                 current_price = event.price
 
-            if current_price is None or current_price <= 0:
+            if current_price is None or not _is_valid_market_price(current_price):
                 logger.error(
                     "Virtual 시장가 체결가 미상 — 0원 체결 금지, 주문 실패 종결 "
                     "(order_id=%s, symbol=%s)",

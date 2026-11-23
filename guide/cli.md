@@ -2,7 +2,7 @@
 
 Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
 
-> 마지막 갱신: 2026-11-20
+> 마지막 갱신: 2026-11-23
 
 > 이 문서는 `scripts/generate_cli_reference.py`로 자동 생성됩니다. 명령어 상세를 직접 편집하지 말고 Click 데코레이터나 생성 스크립트를 수정한 뒤 재생성하세요.
 
@@ -2225,7 +2225,7 @@ ante rule update <RULE_TYPE> --account <ACCOUNT_ID> [OPTIONS]
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--account` | O | TEXT | — | 계좌 ID |
-| `--enabled`, `--disabled` | - | BOOLEAN | true | 룰 활성화 여부 |
+| `--enabled`, `--disabled` | - | BOOLEAN | — | 룰 활성화 여부 (생략하면 저장된 값을 유지) |
 | `--param` | - | TEXT | — | 룰 파라미터 (key=value, 복수 지정 가능) |
 | `--params-json` | - | TEXT | — | 룰 파라미터 JSON object |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
