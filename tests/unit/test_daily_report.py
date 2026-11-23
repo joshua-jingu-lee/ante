@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, date, datetime, time, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
+from ante.core import clock
 from ante.eventbus.bus import EventBus
 from ante.eventbus.events import DailyReportEvent, NotificationEvent
 from ante.trade.daily_report import (
@@ -659,3 +661,112 @@ class TestCrossAccountFilter:
         # get_all_positions: account_id 키워드로 자기 계좌가 명시 전달됨.
         gap_kwargs = position_history.get_all_positions.await_args.kwargs
         assert gap_kwargs.get("account_id") == "acc-1"
+
+
+# ── _loop target date ────────────────────────────────
+
+
+class _AdjustableClock:
+    """Test clock whose wall time can jump in either direction."""
+
+    def __init__(self, start: datetime) -> None:
+        self.current = start
+        self._mono = 0.0
+
+    def now(self, tz):
+        return self.current.astimezone(tz)
+
+    def monotonic(self) -> float:
+        return self._mono
+
+
+class TestLoopDate:
+    """The loop reports the date of the target it slept toward (#2787)."""
+
+    async def _run_loop(self, monkeypatch, scheduler, eventbus, start, wake_at):
+        fake_clock = _AdjustableClock(start)
+        original_sleep = asyncio.sleep
+        delays: list[float] = []
+
+        async def fake_sleep(delay, *args, **kwargs):
+            if delay <= 0:
+                return await original_sleep(delay, *args, **kwargs)
+            delays.append(delay)
+            if len(delays) > 1:
+                raise asyncio.CancelledError
+            fake_clock.current = wake_at
+
+        monkeypatch.setattr("ante.trade.daily_report.asyncio.sleep", fake_sleep)
+        report_events: list[DailyReportEvent] = []
+        eventbus.subscribe(DailyReportEvent, lambda e: report_events.append(e))
+
+        with clock.use_clock(fake_clock), pytest.raises(asyncio.CancelledError):
+            await scheduler._loop()
+        return report_events, delays, fake_clock
+
+    @pytest.fixture
+    def make_scheduler(
+        self, performance_tracker, trade_recorder, position_history, eventbus, treasury
+    ):
+        def _make(report_time: time) -> DailyReportScheduler:
+            return DailyReportScheduler(
+                performance_tracker=performance_tracker,
+                trade_recorder=trade_recorder,
+                position_history=position_history,
+                eventbus=eventbus,
+                account_id="acc-1",
+                report_time=report_time,
+                currency="KRW",
+                treasury=treasury,
+            )
+
+        return _make
+
+    async def test_wall_clock_jumps_forward_past_midnight(
+        self, monkeypatch, make_scheduler, eventbus
+    ):
+        """Waking after midnight still reports the target's date."""
+        sched = make_scheduler(time(23, 59))
+        events, delays, _ = await self._run_loop(
+            monkeypatch,
+            sched,
+            eventbus,
+            start=datetime(2026, 3, 19, 23, 58, 0, tzinfo=KST),
+            wake_at=datetime(2026, 3, 20, 0, 0, 10, tzinfo=KST),
+        )
+
+        assert delays[0] == 60.0
+        assert [e.report_date for e in events] == ["2026-03-19"]
+
+    async def test_wall_clock_jumps_back_before_midnight(
+        self, monkeypatch, make_scheduler, eventbus
+    ):
+        """Waking before midnight still reports the next-day target's date."""
+        sched = make_scheduler(time(0, 5))
+        events, delays, _ = await self._run_loop(
+            monkeypatch,
+            sched,
+            eventbus,
+            start=datetime(2026, 3, 19, 0, 6, 0, tzinfo=KST),
+            wake_at=datetime(2026, 3, 19, 23, 59, 0, tzinfo=KST),
+        )
+
+        assert delays[0] == 86_340.0
+        assert [e.report_date for e in events] == ["2026-03-20"]
+
+    async def test_no_adjustment_reports_wall_clock_date(
+        self, monkeypatch, make_scheduler, eventbus
+    ):
+        """Without an adjustment the date equals the wall-clock date on waking."""
+        sched = make_scheduler(time(23, 59))
+        events, _, fake_clock = await self._run_loop(
+            monkeypatch,
+            sched,
+            eventbus,
+            start=datetime(2026, 3, 19, 23, 58, 0, tzinfo=KST),
+            wake_at=datetime(2026, 3, 19, 23, 59, 0, tzinfo=KST),
+        )
+
+        assert [e.report_date for e in events] == [
+            fake_clock.now(KST).date().isoformat()
+        ]
