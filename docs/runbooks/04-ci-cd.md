@@ -90,21 +90,7 @@ branch protection repository setting은 이 저장소 밖 운영 설정이므로
 
 외부 fork PR에서는 same-repo guard 때문에 `merge-gate`가 정상적으로 skip된다. 이때는 시크릿 없는 GitHub-hosted read-only CI만 실행한다.
 
-예시:
-
-```yaml
-- PYTHONPATH=$PWD/src .venv/bin/python -m ruff check src/ tests/
-- PYTHONPATH=$PWD/src .venv/bin/python -m ruff format --check src/ tests/
-- PYTHONPATH=$PWD/src .venv/bin/python -m mypy src/
-- PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check
-- PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check
-- PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check
-- PYTHONPATH=$PWD/src .venv/bin/python scripts/check_prose_budget.py
-- PYTHONPATH=$PWD/src .venv/bin/python scripts/check_comments.py
-- PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -x -n auto --tb=short -q --cov=src/ante --cov-fail-under=80
-- PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -x --tb=short -q
-- docker build -t ante:release-pr .  # release/* PR only
-```
+단계 목록은 `.github/workflows/ci.yml`이 정본이다.
 
 ### Meta Review — Claude code-reviewer
 
@@ -176,7 +162,6 @@ branch protection repository setting은 이 저장소 밖 운영 설정이므로
 - `pr-approvals.yml`은 과거 PR 단계 자동 AI 승인 워커와 자동 재수정 워커를 포함했으나, 현재는 `merge-gate` 잡만 유지한다. 파일명 변경(`merge-gate.yml`)은 비목표.
 - **운영 과제**:
   - 반복 `risk class` 에스컬레이션 자동화 고도화
-  - 필요 시 architecture gate 도입
 
 GitHub branch protection에서 required status checks를 사용할 경우, 각 job 이름은 서로 달라야 한다.
 
@@ -247,19 +232,7 @@ D-020 필수 운영값 세 가지는 운영 GitHub 저장소 설정에서 유지
 
 ## 4. 로컬 개발 시 사전 검증
 
-```bash
-PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py
-PYTHONPATH=$PWD/src .venv/bin/python -m ruff check src/ tests/
-PYTHONPATH=$PWD/src .venv/bin/python -m ruff format src/ tests/
-PYTHONPATH=$PWD/src .venv/bin/python -m mypy src/ante/
-PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check
-PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check
-PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check
-PYTHONPATH=$PWD/src .venv/bin/python scripts/check_prose_budget.py
-PYTHONPATH=$PWD/src .venv/bin/python scripts/check_comments.py
-PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
-PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -v
-```
+`PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py`로 현재 worktree의 `ante`가 import되는지 확인한 뒤, `.github/workflows/ci.yml`의 lint 잡 명령과 `test-shard`·`test` 잡의 pytest 명령(`tests/unit/`·`tests/integration/`·`tests/e2e/`)을 `PYTHONPATH=$PWD/src`로 로컬에서 실행한다.
 
 내부 브랜치 리뷰(`/code-review`) 전 이 검증을 통과시켜야 사전 리뷰 루프가 짧아진다.
 
@@ -307,20 +280,6 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -v
   4. 이슈 또는 PR 코멘트에 복구 run 링크와 최종 상태를 남긴다.
 
 **멱등성**: 이슈 상태·체크박스·에픽 동기화는 멱등이라 중복 실행이 안전하다(이미 `[x]`/closed면 무해 — 원본 보존 원칙). 단 수동 복구(`issue_numbers`) 경로는 `pr` 컨텍스트가 없어 post-merge 코멘트의 중복 판정 needle이 `- PR: n-a`인데 closed run이 남긴 코멘트는 `- PR: #N`이라 서로 매치되지 않는다 — 이미 closed run이 정리한 이슈에 수동 복구를 돌리면 `정리 완료` 코멘트가 **중복 게시**될 수 있다(무해). 중복을 피하려면 아직 정리되지 않은 이슈 번호만 지정한다.
-
-## 6. 설계 적합성 검증 (선택 Gate)
-
-모듈 간 import 방향과 순환 의존을 기계적으로 검사하는 Gate는 계속 도입 후보로 둔다.
-
-예상 파일:
-
-```yaml
-# .github/workflows/architecture.yml
-- 모듈 간 import 규칙 검증
-- 금지된 직접 의존 검사
-```
-
-도입 시에는 `ci`에 병합하거나 별도 required status check로 분리한다.
 
 ## 7. 릴리스 연계
 

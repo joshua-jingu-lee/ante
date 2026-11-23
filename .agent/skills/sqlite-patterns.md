@@ -195,7 +195,7 @@ PRAGMA busy_timeout = 5000;         -- SQLITE_BUSY 시 5초 대기 후 재시도
 
 ## 8. 공통 주의사항
 
-- **동기 sqlite3 호출 금지**: 반드시 `aiosqlite` 사용 (이벤트 루프 블로킹 방지)
+- **동기 sqlite3 호출 금지**: core·db 안에서도 이벤트 루프 경로에서는 동기 sqlite3를 부르지 않고 `aiosqlite`를 쓴다(백업 §6은 예외). core·db 밖의 `sqlite3`·`aiosqlite` import는 import 경계 검사가 실패시킨다
 - **파라미터 바인딩 필수**: `f"SELECT * FROM t WHERE id = {id}"` 금지 → `"... WHERE id = ?"` 사용 (SQL injection 방지)
 - **TEXT 타입 활용**: SQLite는 동적 타입이지만, 스키마에 타입 명시하여 의도 전달
 - **인덱스**: 자주 조회하는 컬럼(bot_id, symbol, executed_at)에 인덱스 생성
