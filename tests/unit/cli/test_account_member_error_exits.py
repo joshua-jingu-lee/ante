@@ -66,6 +66,8 @@ _ACCOUNT_CM = "ante.cli.commands.account._create_account_service"
 _MEMBER_CM = "ante.cli.commands.member._create_service"
 _MODES = ("json", "text")
 _MASTER_REQUIRED = "권한이 없습니다: master만 수행할 수 있습니다."
+_ENV_SLOT = "fake-secret-in-env-slot"
+_PATH_SLOT = "/nonexistent-ante-fake"
 
 
 def _set_master(ctx: click.Context) -> None:
@@ -170,6 +172,12 @@ _UNKNOWN_KEY = (
     "알 수 없는 credential key입니다 ({} 옵션의 {}번째 인자). "
     "허용되는 key: ['app_key', 'app_secret']"
 )
+_ENV_NOT_SET = (
+    "--credential-env 옵션의 {}번째 인자({})가 가리키는 환경변수가 "
+    "설정되지 않았거나 공란입니다."
+)
+_FILE_FAILED = "--credential-file 옵션의 {}번째 인자({})가 가리키는 파일{}"
+_BROKER_DUP = "--broker-config 옵션의 {}번째 인자의 key가 {}번째 인자와 중복됩니다."
 
 
 def _create_case(extra: list[str], code: str, message: str, case_id: str) -> Any:
@@ -293,9 +301,25 @@ _CREATE_INPUT_EXITS = [
     _create_case(
         ["--credential-env", "app_key=FAKE_ENV_UNSET"],
         "ACCOUNT_CREDENTIAL_ENV_NOT_SET",
-        "--credential-env app_key=FAKE_ENV_UNSET: "
-        "환경변수가 설정되지 않았거나 공란입니다.",
+        _ENV_NOT_SET.format(1, "app_key"),
         "credential-env-unset",
+    ),
+    _create_case(
+        ["--credential-env", f"app_key={_ENV_SLOT}"],
+        "ACCOUNT_CREDENTIAL_ENV_NOT_SET",
+        _ENV_NOT_SET.format(1, "app_key"),
+        "credential-env-value-in-name-slot",
+    ),
+    _create_case(
+        [
+            "--credential-env",
+            "app_key=FAKE_ENV_A",
+            "--credential-env",
+            f"app_secret={_ENV_SLOT}",
+        ],
+        "ACCOUNT_CREDENTIAL_ENV_NOT_SET",
+        _ENV_NOT_SET.format(2, "app_secret"),
+        "credential-env-unset-second",
     ),
     _create_case(
         ["--credential-file", "app_key="],
@@ -304,11 +328,21 @@ _CREATE_INPUT_EXITS = [
         "credential-file-empty-path",
     ),
     _create_case(
-        ["--credential-file", "app_key=/nonexistent-ante-fake/cred.txt"],
+        ["--credential-file", f"app_key={_PATH_SLOT}/cred.txt"],
         "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND",
-        "--credential-file app_key=/nonexistent-ante-fake/cred.txt: "
-        "파일을 찾을 수 없습니다.",
+        _FILE_FAILED.format(1, "app_key", "을 찾을 수 없습니다."),
         "credential-file-missing",
+    ),
+    _create_case(
+        [
+            "--credential-env",
+            "app_key=FAKE_ENV_A",
+            "--credential-file",
+            f"app_secret={_PATH_SLOT}/{_ENV_SLOT}",
+        ],
+        "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND",
+        _FILE_FAILED.format(1, "app_secret", "을 찾을 수 없습니다."),
+        "credential-file-missing-value-in-path-slot",
     ),
     _create_case(
         ["--credential", f"app_key={_SECRET}"],
@@ -330,10 +364,24 @@ _CREATE_INPUT_EXITS = [
         "broker-config-empty-key-second",
     ),
     _create_case(
-        [*_CRED_OK, "--broker-config", "a=1", "--broker-config", "a=2"],
+        [*_CRED_OK, "--broker-config", "fake-v1=1", "--broker-config", "fake-v1=2"],
         "CLI_MISSING_REQUIRED_INPUT",
-        "--broker-config key 'a'가 중복 입력되었습니다.",
+        _BROKER_DUP.format(2, 1),
         "broker-config-duplicate",
+    ),
+    _create_case(
+        [
+            *_CRED_OK,
+            "--broker-config",
+            "a=1",
+            "--broker-config",
+            "fake-v1=1",
+            "--broker-config",
+            "fake-v1=2",
+        ],
+        "CLI_MISSING_REQUIRED_INPUT",
+        _BROKER_DUP.format(3, 2),
+        "broker-config-duplicate-later",
     ),
 ]
 
@@ -351,7 +399,17 @@ def test_account_create_input_exit(
         env={"FAKE_ENV_A": "fake-env-v", "FAKE_ENV_UNSET": ""},
     )
     _assert_exit(mode, result, code, f"{code}: {message}", f"Error: {code}: {message}")
-    _assert_no_secret(result, _SECRET, "fake-s1", "fake-env-v", "fake-v0")
+    _assert_no_secret(
+        result,
+        _SECRET,
+        "fake-s1",
+        "fake-env-v",
+        "fake-v0",
+        "fake-v1",
+        _ENV_SLOT,
+        _PATH_SLOT,
+        "FAKE_ENV_UNSET",
+    )
     service.create.assert_not_called()
 
 
@@ -363,11 +421,11 @@ def test_account_create_credential_file_unreadable(mode: str, tmp_path: Path) ->
         ["--format", mode, *_CREATE, "--credential-file", f"app_key={folder}"],
         patch(_ACTIVE, return_value=False),
     )
-    message = (
-        f"ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: --credential-file app_key={folder}: "
-        f"파일을 읽을 수 없습니다 ([Errno 21] Is a directory: '{folder}')."
+    message = "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: " + _FILE_FAILED.format(
+        1, "app_key", "을 읽을 수 없습니다."
     )
     _assert_plain(mode, result, "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND", message)
+    _assert_no_secret(result, str(tmp_path), "Errno")
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -378,11 +436,11 @@ def test_account_create_credential_file_empty(mode: str, tmp_path: Path) -> None
         ["--format", mode, *_CREATE, "--credential-file", f"app_key={empty}"],
         patch(_ACTIVE, return_value=False),
     )
-    message = (
-        f"ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: --credential-file app_key={empty}: "
-        "파일이 비어 있습니다."
+    message = "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: " + _FILE_FAILED.format(
+        1, "app_key", "이 비어 있습니다."
     )
     _assert_plain(mode, result, "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND", message)
+    _assert_no_secret(result, str(tmp_path))
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -697,6 +755,13 @@ def test_account_delete_service_error(
             _UNKNOWN_KEY.format("--credential", 1),
             id="secret-as-key",
         ),
+        pytest.param(
+            "test",
+            ["--credential-env", f"app_key={_ENV_SLOT}"],
+            "ACCOUNT_CREDENTIAL_ENV_NOT_SET",
+            _ENV_NOT_SET.format(1, "app_key"),
+            id="env-value-in-name-slot",
+        ),
     ],
 )
 def test_account_set_credentials_input_exit(
@@ -712,7 +777,7 @@ def test_account_set_credentials_input_exit(
         _service_cm(_ACCOUNT_CM, service),
     )
     _assert_exit(mode, result, code, f"{code}: {message}", f"Error: {code}: {message}")
-    _assert_no_secret(result, _SECRET)
+    _assert_no_secret(result, _SECRET, _ENV_SLOT)
     service.update.assert_not_called()
 
 
@@ -897,21 +962,22 @@ def test_member_secret_input_both(
 
 
 @pytest.mark.parametrize("mode", _MODES)
+@pytest.mark.parametrize("name", ["FAKE_PW_ENV", _ENV_SLOT])
 @pytest.mark.parametrize(("args", "env_opt", "file_opt", "missing"), _SECRET_COMMANDS)
 def test_member_secret_env_not_set(
-    mode: str, args: list[str], env_opt: str, file_opt: str, missing: str
+    mode: str, name: str, args: list[str], env_opt: str, file_opt: str, missing: str
 ) -> None:
     result = _invoke(
-        ["--format", mode, *args, env_opt, "FAKE_PW_ENV"],
+        ["--format", mode, *args, env_opt, name],
         _send(AssertionError("IPC 금지")),
         env={"FAKE_PW_ENV": "   "},
     )
     message = (
-        "환경변수 FAKE_PW_ENV이(가) 설정되어 있지 않거나 공란입니다. "
+        f"{env_opt}가 가리키는 환경변수가 설정되어 있지 않거나 공란입니다. "
         f"{env_opt}는 비밀값이 든 환경변수의 *이름*만 받습니다."
     )
     _assert_coded(mode, result, "MEMBER_PASSWORD_ENV_NOT_SET", message)
-    _assert_no_secret(result, _RECOVERY)
+    _assert_no_secret(result, _RECOVERY, name)
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -929,12 +995,9 @@ def test_member_secret_file_unreadable(
         ["--format", mode, *args, file_opt, str(absent)],
         _send(AssertionError("IPC 금지")),
     )
-    message = (
-        f"{file_opt} 파일을 읽을 수 없습니다: {absent} "
-        f"([Errno 2] No such file or directory: '{absent}')"
-    )
+    message = f"{file_opt} 파일을 읽을 수 없습니다."
     _assert_coded(mode, result, "MEMBER_PASSWORD_FILE_NOT_FOUND", message)
-    _assert_no_secret(result, _RECOVERY)
+    _assert_no_secret(result, _RECOVERY, str(tmp_path), "Errno")
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -953,9 +1016,9 @@ def test_member_secret_file_empty(
         ["--format", mode, *args, file_opt, str(empty)],
         _send(AssertionError("IPC 금지")),
     )
-    message = f"{file_opt} 파일이 비어 있습니다: {empty}"
+    message = f"{file_opt} 파일이 비어 있습니다."
     _assert_coded(mode, result, "MEMBER_PASSWORD_FILE_NOT_FOUND", message)
-    _assert_no_secret(result, _RECOVERY)
+    _assert_no_secret(result, _RECOVERY, str(tmp_path))
 
 
 def _secret_args(args: list[str], env_opt: str) -> list[str]:

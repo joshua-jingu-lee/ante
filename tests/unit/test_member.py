@@ -325,11 +325,17 @@ class TestSuspendReactivateRevoke:
         assert m.token_hash == ""
 
     async def test_revoke_already_revoked_fails(self, service):
+        from ante.member.errors import MemberStateConflictError
+
         await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         await service.revoke("agent-01", revoked_by="owner")
-        with pytest.raises(PermissionError, match="active, suspended 상태에서만"):
+        with pytest.raises(MemberStateConflictError) as excinfo:
             await service.revoke("agent-01", revoked_by="owner")
+        assert type(excinfo.value) is MemberStateConflictError
+        assert excinfo.value.code == "MEMBER_STATE_CONFLICT"
+        assert excinfo.value.current_status == "revoked"
+        assert excinfo.value.requested_action == "revoke"
 
     async def test_revoke_master_fails(self, service):
         await service.bootstrap_master("owner", "pass123")
