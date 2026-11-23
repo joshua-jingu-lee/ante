@@ -162,7 +162,8 @@ cold-path 삭제는 항상 keep 의미다.
 
 일반 운영 CLI는 broker adapter를 직접 생성하지 않는다. 직접 생성 경로는 서버의
 credentials 복호화, 연결 세션, rate limit, circuit breaker, audit 경로를 우회할 수
-있다. `broker order`와 `broker stream prices`는 일반 운영 IPC 대상이 아니며 별도
+있다. 서버가 실행 중이 아닐 때의 직접 연결 폴백은 예외다. 서버가 거부하거나 응답하지
+않으면 그 코드로 끝난다. `broker order`와 `broker stream prices`는 일반 운영 IPC 대상이 아니며 별도
 maintenance/test 스펙 없이는 제공하지 않는다.
 
 #### Signal
@@ -543,8 +544,9 @@ drift다.
 
 | 상황 | 동작 |
 |------|------|
-| 서버 미기동 (소켓 없음) | 런타임 전용 커맨드는 `IPCClient`가 `ServerNotRunningError` 발생. CLI는 `"서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."` 출력 후 종료. member maintenance fallback 대상은 IPC 실패 전/후 직접 MemberService 경로로 전환 가능 |
-| 타임아웃 (기본 30초) | `IPCClient`가 `IPCTimeoutError` 발생. CLI는 `"서버 응답 시간 초과"` 출력 후 종료 |
+| 서버 미기동 (소켓 없음·연결 거부) | 런타임 전용 커맨드는 `IPCClient`가 `ServerNotRunningError` 발생. CLI는 `"서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."` 출력 후 종료. member maintenance fallback 대상은 IPC 실패 전/후 직접 MemberService 경로로 전환 가능 |
+| 타임아웃 (연결·응답 단계, 기본 30초) | `IPCClient`가 `IPCTimeoutError` 발생. CLI는 `"서버 응답 시간 초과"` 출력 후 종료 |
+| 그 밖의 연결 실패 (권한 거부 등) | 감싸지 않고 올려 명령의 미분류 예외 출구로 끝난다(기본 `EXECUTION_ERROR`. `rule update`·`strategy set-status`는 각각의 도메인 코드). 폴백 없음 |
 | 서버 내부 에러 | 응답 `status: "error"` 반환. CLI는 `error.code` + `error.message` 출력 |
 | 미등록 커맨드 | `_dispatch`에서 `UNKNOWN_COMMAND` 에러 응답 |
 | 인자 검증 실패 | 모든 명령은 요청 모델을 가진다. 인자가 모델을 통과하지 못하면 핸들러를 부르지 않고 `VALIDATION_ERROR` 에러 응답. 메시지는 명령 이름과 필드 경로·검증 종류만 싣는다(`<명령> 인자 검증 실패: <필드 경로>(<검증 종류>), …`). 모르는 키의 이름은 필드 경로로 실리고(인쇄 가능하지 않은 문자는 이스케이프한다), 키 이름 외의 입력값은 싣지 않는다 |
