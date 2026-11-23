@@ -100,7 +100,8 @@ executors = {
 | `bot_delete` | 보유 포지션이 있는가 | `fail` | Trade |
 | `bot_delete` | 봇이 stopped 상태인가 | `fail` | BotManager |
 | `bot_change_strategy` | 봇이 stopped 상태인가 | `fail` | BotManager |
-| `bot_assign_strategy` | 전략이 adopted 상태인가 | `fail` | ReportStore |
+| `bot_change_strategy` | 전략이 adopted 상태인가 | `fail` | StrategyRegistry |
+| `bot_assign_strategy` | 전략이 adopted 상태인가 | `fail` | StrategyRegistry |
 | `bot_resume` | 봇이 stopped 또는 error 상태인가 | `fail` | BotManager |
 | `budget_change` | Treasury 미할당 잔액이 증액분을 감당할 수 있는가 | `warn` | Treasury |
 
@@ -127,7 +128,7 @@ if validator:
 | `budget_change` | Treasury 미할당 잔액 ≥ 증액분 | 거부 — 자금 부족 |
 | `bot_create` | `params.config`가 `BotConfig`로 변환 가능, 전략이 adopted 상태, 동일 봇 미존재 | 거부 — payload 오류, 전략 미채택 또는 봇 중복 |
 | `bot_delete` | 봇이 stopped 상태, 보유 포지션 없음 | 거부 — 봇 중지 및 포지션 청산 필요 |
-| `bot_change_strategy` | 봇이 stopped 상태 | 거부 — running 중에는 전략 변경 불가 |
+| `bot_change_strategy` | 봇이 stopped 상태, 전략이 adopted 상태 | 거부 — running 중에는 전략 변경 불가 또는 전략 미채택 |
 | `bot_resume` | 봇이 stopped 또는 error 상태 | 거부 — 이미 running 상태 |
 | `bot_assign_strategy` | 전략이 adopted 상태 | 거부 — 전략 미채택 |
 | `rule_change` | 봇이 존재하고 running 또는 stopped 상태 | 거부 — 봇 미존재 |
