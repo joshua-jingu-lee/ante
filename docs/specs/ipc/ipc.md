@@ -355,13 +355,13 @@ normative SSOT는 [contracts/envelopes.md](../contracts/envelopes.md)다. 본 �
   "id": "uuid-v4",
   "status": "ok",
   "result": {
-    "suspended_count": 2
+    "status": "halted", "accounts_changed": 1, "changed_at": "2026-01-01T00:00:00.123456Z", "accounts": [{"account_id": "main", "previous_status": "active", "status": "suspended", "changed": true}]
   }
 }
 ```
 
-`result` payload(`{"suspended_count": N}`, `{"bot": ...}` 등)는 도메인 IPC
-커맨드별 계약이며 envelope 형태가 아니다.
+`result` payload(위의 `system.halt`·`system.clear_halt` 예: `status`는 envelope의 `"ok"`와 다른 필드로 `"halted"`/`"halt_cleared"`, `accounts_changed`는 `changed`가 참인 항목 수, `changed_at`, `accounts`는 `AccountService.suspend_all`/`activate_all`의 반환.
+`{"bot": ...}` 등)는 도메인 IPC 커맨드별 계약이며 envelope 형태가 아니다.
 
 **응답 (실패)** — IPC error envelope의 적용 예시. envelope 형태 SSOT는
 [contracts/envelopes.md — IPC error envelope](../contracts/envelopes.md#ipc-error-envelope):

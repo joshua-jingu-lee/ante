@@ -231,8 +231,9 @@ def positions(ctx: click.Context, account_id: str) -> CommandResult:
     pos_list = result.get("positions", [])
 
     if not pos_list:
-        empty: dict[str, Any] = {"message": "보유 종목 없음", "positions": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "보유 종목 없음"
+        empty: dict[str, Any] = {"message": message, "positions": []}
+        return CommandResult(data=empty, text=(message,))
 
     columns = ["symbol", "quantity", "avg_price", "eval_amount"]
     return CommandResult(

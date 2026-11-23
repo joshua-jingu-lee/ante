@@ -340,9 +340,7 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("positions_empty_ipc", "text"): (
-        "{'message': '보유 종목 없음', 'positions': []}\n"
-    ),
+    ("positions_empty_ipc", "text"): ("보유 종목 없음\n"),
     ("positions_empty_ipc", "json"): (
         "{\n"
         '  "status": "ok",\n'
@@ -353,9 +351,7 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("positions_empty_direct", "text"): (
-        "{'message': '보유 종목 없음', 'positions': []}\n"
-    ),
+    ("positions_empty_direct", "text"): ("보유 종목 없음\n"),
     ("positions_empty_direct", "json"): (
         "{\n"
         '  "status": "ok",\n'

@@ -225,7 +225,7 @@ def _invoke_case(
 
 
 _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
-    ("list_empty", "text"): ("{'message': '등록된 멤버가 없습니다.', 'members': []}\n"),
+    ("list_empty", "text"): ("등록된 멤버가 없습니다.\n"),
     ("list_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'
