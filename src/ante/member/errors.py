@@ -36,9 +36,8 @@ class MemberStateConflictError(MemberError, ValueError):
     를 재정지하려 할 때, ``reactivate`` 메서드가 이미 ACTIVE 인 멤버 (혹은
     SUSPENDED 가 아닌 상태) 를 재활성화하려 할 때 raise 한다.
 
-    state-conflict 는 권한 부족이 아닌 상태 흐름 위반이다.
-    ``suspend``/``reactivate`` 의 state 체크는 인라인 typed raise 이고,
-    ``revoke`` (다중 상태 허용) 는 ``_assert_status`` helper 를 그대로 사용한다.
+    state-conflict 는 권한 부족이 아닌 상태 흐름 위반이다. ``revoke`` 의
+    재폐기도 같다. 세 메서드의 state 체크는 모두 인라인 typed raise 다.
     """
 
     code: str = "MEMBER_STATE_CONFLICT"

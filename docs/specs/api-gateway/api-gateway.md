@@ -280,6 +280,8 @@ KRX는 네이티브 스탑 주문을 지원하지 않으므로, 실시간 시세
 | 발동 (`_trigger_order`) | `StopOrderTriggeredEvent` (+ 별도 `OrderRequestEvent`) | `"stop_triggered"` | 변환된 일반 주문은 자체 라이프사이클(`OrderSubmittedEvent` 등)을 별도로 통보한다. `StopOrderTriggeredEvent`는 stop 식별 단위(`stop_order_id`, `trigger_price`, `converted_order_type`)를 보존한다. |
 | 만료 (`_expire_order`) | `StopOrderExpiredEvent` | `"stop_expired"` | `reason` 허용 값: `"session_ended"` (세션 종료) / `"manager_stopped"` (매니저 stop). |
 
+한 스탑 주문의 종결(발동·만료·취소)은 한 번만 일어난다. 먼저 종결된 처리가 이기고, 이미 종결된 주문에 대한 뒤의 발동·만료는 이벤트를 발행하지 않는다(#2874).
+
 **dict shape 호환**:
 
 - 스탑 알림에서 `order_id` 키에는 `stop_order_id`를 그대로 채워 일반 주문 알림과 dict shape를 맞춘다 (외부 채널 / 전략의 후속 cancel 호환). `stop_order_id` 키도 명시 식별자로 함께 노출한다. 식별자 획득·dict shape 호환 자체는 `cancel`/`modify` 모두에 유효하나, **stop 주문 자체의 `modify` 실행은 미지원**(broker 미접수 — record 없음)이므로 후속 정정은 취소(`cancel`) 후 재주문으로 대체한다. (이미 접수된 `open` 일반 주문의 가격 정정은 broker-level v1=price-only로 지원, #2391.)

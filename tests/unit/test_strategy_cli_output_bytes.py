@@ -98,6 +98,14 @@ class _OddParamsStrategy(_FakeStrategy):
         return None
 
 
+class _NoneSchemaStrategy(_FakeStrategy):
+    def get_params(self) -> Any:
+        return {"window": 20}
+
+    def get_param_schema(self) -> Any:
+        return None
+
+
 _PARAMS = {
     "params": {"window": 20, "threshold": 0.5},
     "param_schema": {"window": "이동평균 기간"},
@@ -186,6 +194,8 @@ _IPC_RESULT = {"strategy_id": "strat-1", "status": "adopted"}
 _EDGE_CASES: dict[tuple[str, str], list[str]] = {
     ("info_odd_params", "json"): ["strategy", "info", "my_strategy"],
     ("info_odd_params", "text"): ["strategy", "info", "my_strategy"],
+    ("info_none_schema", "json"): ["strategy", "info", "my_strategy"],
+    ("info_none_schema", "text"): ["strategy", "info", "my_strategy"],
     ("submit_ok_warnings", "text"): ["strategy", "submit", _FILE],
 }
 
@@ -216,6 +226,8 @@ def _loader(branch: str) -> MagicMock:
         return MagicMock(return_value=_Raising)
     if branch == "info_odd_params":
         return MagicMock(return_value=_OddParamsStrategy)
+    if branch == "info_none_schema":
+        return MagicMock(return_value=_NoneSchemaStrategy)
     return MagicMock(return_value=_FakeStrategy)
 
 
@@ -242,7 +254,7 @@ def _registry(branch: str) -> AsyncMock:
         older = _record("strat-0", version="0.9.0", status=StrategyStatus.ARCHIVED)
         newest = _record(warnings=["print 사용", "전역 상태"])
         registry.get_by_name = AsyncMock(return_value=[newest, older])
-    elif branch == "info_odd_params":
+    elif branch in ("info_odd_params", "info_none_schema"):
         odd = dataclasses.replace(_record(), filepath=_FILE)
         registry.get_by_name = AsyncMock(return_value=[odd])
     else:
@@ -320,7 +332,7 @@ def _invoke(
             (
                 "ante.cli.commands.strategy._load_strategy_params",
                 real_params
-                if branch == "info_odd_params"
+                if branch in ("info_odd_params", "info_none_schema")
                 else MagicMock(return_value=params),
             ),
             ("ante.cli.commands.ipc_helpers.ipc_send", ipc_send),
@@ -1014,6 +1026,55 @@ _STRATEGY_EDGE_BYTES: dict[tuple[str, str], tuple[str, str, int]] = {
         "",
         "Error: EXECUTION_ERROR: 'list' object has no attribute 'items'\n",
         1,
+    ),
+    ("info_none_schema", "json"): (
+        (
+            "{\n"
+            '  "status": "ok",\n'
+            '  "message": "",\n'
+            '  "data": {\n'
+            '    "strategy_id": "strat-1",\n'
+            '    "name": "my_strategy",\n'
+            '    "version": "1.0.0",\n'
+            '    "status": "registered",\n'
+            '    "description": "테스트 전략",\n'
+            '    "author_name": "agent",\n'
+            '    "author_id": "agent-1",\n'
+            '    "filepath": "strat.py",\n'
+            '    "registered_at": "2026-01-01T09:00:00+00:00",\n'
+            '    "validation_warnings": [],\n'
+            '    "params": {\n'
+            '      "window": 20\n'
+            "    },\n"
+            '    "param_schema": null,\n'
+            '    "rationale": "모멘텀",\n'
+            '    "risks": [\n'
+            '      "급락"\n'
+            "    ]\n"
+            "  }\n"
+            "}\n"
+        ),
+        "",
+        0,
+    ),
+    ("info_none_schema", "text"): (
+        (
+            "  이름             : my_strategy\n"
+            "  버전             : 1.0.0\n"
+            "  상태             : registered\n"
+            "  설명             : 테스트 전략\n"
+            "  작성자            : agent\n"
+            "  작성자 ID         : agent-1\n"
+            "  파일 경로          : strat.py\n"
+            "  등록일            : 2026-01-01T09:00:00+00:00\n"
+            "  투자 근거          : 모멘텀\n"
+            "  리스크            :\n"
+            "    - 급락\n"
+            "  파라미터           :\n"
+            "    window = 20\n"
+        ),
+        "",
+        0,
     ),
     ("submit_ok_warnings", "text"): (
         ("전략 등록 완료: strat-1\n"),

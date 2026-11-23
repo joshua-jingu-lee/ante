@@ -1141,11 +1141,25 @@ class TestVirtualRouting:
         assert len(cap.failed) == 1
         assert cap.failed[0].error_message == "virtual_market_price_unavailable"
 
-    @pytest.mark.parametrize("quote", [0.0, -1.0])
-    async def test_g8_virtual_market_non_positive_price_no_fill(
-        self, quote: float
+    @pytest.mark.parametrize("side", ["buy", "sell"])
+    @pytest.mark.parametrize(
+        "quote",
+        [
+            "abc",
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            True,
+            10**400,
+            0.0,
+            -1.0,
+        ],
+        ids=["str", "nan", "inf", "-inf", "bool", "huge_int", "zero", "negative"],
+    )
+    async def test_g8_virtual_market_invalid_price_no_fill(
+        self, quote: object, side: str
     ) -> None:
-        """G8: 시장가 체결가 조회가 0 이하를 돌려주면 체결 없이 OrderFailedEvent."""
+        """G8(#2576): 불리언 아닌 유한 양수가 아닌 시장가 체결가는 실패 종결."""
         bus = EventBus()
         cap = _capture(bus)
         gateway = MagicMock()
@@ -1155,12 +1169,34 @@ class TestVirtualRouting:
             registry=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
             gateway=gateway,
         )
-        await executor._on_order_approved(_approved())
+        await executor._on_order_approved(_approved(side=side))
 
         gateway.get_current_price.assert_awaited_once()
         assert cap.filled == []
         assert len(cap.failed) == 1
         assert cap.failed[0].error_message == "virtual_market_price_unavailable"
+
+    @pytest.mark.parametrize("side", ["buy", "sell"])
+    @pytest.mark.parametrize("quote", [72000, 72000.5])
+    async def test_g8_virtual_market_valid_price_fills(
+        self, quote: float, side: str
+    ) -> None:
+        """G8(#2576) 대조군: 정상 int·float 시장가 체결가는 그 값 그대로 체결된다."""
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=quote)
+        executor = self._make_virtual_executor(
+            bus,
+            registry=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            gateway=gateway,
+        )
+        await executor._on_order_approved(_approved(side=side))
+
+        assert cap.failed == []
+        assert len(cap.filled) == 1
+        assert cap.filled[0].price == quote
+        assert type(cap.filled[0].price) is type(quote)
 
     async def test_g8_no_gateway_market_no_price_fails(self) -> None:
         """G8: gateway None + event.price None 시장가 → 0원 체결 없음 + 실패."""
