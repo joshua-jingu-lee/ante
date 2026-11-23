@@ -640,12 +640,7 @@ class Treasury:
         return account_id == self._account_id
 
     async def _on_order_validated(self, event: object) -> None:
-        """룰 검증 통과 후 자금 예약 -> 승인/거부 발행.
-
-        EventBus는 핸들러 예외를 ``logger.exception`` 후 swallow하므로,
-        매수 경로에서 발생할 수 있는 모든 실패는 명시적으로 terminal
-        ``OrderRejectedEvent``로 변환해야 한다 (Order lifecycle invariant).
-        """
+        """승인/거부 발행 — 매수 실패는 예외 대신 terminal ``OrderRejectedEvent`` 로."""
         from ante.eventbus.events import (
             OrderApprovedEvent,
             OrderRejectedEvent,
@@ -1018,15 +1013,7 @@ class Treasury:
         )
 
     async def _on_order_filled(self, event: object) -> None:
-        """체결 이벤트 처리 -- 예약 자금 정산.
-
-        outbox at-least-once 재전달에 대한 **진짜 exactly-once-effect**.
-        ``fill_dedup_key`` 가 비빈키면 전용 ``treasury_fill_dedup`` 테이블에
-        ``INSERT OR IGNORE`` 한 뒤 정산을 **같은 트랜잭션**에 묶어, 재전달(이미
-        처리된 키)은 정산을 0회 추가한다(dedup-insert ⟺ 정산 1:1). 빈키
-        (VirtualProvider 직접발행 / FillApplier fallback = 단발 in-memory, 재전달
-        없음)는 dedup 비대상으로 현행 정산을 그대로 수행한다(설계 결정 5).
-        """
+        """체결 이벤트 처리 — 매수는 예약 자금 정산, 매도는 대금을 예산에 더한다."""
         from ante.eventbus.events import OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):
@@ -1107,30 +1094,7 @@ class Treasury:
     async def _settle_buy_fill(
         self, event: Any, budget: BotBudget, fill_value: float, commission: float
     ) -> None:
-        """매수 체결 정산 — 부분체결 비례 정산 + terminal 잔여 회수.
-
-        per-fill 회계(R1-1):
-          - ``actual_cost = quantity*price + commission``
-          - ``covered = min(remaining_reserved, actual_cost)``
-          - ``reserved -= covered`` ; ``remaining_reserved -= covered`` ;
-            ``spent += actual_cost``
-          - ``shortfall = actual_cost - covered``; ``shortfall>0`` 이면
-            ``available -= shortfall`` (체결가>예약분 = 기존 shortfall
-            동작 보존, audit warning 유지)
-
-        terminal 판정은 OrderTracker(``recorded_filled_qty >= ordered_qty``)로
-        한다 — FillApplier 가 ``record_fill()`` 커밋 후 ``OrderFilledEvent`` 를
-        발행하므로 Treasury 가 보는 tracker 상태는 이번 fill 을 이미 포함한다
-        (R1-3). terminal 이면 잔여 예약(under-fill surplus)을 회수하고 entry 를
-        제거한다; 중간 partial 이면 entry 를 유지한다.
-
-        OrderTracker 미주입 또는 ``get(order_id)`` 가 None 이면(예:
-        VirtualProvider 직접 full-fill — tracker 에 seed 안 됨) 기존 full-fill
-        pop-once semantics 로 fallback 한다 (R1-2).
-
-        불변식 ``available = allocated - reserved - spent + returned`` 가 부분체결
-        전 구간에서 유지된다.
-        """
+        """매수 체결 비례 정산 + terminal 잔여 회수(tracker 기록이 없으면 일괄 정산)."""
         order_id = event.order_id
         actual_cost = fill_value + commission
 

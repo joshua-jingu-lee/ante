@@ -6,7 +6,7 @@ import logging
 
 
 def _probe_logrecord_attrs() -> frozenset[str]:
-    """실제 LogRecord 인스턴스의 ``__dict__`` 키를 추출한다."""
+    """LogRecord ``__dict__`` 키 + Formatter가 주입하는 ``message``·``asctime``."""
     probe = logging.LogRecord(
         name="_probe",
         level=logging.INFO,

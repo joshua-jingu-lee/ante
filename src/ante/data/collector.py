@@ -57,7 +57,7 @@ class DataCollector:
         return self._buffer
 
     def _is_valid_ingress(self, symbol: object, timeframe: object) -> bool:
-        """canonical symbol/timeframe ingress 검증 (SSOT 위임)."""
+        """canonical symbol/timeframe ingress 검증(``1d`` 거부, KRX만 symbol 검사)."""
         return (
             isinstance(timeframe, str)
             and is_valid_timeframe(timeframe)

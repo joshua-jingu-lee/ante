@@ -188,13 +188,7 @@ def _parse_psbl_amount(
     primary_field: str,
     fallback_field: str,
 ) -> float:
-    """inquire-psbl-order 금액 필드 파싱 (primary missing/parse 시만 폴백).
-
-    ``primary_field``(``nrcvb_buy_amt``)가 응답에 없거나 float 변환에 실패할 때만
-    ``fallback_field``(``ord_psbl_cash``)로 폴백한다. ``primary_field`` 값이
-    ``0``으로 정상 파싱되면 그대로 ``0.0``을 반환한다 — ``0``은 정상값일 수
-    있으므로 폴백 트리거가 아니다(G6).
-    """
+    """psbl-order 금액 파싱(primary 누락·변환 실패면 폴백, 폴백도 실패면 0.0)."""
     if primary_field in output:
         try:
             return float(output[primary_field])
@@ -691,31 +685,7 @@ class KISBaseAdapter(BrokerAdapter):
         *,
         cb_exempt_timeout: bool = False,
     ) -> list[dict[str, Any]]:
-        """KIS 연속조회(CTX_AREA + tr_cont)를 따라 전 페이지 행을 누적한다.
-
-        ``base_params`` 는 첫 페이지 요청 파라미터이며 ``CTX_AREA_FK100`` /
-        ``CTX_AREA_NK100`` 은 빈 문자열로 시작한다(호출자가 전달). ``row_key``
-        로 지정한 단일 행 리스트(예: ``"output1"`` / ``"output"``)만 누적하며,
-        ``output2`` 같은 summary/metadata 는 누적하지 않는다.
-
-        ``cb_exempt_timeout`` 은 ``_request_with_cont`` 로 그대로 전파되는 차단기
-        회계 opt-out 이다. late-ccld(``get_order_history``) 폴 경로만
-        ``True`` 로 호출해 조회 타임아웃이 어댑터 전역 단일 차단기를 OPEN 시키지
-        않게 한다. 다른 호출자는 기본값 ``False`` 로 무변경이다.
-
-        연속 규약:
-            - 최초 요청: 요청 헤더 ``tr_cont`` = "" + cursor = "".
-            - 응답 헤더 ``tr_cont`` 가 "F"/"M" 이면 body 의 ``ctx_area_fk100`` /
-              ``ctx_area_nk100`` 를 다음 요청 ``CTX_AREA_FK100`` /
-              ``CTX_AREA_NK100`` 로 넣고 요청 헤더 ``tr_cont`` = "N" 로 재호출.
-            - "D"/"E"(또는 그 외) 이면 마지막 페이지로 보고 종료.
-
-        가드:
-            - "F"/"M" 인데 다음 cursor 가 비어 있으면 무한루프/누락을 막기 위해
-              ``logger.warning`` 후 중단(잔여 페이지 누락 가능성 surface).
-            - 최대 페이지 수(``DEFAULT_MAX_PAGINATION_PAGES``) 도달 시
-              ``logger.warning`` 후 중단.
-        """
+        """연속조회로 ``row_key`` 행 누적(cursor 누락·최대 페이지면 경고 후 중단)."""
         rows: list[dict[str, Any]] = []
         params = dict(base_params)
         cont_header = ""

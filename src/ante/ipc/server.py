@@ -495,11 +495,7 @@ class IPCServer:
             closing_event.set()
 
         def _enqueue(frame: dict[str, Any]) -> None:
-            """sink 콜백 — newline-free dict 를 out_queue 에 put_nowait.
-
-            laggard-aware: QueueFull 이면 채널 laggard teardown 을 트리거한다
-            (raw put_nowait 금지 — INV-OUT-6 backpressure swallow 우회 명시체크).
-            """
+            """sink 콜백 — out_queue 에 put_nowait, QueueFull 이면 laggard teardown."""
             try:
                 out_queue.put_nowait(frame)
             except asyncio.QueueFull:

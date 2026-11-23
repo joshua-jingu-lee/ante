@@ -18,25 +18,14 @@ DEFAULT_INTERVAL_SECONDS = 1800
 
 
 class ReconcileScheduler:
-    """주기적으로 모든 활성 봇의 포지션 대사를 수행한다.
+    """주기적으로 바인딩된 계좌의 봇 포지션 대사를 수행한다.
 
     이 스케줄러 인스턴스는 단일 broker(``broker_account_id``)에만 바인딩된다.
     다른 계좌의 봇이 같은 스케줄러에 잡히는 경우 잘못된 broker positions가
     적용되지 않도록 ``run_once()`` 안에서 명시적으로 skip한다.
 
-    Args:
-        reconciler: 포지션 대사 실행기.
-        broker: 브로커 어댑터 (실제 잔고 조회용).
-        bot_manager: 활성 봇 목록 조회용.
-        eventbus: 이벤트 발행용.
-        broker_account_id: 이 스케줄러가 바인딩된 broker의 account_id.
-            ``run_once()``는 이 account_id에 일치하는 봇만 reconcile한다.
-        interval_seconds: 대사 반복 주기 (초). 기본 1800(30분).
-        skip_initial_external_buy: True 면 ``start()`` 의 **기동 즉시 1회 대사**
-            에서만 "외부 매수" 분류 보정을 건너뛴다(barrier).
-            계좌의 fill 카치업이 성공하지 못한 채 기동 reconcile 이 돌면 미복구
-            ante 체결을 "외부 매수" 로 오분류하므로, 그 1회만 연기한다. 이후
-            주기 대사는 fill 폴 루프가 복구를 진행하므로 정상 처리한다.
+    ``skip_initial_external_buy`` 가 True 면 ``start()`` 의 **기동 즉시 1회 대사**
+    에서만 "외부 매수" 분류 보정을 건너뛴다(barrier).
     """
 
     def __init__(

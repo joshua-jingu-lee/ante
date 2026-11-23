@@ -202,12 +202,7 @@ class StreamIntegration:
         logger.debug("체결 통보 처리: %s %s", symbol, execution.get("side", ""))
 
     async def _on_stream_connected(self, event: object) -> None:
-        """스트림 연결 성공 시 폴백 중지.
-
-        multi-account StreamIntegration pool 에서 다른
-        계좌의 stream 이벤트로 자기 fallback 을 토글하지 않도록
-        ``event.account_id`` 가 ``self._account_id`` 와 일치할 때만 반응한다.
-        """
+        """자기 계좌(``self._account_id``)의 스트림 연결 성공 시 폴백 중지."""
         event_account_id = getattr(event, "account_id", "")
         if event_account_id != self._account_id:
             return
@@ -215,11 +210,7 @@ class StreamIntegration:
         logger.info("스트림 연결됨 — REST 폴링 폴백 중지")
 
     async def _on_stream_disconnected(self, event: object) -> None:
-        """스트림 연결 해제 시 REST 폴링 폴백 시작.
-
-        account-scoped 필터. 자세한 내용은
-        :meth:`_on_stream_connected` 참조.
-        """
+        """자기 계좌의 스트림 연결 해제 시 REST 폴링 폴백 시작(``_running`` 일 때만)."""
         if not self._running:
             return
         event_account_id = getattr(event, "account_id", "")
@@ -321,13 +312,7 @@ class StreamIntegration:
             logger.debug("종목 구독 해제: %s", symbol)
 
     def _get_monitored_symbols(self) -> set[str]:
-        """모니터링 대상 종목 수집 (활성 봇 + StopOrderManager).
-
-        multi-account StreamIntegration pool 에서 각 인스턴스
-        는 자신의 ``self._account_id`` 에 해당하는 봇만 선택한다. StopOrder
-        역시 같은 account_id 의 active orders 만 모니터링 종목에 포함시켜
-        다른 계좌의 KIS 40종목 한도를 잠식하지 않게 한다.
-        """
+        """자기 계좌의 모니터링 대상 종목 수집 (running 봇 + StopOrderManager)."""
         symbols: set[str] = set()
 
         if self._bot_manager:
