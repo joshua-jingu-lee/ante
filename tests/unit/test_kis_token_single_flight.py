@@ -28,6 +28,7 @@ from ante.broker.error_codes import (
 )
 from ante.broker.exceptions import AuthenticationError
 from ante.broker.kis import (
+    TOKEN_RATE_LIMIT_COOLDOWN_SECONDS,
     KISErrorClassifier,
     _is_cached_token_fresh,
     _record_token_cooldown,
@@ -738,6 +739,11 @@ class TestLockedRecheckWithYieldingSession:
 
         assert [type(r) for r in results] == [TokenRateLimitError] * 2
         assert session.post_count == 1
-        recorded = _token_cooldowns["shared_key"]
-        assert results[0].cooldown_until == recorded
-        assert results[1].cooldown_until == recorded
+        deadline = _token_cooldowns["shared_key"]
+        recorded_at = datetime(2026, 5, 29, 0, 0, tzinfo=UTC) + timedelta(
+            seconds=deadline - TOKEN_RATE_LIMIT_COOLDOWN_SECONDS - 1000.0
+        )
+        assert results[0].cooldown_until == results[1].cooldown_until
+        assert results[0].cooldown_until == recorded_at + timedelta(
+            seconds=TOKEN_RATE_LIMIT_COOLDOWN_SECONDS
+        )

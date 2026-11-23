@@ -120,7 +120,7 @@ class TestRequestWindow:
     async def test_concurrent_sends_on_full_window_keep_limit(
         self, split_clock: _SplitClock, yielding_sleep: list[float]
     ) -> None:
-        """창이 찬 상태에서 동시에 든 셋은 줄을 서서 한도를 지킨다."""
+        """창이 찬 상태에서 동시에 든 셋은 든 순서대로 줄을 서서 한도를 지킨다."""
         adapter = _make_adapter()
         base = split_clock.monotonic()
         sends = [await _send(adapter)]
@@ -131,8 +131,35 @@ class TestRequestWindow:
         sends.extend(await asyncio.gather(*(_send(adapter) for _ in range(3))))
 
         assert _max_in_any_window(sends) <= _LIMIT
+        assert sends == sorted(sends), "먼저 든 요청이 먼저 나가야 한다"
         assert [s - base for s in sends] == [0.0, 0.5, 60.0, 60.5, 120.0]
         assert yielding_sleep == [59.0, 0.5, 59.5]
+
+    async def test_early_wakeup_rechecks_window_before_sending(
+        self, split_clock: _SplitClock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """요청보다 일찍 깨면 창을 다시 보고 남은 만큼 더 잔다."""
+        original_sleep = asyncio.sleep
+        slept: list[float] = []
+
+        async def _early_sleep(delay: float, *args: Any, **kwargs: Any) -> None:
+            slept.append(delay)
+            split_clock.advance(delay - 1.0 if delay > 1.0 else delay)
+            await original_sleep(0)
+
+        monkeypatch.setattr(kis_module.asyncio, "sleep", _early_sleep)
+        adapter = _make_adapter()
+        base = split_clock.monotonic()
+        sends = [await _send(adapter)]
+        _advance_to(split_clock, base, 1.0)
+        sends.append(await _send(adapter))
+        _advance_to(split_clock, base, 2.0)
+
+        sends.append(await _send(adapter))
+
+        assert _max_in_any_window(sends) <= _LIMIT
+        assert sends[-1] - base == _WINDOW
+        assert slept == [58.0, 1.0]
 
     async def test_wall_clock_going_back_does_not_stretch_wait(
         self, split_clock: _SplitClock, yielding_sleep: list[float]

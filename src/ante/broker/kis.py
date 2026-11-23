@@ -7,7 +7,7 @@ import calendar
 import json
 import logging
 from abc import abstractmethod
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
@@ -103,8 +103,8 @@ _token_cache: dict[_TokenCacheKey, tuple[str, datetime]] = {}
 _token_locks: dict[str, asyncio.Lock] = {}
 """app_key → 발급 직렬화 Lock (T1, lock key=app_key — rate-limit 단위)."""
 
-_token_cooldowns: dict[str, datetime] = {}
-"""app_key → cooldown_until (UTC) — EGW00133 source-level cooldown.
+_token_cooldowns: dict[str, float] = {}
+"""app_key → 단조 마감(``clock.monotonic()``) — EGW00133 source-level cooldown.
 
 T2 불변: 유효 캐시 토큰 read 는 cooldown 과 무관(hydrate 먼저)하다."""
 
@@ -121,21 +121,27 @@ def _reset_token_cache() -> None:
     _token_cooldowns.clear()
 
 
+def _cooldown_wall_time(deadline: float) -> datetime:
+    """단조 마감을 지금의 잔여로 환산한 UTC 순간 (now 를 먼저, 단조를 나중에 읽는다)."""
+    now = clock.now(UTC)
+    return now + timedelta(seconds=deadline - clock.monotonic())
+
+
 def _token_cooldown_until(app_key: str) -> datetime | None:
     """app_key 의 현재 EGW00133 cooldown 만료시각(UTC) 또는 ``None``."""
-    until = _token_cooldowns.get(app_key)
-    if until is None:
+    deadline = _token_cooldowns.get(app_key)
+    if deadline is None:
         return None
-    if clock.now(UTC) >= until:
+    if clock.monotonic() >= deadline:
         return None
-    return until
+    return _cooldown_wall_time(deadline)
 
 
 def _record_token_cooldown(app_key: str) -> datetime:
     """EGW00133 수신 시 app_key cooldown 기록 후 만료시각 반환."""
-    until = clock.now(UTC) + timedelta(seconds=TOKEN_RATE_LIMIT_COOLDOWN_SECONDS)
-    _token_cooldowns[app_key] = until
-    return until
+    deadline = clock.monotonic() + TOKEN_RATE_LIMIT_COOLDOWN_SECONDS
+    _token_cooldowns[app_key] = deadline
+    return _cooldown_wall_time(deadline)
 
 
 def _raise_token_rate_limit(app_key: str, *, record: bool = True) -> NoReturn:
@@ -316,7 +322,8 @@ class KISBaseAdapter(BrokerAdapter):
 
         self._session: Any = None
 
-        self._request_times: list[datetime] = []
+        self._request_times: deque[float] = deque()
+        self._rate_lock = asyncio.Lock()
         self._rate_limit_per_minute: int = 5 if self.is_paper else 20
 
         self._max_retries_order: int = config.get(
@@ -495,19 +502,19 @@ class KISBaseAdapter(BrokerAdapter):
             await self._authenticate()
 
     async def _rate_limit_wait(self) -> None:
-        """Rate limit 준수 대기."""
-        now = clock.now(UTC)
-        cutoff = now - timedelta(minutes=1)
-        self._request_times = [t for t in self._request_times if t > cutoff]
-
-        if len(self._request_times) >= self._rate_limit_per_minute:
-            oldest = min(self._request_times)
-            wait_seconds = 60 - (now - oldest).total_seconds()
-            if wait_seconds > 0:
+        """단조 시계의 창 ``(t-60, t]`` 에서 분당 한도를 지키도록 줄 세워 대기."""
+        async with self._rate_lock:
+            while True:
+                now = clock.monotonic()
+                cutoff = now - 60.0
+                while self._request_times and self._request_times[0] <= cutoff:
+                    self._request_times.popleft()
+                if len(self._request_times) < self._rate_limit_per_minute:
+                    break
+                wait_seconds = self._request_times[0] - cutoff
                 logger.debug("Rate limit 대기: %.1f초", wait_seconds)
                 await asyncio.sleep(wait_seconds)
-
-        self._request_times.append(now)
+            self._request_times.append(now)
 
     def _get_timeout(self, url: str) -> float:
         """URL 기반 타임아웃 결정."""
