@@ -43,7 +43,7 @@ CONTRACT_ARGS = {
         "check",
         "src/",
         "--select",
-        "BLE001,ASYNC,S608,C901",
+        "BLE001,ASYNC,S608,C901,TID251",
         "--config",
         "lint.mccabe.max-complexity = 10",
         "--output-format",
@@ -275,6 +275,11 @@ RUFF_TEXT = {
     "ASYNC109": "asyncio.to_thread나 비동기 API를 쓴다.",
     "S608": "자리표시자를 쓴다.",
     "C901": "함수를 나눈다.",
+    "TID251": (
+        "기준선을 올리지 않는다(noqa로 끄지도 않는다). "
+        "ante.core.clock의 now(tz)·monotonic()을 쓴다. "
+        "운영 코드는 시계를 바꾸지 않는다."
+    ),
 }
 
 
@@ -547,3 +552,39 @@ def test_pyproject_pins_match_baseline_tools() -> None:
     assert pins.get("mypy", "").replace(".", "").isdigit(), (
         f"mypy must be pinned with ==: {dev}"
     )
+
+
+# ── 실제 ruff: noqa를 단 금지 호출 ─────────────────────────
+
+
+_NOQA_CLOCK = (
+    "from datetime import UTC, datetime\n\n\n"
+    "def stamp() -> datetime:\n"
+    "    return datetime.now(UTC)  # noqa: TID251\n"
+)
+
+
+def test_noqa_banned_clock_call_is_counted_by_real_ruff(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    """일반 린트가 noqa로 넘기는 금지 호출도 래칫은 센다(clock.py의 예외는 유지)."""
+    (tmp_path / "pyproject.toml").write_text(
+        (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    module = tmp_path / "src" / "ante" / "a.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(_NOQA_CLOCK, encoding="utf-8")
+    clock = tmp_path / "src" / "ante" / "core" / "clock.py"
+    clock.parent.mkdir()
+    clock.write_text(_NOQA_CLOCK.replace("  # noqa: TID251", ""), encoding="utf-8")
+    _write_baseline(tmp_path, _baseline())
+
+    code, output = _run(tmp_path, checker.run_tool, capsys)
+
+    assert code == 1
+    assert output.splitlines() == [
+        HEADER,
+        f"ruff\t{A}\tTID251: actual 1, baseline 0 (+1)",
+        _alt("TID251"),
+        MOVE_LINE,
+    ]
