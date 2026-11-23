@@ -2,8 +2,7 @@
   "comments": {},
   "docstring_history": {},
   "docstring_excess": {
-    "src/ante/ipc/registry.py": 15,
     "src/ante/main.py": 130
   },
-  "docstring_lines": 6090
+  "docstring_lines": 6075
 }
