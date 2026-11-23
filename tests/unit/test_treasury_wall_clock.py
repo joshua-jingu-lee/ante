@@ -83,7 +83,6 @@ async def test_virtual_sync_records_fixed_time_after_advance(
     assert treasury.get_summary()["last_sync_time"] == expected.isoformat()
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="#2798")
 async def test_sync_time_survives_reload(treasury: Treasury) -> None:
     await treasury._do_sync(_broker(), _positions())
     if treasury.last_synced_at != _AT:
