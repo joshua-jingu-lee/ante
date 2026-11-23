@@ -79,9 +79,21 @@ class _Env:
     manager: BotManager
 
 
+_STRATEGY_SOURCE = """
+from ante.strategy import Strategy, StrategyMeta
+
+
+class Registered(Strategy):
+    meta = StrategyMeta(name="{name}", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+
+
 async def _register(registry: StrategyRegistry, tmp_path: Path, name: str) -> str:
     path = tmp_path / f"{name}.py"
-    path.write_text("# strategy\n", encoding="utf-8")
+    path.write_text(_STRATEGY_SOURCE.format(name=name), encoding="utf-8")
     record = await registry.register(
         path, StrategyMeta(name=name, version="1.0.0", description="t")
     )

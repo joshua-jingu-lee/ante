@@ -100,7 +100,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 | `create_bot` | `config: BotConfig, strategy_cls: type[Strategy], ctx: StrategyContext \| None = None` | `Bot` | 봇 생성. ctx가 주입되면 그대로 사용하고, None이면 context_factory로 자동 생성. 이벤트 구독 등록 + DB 저장. `accepts_external_signals=True`이면 시그널 키 자동 발급 |
 | `start_bot` | `bot_id: str` | `None` | 봇 시작. `bot.start()` 호출 |
 | `stop_bot` | `bot_id: str` | `None` | 봇 중지 |
-| `update_bot` | `bot_id: str, updates: dict` | `Bot` | 봇 설정 수정. **중지 상태에서만 가능** — RUNNING이면 `BotError` 발생. BotConfig는 frozen dataclass이므로 재생성 패턴 적용: 기존 config를 dict로 풀고 → updates 병합 → 새 BotConfig 생성 → Bot.config 교체 → DB 갱신. `budget` 키가 포함되면 `Treasury.deallocate()` + `Treasury.allocate()`로 예산 재조정. `strategy_id` 변경 시 StrategyRegistry 존재 확인 + exchange 호환성 검증. **`account_id`는 불변 필드** — updates에 현재 값과 다른 `account_id`가 포함되면 `BotImmutableFieldError`(안정 코드 `BOT_IMMUTABLE_FIELD`, validation 카테고리) 발생. 같은 값(no-op)·미포함은 통과 |
+| `update_bot` | `bot_id: str, updates: dict` | `Bot` | 봇 설정 수정. **중지 상태에서만 가능** — RUNNING이면 `BotError` 발생. BotConfig는 frozen dataclass이므로 재생성 패턴 적용: 기존 config를 dict로 풀고 → updates 병합 → 새 BotConfig 생성 → Bot.config 교체 → DB 갱신. `budget` 키가 포함되면 `Treasury.deallocate()` + `Treasury.allocate()`로 예산 재조정. `strategy_id` 변경 시 StrategyRegistry 존재 확인 + exchange 호환성 검증 후 실행 코드도 함께 교체(아래 「전략 교체」). **`account_id`는 불변 필드** — updates에 현재 값과 다른 `account_id`가 포함되면 `BotImmutableFieldError`(안정 코드 `BOT_IMMUTABLE_FIELD`, validation 카테고리) 발생. 같은 값(no-op)·미포함은 통과 |
 
 **`account_id` 불변 정책 (#2282)**: 봇의 `account_id`는 생성 후 변경할 수 없다. treasury 예산은 옛 account 아래에 할당되고, broker credential도 옛 account에 바인딩되며, 포지션 격리도 account-bound이므로, `account_id`를 변경하면 이 자원들이 새 account로 재배치되지 않아 불일치가 발생한다. 단일 사용자 홈서버에서 복잡한 re-isolation(예산 이전·credential 재바인딩·포지션 마이그레이션)을 구현하는 대신, `account_id`를 `update_bot`의 불변 필드로 제약한다(YAGNI 안전 기본). 변경이 필요하면 **봇을 삭제 후 재생성**한다. 이는 Account의 불변 필드(`exchange`/`currency`/`trading_mode`/`broker_type`, `AccountImmutableFieldError`) 정책과 정합한다([account/04-account-service.md](../account/04-account-service.md) 참조). `_save_bot_config`의 UPSERT가 `account_id` 컬럼을 갱신하는 것(#2274, create/load 경로 persistence 일관성)은 그대로 유지되며, 제약은 `update_bot` ingress에서만 적용된다.
 | `delete_bot` | `bot_id: str, handle_positions: str = "keep"` | `None` | 봇 삭제. 실행 중이면 먼저 중지. `handle_positions="liquidate"` 시 TradeService를 통해 보유 종목 시장가 매도 주문 발행 후 삭제 진행. `"keep"`(기본)은 포지션 유지한 채 봇만 삭제. 이벤트 구독 해제 + VIRTUAL 계좌 봇의 VirtualExecutor 해제 + 시그널 키 폐기 + DB 레코드 삭제. `remove_bot`은 동일 기능의 별칭(alias) |
@@ -110,10 +110,12 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 | `rotate_signal_key` | `bot_id: str` | `str` | 기존 시그널 키 폐기 + 새 키 발급. DB rotate 커밋 직후 해당 봇의 활성 시그널 채널을 teardown한다 — **커밋 후 NEW signal은 admit되지 않으며, 옛 키로 이미 진입한 in-flight signal은 최대 1개까지 정상 완료**(in-flight abort 아님). enforcement 메커니즘은 아래 `### 채널 teardown enforcement (#2334)` 참조. 구현 PR 머지 후 적용(동기 버그 #2333 unblock) |
 | `get_signal_key` | `bot_id: str` | `str \| None` | 봇의 시그널 키 조회. `accepts_external_signals=False`이면 `None` |
 | `get_restart_count` | `bot_id: str` | `int` | 봇의 현재 재시작 시도 횟수 |
-| `assign_strategy` | `bot_id: str, strategy_id: str` | `None` | 봇에 전략 배정. RUNNING이면 중지→전략 교체→재시작. STOPPED/CREATED이면 전략 ID만 교체 |
-| `change_strategy` | `bot_id: str, strategy_id: str` | `None` | 중지 상태 봇의 전략 교체. RUNNING이면 `BotError` 발생 |
+| `assign_strategy` | `bot_id: str, strategy_id: str` | `None` | 봇에 전략 배정. RUNNING이면 중지→전략 교체→재시작. STOPPED/CREATED/ERROR이면 전략 ID와 실행 코드만 교체(아래 「전략 교체」). STOPPING이면 `BotError` 발생 |
+| `change_strategy` | `bot_id: str, strategy_id: str` | `None` | 중지 상태 봇의 전략 ID와 실행 코드 교체(아래 「전략 교체」). RUNNING·STOPPING이면 `BotError` 발생 |
 | `resume_bot` | `bot_id: str` | `None` | STOPPED/ERROR 상태 봇 재시작. 에러 카운터 리셋 후 `start()` 호출. RUNNING이면 `BotError` 발생 |
 | `load_from_db` | — | `int` | DB에서 봇 설정을 읽어 메모리에 로드. deleted 제외. 반환값은 로드된 봇 수 |
+
+**전략 교체 (#2838)**: `assign_strategy`·`change_strategy`·`update_bot`(`strategy_id` 변경)은 봇 설정의 전략 ID와 봇이 실행하는 전략 클래스를 함께 바꾼다. 새 전략은 봇을 건드리기 전에 `create_bot`과 같은 순서로 준비한다 — 레지스트리 조회 → 등록된 파일에서 로드 → 계좌 exchange 호환 검증 → 스냅샷 생성 → 스냅샷에서 로드. 준비가 실패하면 봇의 상태·전략 ID·실행 코드·DB가 바뀌지 않고, 실행 중이던 봇은 옛 전략으로 계속 돈다. 중지한 뒤 DB 저장이 실패하면(`update_bot`은 예산 갱신이 실패해도) 전략 ID와 실행 코드를 옛 것으로 되돌리고 봇을 정지 상태로 둔다(옛 전략을 자동으로 다시 시작하지 않는다). 되돌리기 전에 봇이 그 사이 다시 시작됐으면 되돌리지 않고 원래 오류를 올린다. 이때 봇은 새 전략 ID와 그 실행 코드로 돌고, DB는 저장 실패면 옛 ID, 예산 갱신 실패면 새 ID로 남는다. 새 전략의 `on_start`가 실패하면 `start_bot`과 같이 예외를 올리고, 봇은 새 전략에 묶인 채 정지 상태로 남는다. 같은 봇의 포지션·가상 포트폴리오는 교체 뒤에도 그대로이며 새 전략이 `ctx`로 본다. 옛 전략의 미체결 주문은 봇 중지 동작을 그대로 따르며, 이 절은 그 처리를 정하지 않는다. `Bot.start`는 봇에 묶인 전략 ID와 `config.strategy_id`가 다르면 시작하지 않고 `BotError`를 낸다.
 
 **설계 근거**:
 

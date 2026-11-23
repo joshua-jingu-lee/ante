@@ -19,6 +19,7 @@ from ante.strategy import (
     StrategyContext,
     StrategyMeta,
 )
+from ante.strategy.registry import StrategyRegistry
 
 # ── Fake 구현체 ──────────────────────────────────
 
@@ -99,21 +100,44 @@ async def manager(eventbus, db):
         pass
 
 
+_S2_SOURCE = """
+from ante.strategy import Strategy, StrategyMeta
+
+
+class S2Strategy(Strategy):
+    meta = StrategyMeta(name="s2", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+
+
+@pytest.fixture
+async def s2(db, tmp_path):
+    """배정·교체 대상으로 실제 등록한 전략의 id (#2838: 준비 단계가 파일을 로드)."""
+    filepath = tmp_path / "s2.py"
+    filepath.write_text(_S2_SOURCE, encoding="utf-8")
+    registry = StrategyRegistry(db)
+    await registry.initialize()
+    meta = StrategyMeta(name="s2", version="1.0.0", description="test")
+    return (await registry.register(filepath, meta)).strategy_id
+
+
 # ── assign_strategy ──────────────────────────────
 
 
 class TestAssignStrategy:
-    async def test_assign_to_stopped_bot(self, manager, ctx):
+    async def test_assign_to_stopped_bot(self, manager, ctx, s2):
         """중지 상태 봇에 전략 배정."""
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
-        await manager.assign_strategy("bot1", "s2")
+        await manager.assign_strategy("bot1", s2)
 
         bot = manager.get_bot("bot1")
-        assert bot.config.strategy_id == "s2"
+        assert bot.config.strategy_id == s2
 
-    async def test_assign_to_running_bot_restarts(self, manager, ctx):
+    async def test_assign_to_running_bot_restarts(self, manager, ctx, s2):
         """running 봇에 전략 배정 시 중지 후 재시작."""
         config = BotConfig(
             bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
@@ -122,43 +146,43 @@ class TestAssignStrategy:
         await manager.start_bot("bot1")
         assert manager.get_bot("bot1").status == BotStatus.RUNNING
 
-        await manager.assign_strategy("bot1", "s2")
+        await manager.assign_strategy("bot1", s2)
 
         bot = manager.get_bot("bot1")
-        assert bot.config.strategy_id == "s2"
+        assert bot.config.strategy_id == s2
         assert bot.status == BotStatus.RUNNING
 
-    async def test_assign_updates_db(self, manager, ctx, db):
+    async def test_assign_updates_db(self, manager, ctx, db, s2):
         """전략 배정 시 DB에 strategy_id가 갱신된다."""
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
-        await manager.assign_strategy("bot1", "s2")
+        await manager.assign_strategy("bot1", s2)
 
         row = await db.fetch_one("SELECT strategy_id FROM bots WHERE bot_id = 'bot1'")
-        assert row["strategy_id"] == "s2"
+        assert row["strategy_id"] == s2
 
     async def test_assign_not_found_raises(self, manager):
         """존재하지 않는 봇이면 예외."""
         with pytest.raises(BotError, match="not found"):
             await manager.assign_strategy("nonexistent", "s1")
 
-    async def test_assign_to_created_bot(self, manager, ctx):
+    async def test_assign_to_created_bot(self, manager, ctx, s2):
         """created 상태 봇에 전략 배정."""
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
         assert manager.get_bot("bot1").status == BotStatus.CREATED
 
-        await manager.assign_strategy("bot1", "s2")
+        await manager.assign_strategy("bot1", s2)
 
-        assert manager.get_bot("bot1").config.strategy_id == "s2"
+        assert manager.get_bot("bot1").config.strategy_id == s2
 
 
 # ── change_strategy ──────────────────────────────
 
 
 class TestChangeStrategy:
-    async def test_change_stopped_bot(self, manager, ctx):
+    async def test_change_stopped_bot(self, manager, ctx, s2):
         """중지 상태 봇의 전략 교체."""
         config = BotConfig(
             bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
@@ -168,9 +192,9 @@ class TestChangeStrategy:
         await manager.stop_bot("bot1")
         assert manager.get_bot("bot1").status == BotStatus.STOPPED
 
-        await manager.change_strategy("bot1", "s2")
+        await manager.change_strategy("bot1", s2)
 
-        assert manager.get_bot("bot1").config.strategy_id == "s2"
+        assert manager.get_bot("bot1").config.strategy_id == s2
 
     async def test_change_running_raises(self, manager, ctx):
         """running 봇 전략 변경 시 예외."""
@@ -183,40 +207,40 @@ class TestChangeStrategy:
         with pytest.raises(BotError, match="실행 중인 봇"):
             await manager.change_strategy("bot1", "s2")
 
-    async def test_change_updates_db(self, manager, ctx, db):
+    async def test_change_updates_db(self, manager, ctx, db, s2):
         """전략 교체 시 DB에 strategy_id가 갱신된다."""
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
-        await manager.change_strategy("bot1", "s2")
+        await manager.change_strategy("bot1", s2)
 
         row = await db.fetch_one("SELECT strategy_id FROM bots WHERE bot_id = 'bot1'")
-        assert row["strategy_id"] == "s2"
+        assert row["strategy_id"] == s2
 
     async def test_change_not_found_raises(self, manager):
         """존재하지 않는 봇이면 예외."""
         with pytest.raises(BotError, match="not found"):
             await manager.change_strategy("nonexistent", "s1")
 
-    async def test_change_created_bot(self, manager, ctx):
+    async def test_change_created_bot(self, manager, ctx, s2):
         """created 상태 봇의 전략 교체 가능."""
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
-        await manager.change_strategy("bot1", "s2")
+        await manager.change_strategy("bot1", s2)
 
-        assert manager.get_bot("bot1").config.strategy_id == "s2"
+        assert manager.get_bot("bot1").config.strategy_id == s2
 
-    async def test_change_error_bot(self, manager, ctx):
+    async def test_change_error_bot(self, manager, ctx, s2):
         """error 상태 봇의 전략 교체 가능."""
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
         # 수동으로 error 상태 설정
         manager.get_bot("bot1").status = BotStatus.ERROR
 
-        await manager.change_strategy("bot1", "s2")
+        await manager.change_strategy("bot1", s2)
 
-        assert manager.get_bot("bot1").config.strategy_id == "s2"
+        assert manager.get_bot("bot1").config.strategy_id == s2
 
 
 # ── resume_bot ───────────────────────────────────

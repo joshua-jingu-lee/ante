@@ -445,12 +445,36 @@ async def test_stop_bot_moves_to_stopped(manager, ctx, events, db, prior):
     assert await _db_status(db) == "created"
 
 
-async def test_assign_strategy_on_running_restarts(manager, ctx, events, db):
+_OTHER_STRATEGY_SOURCE = """
+from ante.strategy import Strategy, StrategyMeta
+
+
+class OtherStrategy(Strategy):
+    meta = StrategyMeta(name="strat-other", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+
+
+async def _register_other(db: Database, tmp_path: Path) -> str:
+    from ante.strategy.registry import StrategyRegistry
+
+    filepath = tmp_path / "strat_other.py"
+    filepath.write_text(_OTHER_STRATEGY_SOURCE, encoding="utf-8")
+    registry = StrategyRegistry(db)
+    await registry.initialize()
+    meta = StrategyMeta(name="strat-other", version="1.0.0", description="test")
+    return (await registry.register(filepath, meta)).strategy_id
+
+
+async def test_assign_strategy_on_running_restarts(manager, ctx, events, db, tmp_path):
+    other = await _register_other(db, tmp_path)
     bot = await _enter(manager, ctx, "running")
     generation = bot._generation
     before = len(events)
 
-    assert await manager.assign_strategy(BOT_ID, "strat-other") is None
+    assert await manager.assign_strategy(BOT_ID, other) is None
 
     assert bot.status.value == "running"
     assert bot._generation == generation + 1
