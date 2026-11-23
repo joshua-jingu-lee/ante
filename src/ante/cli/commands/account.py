@@ -223,7 +223,7 @@ def _resolve_credentials(
                 f"--credential-file 옵션의 {position}번째 인자({key})가 가리키는 "
                 "파일을 찾을 수 없습니다."
             )
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             raise AccountCredentialFileNotFoundError(
                 "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: "
                 f"--credential-file 옵션의 {position}번째 인자({key})가 가리키는 "
