@@ -6,7 +6,7 @@
 
 | 구분 | 이벤트 | 처리 |
 |------|--------|------|
-| 구독 | `OrderFilledEvent` | 체결 완료 → 거래 기록 + 포지션 갱신 |
+| 구독 | `OrderFilledEvent` | 체결 완료 → 체결 알림(거래 기록·포지션은 FillApplier가 발행 전에 반영) |
 | 구독 | `OrderRejectedEvent` | 룰 검증 실패 → 거부 기록 |
 | 구독 | `OrderFailedEvent` | 주문 실행 실패 → 실패 기록 |
 | 구독 | `OrderCancelledEvent` | 주문 취소 완료 → 취소 기록 |
