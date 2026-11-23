@@ -214,7 +214,7 @@ class RateLimiter:
 
 ## 8. 공통 주의사항
 
-- **blocking I/O 금지**: `time.sleep()`, 동기 `requests`, 동기 파일 I/O 사용 금지. 반드시 async 버전 사용
+- **blocking I/O 금지**: async 함수가 부르는 동기 헬퍼 안에서도 `time.sleep()`·동기 `requests`·동기 파일 I/O 같은 blocking 호출을 하지 않는다(`src/`의 async 본문에서 새 위반은 ASYNC 래칫이 실패시킨다 — 같은 파일의 기존 건과 맞바꾸면 통과한다)
 - **CPU-bound 작업**: `loop.run_in_executor()` 또는 subprocess로 격리
 - **asyncio.Lock**: 동시 접근 보호 필요 시 사용. 단, 단일 프로세스이므로 GIL과 혼동하지 않기
 - **타임아웃**: 외부 API 호출에는 반드시 `asyncio.wait_for(coro, timeout=)` 사용

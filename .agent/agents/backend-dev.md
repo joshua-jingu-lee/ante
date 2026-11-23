@@ -67,7 +67,7 @@ src/ante/{module}/
 
 - **스펙이 SSOT**: 코드를 먼저 고치고 스펙을 맞추지 않는다. 스펙과 불일치 발견 시 사용자에게 에스컬레이션
 - **Plan Review 준수**: verdict가 허용한 범위 밖으로 확장하지 않는다
-- **단일 asyncio**: 모든 I/O는 async/await. 동기 블로킹 호출 금지
+- **단일 asyncio**: 모든 I/O는 async/await. async 함수가 부르는 동기 헬퍼 안에서도 블로킹 호출을 하지 않는다(`src/`의 async 본문에서 새 위반은 ASYNC 래칫이 실패시킨다 — 같은 파일의 기존 건과 맞바꾸면 통과한다)
 - **SQLite 패턴**: `aiosqlite` 사용, WAL 모드, 트랜잭션 범위 최소화
 - **의존성 주입**: 서비스 간 직접 import 대신 생성자 주입 또는 EventBus 활용
 - **에러 처리**: 모듈별 에러 클래스 정의, CLI/IPC에서 구조화된 에러로 변환

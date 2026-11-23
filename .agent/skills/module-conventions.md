@@ -54,13 +54,12 @@ class BrokerAdapter(ABC):
 
 - `ABC` 사용 (Protocol은 duck typing 필요할 때만)
 - 모든 I/O 메서드는 `async`
-- 반환 타입 명시
 
 ## 3. 데이터 모델 (models.py)
 
 - `dataclass(frozen=True)` 기본 사용 (불변 객체). 가변 필요 시 `frozen=False` 명시.
 - 기본값·`field(default_factory=...)`로 안전한 초기값을 제공한다.
-- Enum은 `enum.StrEnum` 상속 (직렬화 용이). `class X(str, Enum)`은 쓰지 않는다.
+- Enum은 `enum.StrEnum` 상속 (직렬화 용이).
 - 타임스탬프는 `datetime` (UTC 권장).
 - 모델은 순수 데이터 구조로, 비즈니스 로직을 담지 않는다.
 
@@ -110,13 +109,8 @@ try:
     result = await self._broker.place_order(order)
 except BrokerTimeoutError:
     raise OrderExecutionError(f"주문 타임아웃: {order.symbol}")
-
-# 나쁨: 광범위한 예외 무시
-try:
-    result = await self._broker.place_order(order)
-except Exception:
-    pass
 ```
+광범위한 예외(`except Exception`)를 잡아 무시하지 않는다(`src/`의 새 위반은 BLE001 래칫이 실패시킨다 — 같은 파일의 기존 건과 맞바꾸면 통과한다).
 
 ## 5. 의존성 주입
 
@@ -152,10 +146,6 @@ from ante.eventbus import EventBus, Event
 
 # 금지: 다른 모듈의 내부 구현
 from ante.eventbus.service import _internal_method
-
-# 금지: 순환 import
-# ante.bot이 ante.strategy를 import하면서
-# ante.strategy가 ante.bot을 import하는 것
 ```
 
 ## 7. 로깅
@@ -192,26 +182,7 @@ class EventBus:
 (이벤트 enum이나 문자열 토픽으로 구독하지 않는다 — 실제 API는
 `src/ante/eventbus/bus.py`, 이벤트 타입은 `src/ante/eventbus/events.py` 참조.)
 
-## 9. 타입 힌트
-
-```python
-# 모든 public 함수에 타입 힌트 필수
-async def get_balance(self, bot_id: str) -> float:
-    ...
-
-# 컬렉션은 구체적 타입 사용 (실제: src/ante/eventbus/bus.py::get_handlers)
-def get_handlers(self, event_type: type[Event]) -> list[tuple[int, EventHandler]]:
-    ...
-
-# Optional은 명시적으로
-def find_bot(self, bot_id: str) -> Bot | None:
-    ...
-
-# 콜백 타입
-EventHandler = Callable[[Event], Awaitable[None]]
-```
-
-## 10. 금액 처리
+## 9. 금액 처리
 
 ```python
 # float 사용 (스펙 문서 기준)
@@ -224,7 +195,7 @@ total = price * quantity
 - DB 저장 시 `REAL` 타입 사용
 - 국내주식 외 다양한 상품 확장성을 위해 float 채택
 
-## 11. DDL 컨벤션 (db-schema.md SSOT)
+## 10. DDL 컨벤션 (db-schema.md SSOT)
 
 모든 모듈의 테이블 정의는 모듈 레벨 `*_SCHEMA` 문자열 상수로 관리한다. 이 상수가 `docs/architecture/generated/db-schema.md` 자동 생성의 원본(SSOT)이다.
 
@@ -234,7 +205,6 @@ total = price * quantity
 
 - 새 테이블 추가 시 해당 모듈의 `store.py` 또는 `service.py`에 `{DOMAIN}_SCHEMA` 상수 필수
 - `{DOMAIN}_SCHEMA`에 `CREATE TABLE IF NOT EXISTS`와 `CREATE INDEX IF NOT EXISTS`를 모두 포함
-- 스키마 변경 시 `{DOMAIN}_SCHEMA`를 먼저 수정 → `python scripts/generate_db_schema.py` 실행으로 문서 재생성
 
 ### 패턴
 
@@ -257,7 +227,7 @@ CREATE INDEX IF NOT EXISTS idx_{테이블명}_name
 
 보존 정책이 있는 테이블은 `scripts/generate_db_schema.py`의 `RETENTION_POLICIES`에 테이블명과 정책 문자열(예: `"30일 후 삭제"`)로 등록한다. 생성기가 이를 `db-schema.md`의 보존 정책 표로 내며, 등록하지 않은 테이블은 `영구 보존`으로 표기된다.
 
-## 12. CLI/IPC 응답 규칙
+## 11. CLI/IPC 응답 규칙
 
 새 CLI/IPC 표면은 사람이 읽는 text 출력과 agent가 읽는 JSON 출력을 모두
 고려한다.
