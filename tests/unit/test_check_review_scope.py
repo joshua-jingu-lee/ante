@@ -298,6 +298,100 @@ def test_rename_doc_to_non_doc_requires_review(repo: Repo) -> None:
     assert "review\tR\tdocs/moved.md -> scripts/moved.md" in result.stdout
 
 
+# ── 독스트링 줄 수 ──────────────────────────────────────────────
+
+NO_DOC = "def f():\n    return 1\n"
+ONE_LINE = 'def f():\n    """One."""\n    return 1\n'
+TWO_LINES = 'def f():\n    """One.\n\n    Two."""\n    return 1\n'
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        pytest.param(NO_DOC, ONE_LINE, False, id="added"),
+        pytest.param(ONE_LINE, TWO_LINES, False, id="lengthened"),
+        pytest.param(TWO_LINES, ONE_LINE, True, id="shortened"),
+        pytest.param(ONE_LINE, NO_DOC, True, id="removed"),
+        pytest.param(ONE_LINE, ONE_LINE.replace("One", "Other"), True, id="same"),
+        pytest.param(
+            '"""M."""\n' + TWO_LINES,
+            '"""M.\n\nMore."""\n' + ONE_LINE,
+            True,
+            id="swap-in-file",
+        ),
+    ],
+)
+def test_docstring_lines_not_grown(old: str, new: str, expected: bool) -> None:
+    assert scope.docstring_lines_not_grown(old.encode(), new.encode()) is expected
+
+
+def test_docstring_lines_load_failure_is_not_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scope, "CHECK_COMMENTS_PATH", tmp_path / "missing.py")
+    assert not scope.docstring_lines_not_grown(ONE_LINE.encode(), ONE_LINE.encode())
+    assert "_check_review_scope_comments" not in sys.modules
+
+
+def test_docstring_added_to_existing_function_requires_review(repo: Repo) -> None:
+    _with_src(repo, NO_DOC)
+    repo.write("src/ante/m.py", ONE_LINE)
+    repo.commit("add docstring")
+    result = repo.check()
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "review\tM\tsrc/ante/m.py" in result.stdout
+
+
+def test_docstring_lengthened_requires_review(repo: Repo) -> None:
+    _with_src(repo, ONE_LINE)
+    repo.write("src/ante/m.py", TWO_LINES)
+    repo.commit("lengthen docstring")
+    result = repo.check()
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "review\tM\tsrc/ante/m.py" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        pytest.param(TWO_LINES, ONE_LINE, id="shortened"),
+        pytest.param(ONE_LINE, ONE_LINE.replace("One", "Other"), id="content-only"),
+    ],
+)
+def test_docstring_not_lengthened_is_ast_identical(
+    repo: Repo, old: str, new: str
+) -> None:
+    _with_src(repo, old)
+    repo.write("src/ante/m.py", new)
+    repo.commit("docstring")
+    result = repo.check()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ast-identical\tM\tsrc/ante/m.py" in result.stdout
+
+
+def test_docstring_counter_missing_requires_review(repo: Repo, tmp_path: Path) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    script = tools / "check_review_scope.py"
+    script.write_bytes(SCRIPT.read_bytes())
+    (tools / "check_comments.py").write_text(
+        "def parse_baseline(text):\n    raise ValueError(text)\n", encoding="utf-8"
+    )
+    _with_src(repo)
+    repo.write("src/ante/m.py", SRC.replace("  # trailing note", ""))
+    repo.commit("drop comment")
+    result = subprocess.run(
+        [sys.executable, str(script), "--base", repo.base, "--head", "HEAD"],
+        cwd=repo.root,
+        env=repo.env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "review\tM\tsrc/ante/m.py" in result.stdout
+
+
 # ── 경계 ──────────────────────────────────────────────
 
 
@@ -403,7 +497,6 @@ BASELINE = "scripts/comment_baseline.json"
 def _baseline_dict(
     comments: dict[str, int] | None = None,
     history: dict[str, int] | None = None,
-    lines: int = 10,
     excess: dict[str, int] | None = None,
 ) -> dict[str, object]:
     return {
@@ -414,17 +507,15 @@ def _baseline_dict(
         "docstring_excess": {"src/ante/a.py": 4, "src/ante/b.py": 2}
         if excess is None
         else excess,
-        "docstring_lines": lines,
     }
 
 
 def _baseline_json(
     comments: dict[str, int] | None = None,
     history: dict[str, int] | None = None,
-    lines: int = 10,
     excess: dict[str, int] | None = None,
 ) -> str:
-    return json.dumps(_baseline_dict(comments, history, lines, excess), indent=2)
+    return json.dumps(_baseline_dict(comments, history, excess), indent=2)
 
 
 def _without_excess(text: str) -> str:
@@ -433,9 +524,16 @@ def _without_excess(text: str) -> str:
     return json.dumps(data, indent=2)
 
 
+def _with_lines(text: str, lines: int = 10) -> str:
+    data = json.loads(text)
+    data["docstring_lines"] = lines
+    return json.dumps(data, indent=2)
+
+
 BASE_BASELINE = _baseline_json()
-EMPTY_BASELINE = _baseline_json(comments={}, history={}, lines=0, excess={})
+EMPTY_BASELINE = _baseline_json(comments={}, history={}, excess={})
 OLD_SHAPE_BASE_BASELINE = _without_excess(BASE_BASELINE)
+LINES_SHAPE_BASE_BASELINE = _with_lines(BASE_BASELINE)
 
 BASELINE_CASES = [
     pytest.param(
@@ -462,7 +560,9 @@ BASELINE_CASES = [
     pytest.param(
         _baseline_json(history={"src/ante/b.py": 1}), False, id="new-history-key"
     ),
-    pytest.param(_baseline_json(lines=11), False, id="docstring-lines-increase"),
+    pytest.param(
+        _with_lines(EMPTY_BASELINE, 0), False, id="head-with-docstring-lines-key"
+    ),
     pytest.param(
         _baseline_json(excess={"src/ante/a.py": 1, "src/ante/b.py": 2}),
         True,
@@ -497,7 +597,6 @@ BASELINE_CASES = [
                 "comments": {},
                 "docstring_history": {},
                 "docstring_excess": {},
-                "docstring_lines": 0,
                 "extra": {},
             }
         ),
@@ -551,6 +650,7 @@ def test_baseline_path_matches_comment_checker() -> None:
         pytest.param("﻿".encode() + BASE_BASELINE.encode(), id="base-bom"),
         pytest.param(b"\xff\xfe", id="base-not-utf8"),
         pytest.param(OLD_SHAPE_BASE_BASELINE.encode(), id="base-without-excess-key"),
+        pytest.param(LINES_SHAPE_BASE_BASELINE.encode(), id="base-with-lines-key"),
     ],
 )
 def test_malformed_base_baseline_is_not_lowered(old: bytes) -> None:
@@ -582,6 +682,25 @@ def test_base_with_other_key_set_requires_review(repo: Repo, head: str) -> None:
     repo.mark_base()
     repo.write(BASELINE, head)
     repo.commit("new-shape baseline")
+    result = repo.check()
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"review\tM\t{BASELINE}" in result.stdout
+    assert "verdict: REVIEW" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        pytest.param(EMPTY_BASELINE, id="lowered"),
+        pytest.param(BASE_BASELINE, id="values-kept"),
+    ],
+)
+def test_base_with_docstring_lines_key_requires_review(repo: Repo, head: str) -> None:
+    repo.write(BASELINE, LINES_SHAPE_BASE_BASELINE)
+    repo.commit("baseline with docstring_lines")
+    repo.mark_base()
+    repo.write(BASELINE, head)
+    repo.commit("drop docstring_lines")
     result = repo.check()
     assert result.returncode == 1, result.stdout + result.stderr
     assert f"review\tM\t{BASELINE}" in result.stdout

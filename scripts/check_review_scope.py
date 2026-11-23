@@ -16,15 +16,20 @@ file at the repository root. A regular file mode is ``100644`` or ``100755``.
   regular file mode before and after, whose base and head both parse and give
   the same AST once every docstring is dropped. A docstring here is the first
   statement of a module, class or function body when it is a ``str``
-  constant. Only comments and those docstrings changed.
+  constant. Only comments and those docstrings changed. Also, the head's
+  docstring source lines are not more than the base's, both counted with
+  ``docstring_spans`` of ``check_comments.py`` (loaded by file path next to
+  this script). A file whose count cannot be taken is ``review``. The count
+  is a per-file total, so shortening one docstring and lengthening another in
+  the same file by as much still qualifies.
 - ``baseline-lowered``: ``scripts/comment_baseline.json`` modified with the
   same regular file mode before and after, both sides decoding as UTF-8 and
   passing ``parse_baseline`` of ``check_comments.py`` (loaded by file path
-  next to this script), every head key of ``comments``, ``docstring_history``
-  and ``docstring_excess`` present in base with a value not above base, and
-  ``docstring_lines`` not above base. Equal values qualify. A key removed in
-  head is a decrease. A head key missing from base, or a side that cannot be
-  loaded or validated, is ``review``. Since both sides go through the same
+  next to this script), and every head key of ``comments``,
+  ``docstring_history`` and ``docstring_excess`` present in base with a value
+  not above base. Equal values qualify. A key removed in head is a decrease.
+  A head key missing from base, or a side that cannot be loaded or validated,
+  is ``review``. Since both sides go through the same
   ``parse_baseline``, a base whose top-level keys differ from the ones it
   requires (a baseline from before a key was added or after one was removed)
   is ``review``. Also ``scripts/spec_code_block_baseline.json`` modified with
@@ -239,7 +244,7 @@ def classify_without_content(change: Change) -> str | None:
     return REVIEW
 
 
-def _load_parser(name: str, path: Path) -> Callable[[str], Any]:
+def _load_attr(name: str, path: Path, attr: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {path}")
@@ -249,7 +254,11 @@ def _load_parser(name: str, path: Path) -> Callable[[str], Any]:
         spec.loader.exec_module(module)
     finally:
         sys.modules.pop(spec.name, None)
-    parser: Callable[[str], Any] = module.parse_baseline
+    return getattr(module, attr)
+
+
+def _load_parser(name: str, path: Path) -> Callable[[str], Any]:
+    parser: Callable[[str], Any] = _load_attr(name, path, "parse_baseline")
     return parser
 
 
@@ -263,6 +272,26 @@ def _load_spec_baseline_parser() -> Callable[[str], Any]:
 
 def _load_prose_baseline_parser() -> Callable[[str], Any]:
     return _load_parser("_check_review_scope_prose", CHECK_PROSE_BUDGET_PATH)
+
+
+def _load_docstring_spans() -> Callable[[ast.AST], Any]:
+    spans: Callable[[ast.AST], Any] = _load_attr(
+        "_check_review_scope_comments", CHECK_COMMENTS_PATH, "docstring_spans"
+    )
+    return spans
+
+
+def docstring_lines_not_grown(old: bytes, new: bytes) -> bool:
+    """True when head has no more docstring source lines than base."""
+    try:
+        spans = _load_docstring_spans()
+
+        def count(data: bytes) -> int:
+            return sum(end - start + 1 for start, end in spans(ast.parse(data)))
+
+        return count(new) <= count(old)
+    except (Exception, SystemExit):
+        return False
 
 
 def _not_above(head: dict[str, int], base: dict[str, int]) -> bool:
@@ -279,7 +308,6 @@ def baseline_lowered(old: bytes, new: bytes) -> bool:
             _not_above(after.comments, before.comments)
             and _not_above(after.docstring_history, before.docstring_history)
             and _not_above(after.docstring_excess, before.docstring_excess)
-            and after.docstring_lines <= before.docstring_lines
         )
     except (Exception, SystemExit):
         return False
@@ -326,7 +354,11 @@ def classify(change: Change) -> str:
         return BASELINE_LOWERED if spec_baseline_lowered(old, new) else REVIEW
     if change.path == PROSE_BASELINE_PATH:
         return BASELINE_LOWERED if prose_baseline_lowered(old, new) else REVIEW
-    return AST_IDENTICAL if ast_identical_without_docstrings(old, new) else REVIEW
+    if ast_identical_without_docstrings(old, new) and docstring_lines_not_grown(
+        old, new
+    ):
+        return AST_IDENTICAL
+    return REVIEW
 
 
 def _display(change: Change) -> str:

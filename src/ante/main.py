@@ -819,17 +819,7 @@ async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> No
 
 
 async def _register_fill_scheduler_for_account(s: Services, account: Any) -> bool:
-    """단일 LIVE 계좌의 FillReconcileScheduler 등록 (startup + self-healing 공용).
-
-    멱등 재등록(self-healing): 기존 dict 항목이 있으면 새 scheduler 로 덮어쓰기
-    전 기존 task 를 stop 해 orphan task 를 방지한다. **per-account barrier 만**
-    갱신하고 전역 ``fill_catch_up_failed_accounts.clear()`` 는 호출하지 않는다
-    (타 계좌의 barrier 보존).
-
-    Returns:
-        등록 성공(scheduler start 완료) 여부. ``catch_up_once`` 폴 실패여도
-        scheduler 는 start 하지만 readiness 는 false 로 분리한다(R4).
-    """
+    """계좌 하나의 FillReconcileScheduler (재)등록. ``catch_up_once`` 성공 여부 반환."""
     from ante.broker.fill_scheduler import FillReconcileScheduler
 
     account_id = account.account_id
@@ -1049,34 +1039,7 @@ def _start_readiness_self_healing(s: Services, accounts: list[Any]) -> None:
 
 
 async def _self_healing_recover_account(s: Services, account: Any) -> bool:
-    """단일 not_ready broker 계좌의 1회 회복 시도(connect → idempotent 재등록).
-
-    회복 시:
-    1. broker 가 비면제·not_ready 이면 connect 재시도 → 성공 시 ``broker_ready``
-       전이(``broker_just_recovered``).
-    2. 의존 스케줄러(fill_recovery/reconcile/treasury_sync)는 **해당 플래그가 실제
-       not_ready 이거나 broker 가 방금 재연결된 경우에만** idempotent re-register
-       한다(기존 task cancel 후 교체 — orphan 방지). per-account 만 갱신하고 전역
-       barrier ``fill_catch_up_failed_accounts.clear()`` 는 호출하지 않는다
-       (타 계좌 barrier 보존).
-    3. ``broker_ready`` 는 의존 rebind 를 모두 마친 **뒤** mark 한다(stale-broker
-       false-ready 창 제거).
-
-    Known limitations (bounded):
-    - 비-broker flag(fill/treasury) 반복 실패는 broker 캐시 세션을 건강하다고
-      **신뢰**한다. ``broker_ready`` 강등 경로가 없어 "broker_ready=True
-      이나 세션 사망" 조합이 발생하지 않는다. 강등 도입(reader live-poll 등)
-      시 회복 경로의 broker 캐시 무효화 재검토가 필요하다.
-    - ``broker_just_recovered`` rebind(기존 스케줄러 교체) 분기는 startup connect
-      실패 시 스케줄러가 애초에 생성되지 않으므로 production-도달 불가한
-      방어 경로다(broker_ready 강등 도입 시 live 化).
-    - 다계좌 pending 의 burst backoff 는 계좌별 순차 직렬이라 한 영구실패 계좌가
-      뒤 계좌 회복을 bounded 지연시킨다(liveness 무손상). app_key 단위 backoff
-      그룹화는 follow-up.
-
-    Returns:
-        모든 비면제 플래그 ready(active_trading_ready) 여부.
-    """
+    """단일 계좌의 1회 회복 시도. 반환은 active_trading_ready(registry 없으면 True)."""
     account_id = account.account_id
 
     if s.runtime_readiness is None:
@@ -1166,21 +1129,7 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
 
 
 async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
-    """not_ready broker 계좌를 **무기한 재시도**하는 background loop (liveness).
-
-    liveness invariant: broker 회복이 가능한 한 not_ready 계좌는 유한시간 내
-    ready 로 전이한다. ``max_attempts`` 는 **per-burst(연결시도 단위)에만** 적용
-    하고 계좌 lifetime 은 무제한이다 — 일시 토큰압박이 영구 not_ready 로 고착되지
-    않도록. shutdown 에서 task cancel 로 종료한다.
-
-    per-app_key cooldown at source: 같은 app_key 의 여러
-    계좌가 pending 이면, 첫 계좌의 connect 가 EGW00133 으로 cooldown 을 기록한 뒤
-    같은 burst 의 두 번째 계좌 connect 는 cooldown 내라 발급 레이어가 **HTTP 미호출·
-    즉시 ``TokenRateLimitError``** 로 raise → 아래 ``except TokenRateLimitError`` 가
-    그 계좌의 burst 도 break 한다(토큰 1/min 재타격 없음). interval(60s, defaults.py)
-    ≥ cooldown(``TOKEN_RATE_LIMIT_COOLDOWN_SECONDS``=60s)이라 다음 burst 시점에는
-    cooldown 이 만료돼 발급이 정상 재개된다(self-healing 정상 동작과 정합).
-    """
+    """active_trading_ready 가 아닌 대상 계좌를 무기한 재시도하는 background loop."""
     interval = 60
     max_per_burst = 5
     backoff_base = 5
@@ -1292,17 +1241,7 @@ async def _init_stream_integration(
     *,
     account_id: str,
 ) -> None:
-    """KISStreamClient + StreamIntegration 초기화.
-
-    KIS multi-account 환경에서 활성 계좌마다 별도의
-    StreamIntegration 인스턴스를 만들어 ``s.stream_integrations`` dict 에
-    ``account_id`` 키로 등록한다. 한 계좌 stream 의 disconnect 가 다른 계좌
-    의 fallback 을 토글하지 않도록 ``StreamConnectedEvent`` /
-    ``StreamDisconnectedEvent`` 의 account_id marker (C2) 와 함께 작동한다.
-
-    ``s.stream_integration`` 단일 슬롯에 덮어쓰면 두 번째
-    KIS 계좌 등록 시 첫 인스턴스를 silently leak 시킨다.
-    """
+    """StreamIntegration 시작. 성공하면 stream_integrations[account_id] 에 등록한다."""
     assert s.eventbus is not None
     from ante.account.scoping import require_account_id
 
@@ -1354,33 +1293,7 @@ async def _init_stream_integration(
 
 
 async def _sync_instruments(s: Services, accounts: list[Any]) -> None:
-    """종목 마스터 동기화 (전 계좌의 unique exchange 단위로 순회).
-
-    첫 번째 성공 broker 에서 ``return`` 하면, 계좌 순서가
-    ``test``(TEST) → ``sample-paper``(KRX) 인 환경에서 TEST 더미 종목이 KIS/KRX
-    종목 마스터 적재를 선점해 종목명 병기가 전부 symbol-only 로
-    폴백된다. 전 계좌를 순회하되 이미 동기화한 exchange
-    는 ``synced_exchanges`` 로 건너뛰어 같은 exchange 를 중복 조회하지 않는다.
-    빈 결과(``get_instruments() == []``)는 synced 처리하지 않고 ``continue`` 하여
-    같은 exchange 의 후속 계좌가 여전히 동기화를 시도할 수 있게 한다.
-    ``bulk_upsert`` 성공 시에만 exchange 를 synced 로 표시한다. 전 계좌 순회
-    후 아무 것도 동기화하지 못하면 기존 경고를 유지한다.
-
-    D-ACC-09: broker_ready 면제 계좌(virtual/test)는 connect 단계에서
-    이미 skip 되어 broker 가 미연결이다. 여기서도 ``get_broker`` 를 호출하면 그
-    면제 계좌를 KIS 토큰/connect 실패에 **재노출**하므로(readiness 분리 전제
-    붕괴), 면제 계좌는 순회 대상에서 제외한다(non-exempt/live connected 계좌만
-    대상). 면제 계좌의 dummy exchange 가 KRX 등 실 exchange 마스터 적재를
-    선점하던 회귀도 동일하게 차단된다.
-
-    startup connect 에서 broker not_ready 가 된 비면제
-    (LIVE) 계좌도 순회 대상에서 제외한다(``_broker_not_ready_live``). 그 계좌에
-    ``get_broker`` 를 다시 호출하면 EGW00133 계좌의 KIS 토큰 1/min 제한을 startup
-    단일 cadence(T4) 밖에서 또 두드리기 때문이다. (A) per-app_key cooldown 이
-    최종 안전망으로 그 재타격을 source 에서 즉시 raise 로 막지만, 불필요한 발급
-    시도 자체를 줄이는 본 필터를 함께 둬 defense-in-depth 로 한다. per-account
-    try/except 가 not_ready 계좌의 예외도 흡수하므로 전체 sync 를 깨지 않는다.
-    """
+    """종목 마스터 동기화(면제·not_ready LIVE 계좌와 동기화한 exchange 는 건너뜀)."""
     synced_exchanges: set[str] = set()
     for account in accounts:
         if _broker_ready_exempt(account):
@@ -1733,26 +1646,7 @@ async def _stop_session_expiry_loop(
 
 
 async def _init_notification(s: Services) -> None:
-    """NotificationService, TelegramCommandReceiver 초기화.
-
-    부팅 계약:
-
-    - ``TELEGRAM_BOT_TOKEN`` / ``TELEGRAM_CHAT_ID`` 시크릿이 누락(``ConfigError``)
-      되거나 공란이면 NotificationService 를 생성하지 않고 부팅을 계속한다.
-      과거에는 시크릿이 아예 없을 때 ``Config.secret()`` 이 raise 하여 부팅이
-      막혔다 — ``notification.telegram_enabled=false`` 로 Telegram 을 끈 stage
-      환경에서도 우회가 필요했던 원인이다.
-    - 시크릿이 존재하면 ``notification.telegram_enabled`` 플래그와 무관하게
-      ``NotificationService`` 를 항상 생성한다. 플래그는 서비스 내부의 필터링
-      (CRITICAL 이외 차단) 과 ``ConfigChangedEvent`` 기반 런타임 재활성화
-      계약에만 사용된다 — `docs/specs/notification/notification.md` §_should_send
-      참조. 서비스 자체를 지워 버리면 disabled 상태에서도 보장되어야 할
-      CRITICAL 알림 경로와 동적 토글이 함께 무력화된다.
-    - 공란 시크릿(``TELEGRAM_BOT_TOKEN=`` 등) 역시 비활성화 신호로 취급한다
-      (`docs/superpowers/specs/2026-04-17-staging-environment-design.md` 참고).
-      ``Config.secret()`` 은 이 경우 raise 하지 않고 빈 문자열을 반환하므로
-      별도 가드가 필요하다.
-    """
+    """NotificationService·TelegramCommandReceiver 초기화(시크릿 누락·공란이면 skip)."""
     assert s.eventbus is not None
     assert s.dynamic_config is not None
 
@@ -1927,31 +1821,7 @@ async def _run(s: Services) -> None:
 
 
 async def _shutdown(s: Services) -> None:
-    """종료 정리 (역순).
-
-    종료 순서 (cold-path race window 차단):
-    1. 종료 알림(NotificationEvent), Telegram, 스케줄러 태스크 취소
-       (감사/결재 만료, **스탑 주문 세션 만료 sweep task** 포함).
-    2. **IPCServer.stop_accepting()** — 새 IPC 연결 차단, **소켓 파일은 유지**.
-       이 호출 시작 시 IPCServer state는 `SHUTTING_DOWN`으로 전환되어 이후
-       active connection의 mutating command를 `SERVICE_UNAVAILABLE`로 거부한다.
-    3. **StopOrderManager.stop()** — 활성 스탑 주문을
-       `manager_stopped`로 일괄 만료. IPC gate(2) **뒤**·BotManager(6) **앞**에
-       두어, manager.stop() 소요와 무관하게 mutating IPC를 차단하면서도
-       `StopOrderExpiredEvent` 소비자(SignalChannel)가 생존한다.
-    4. DailyReportScheduler, ReconcileScheduler 종료
-    5. 각 계좌의 Treasury sync 중지
-    6. BotManager 전체 봇 중지
-    7. StreamIntegration 종료
-    8. APIGateway 종료
-    9. BrokerAdapter/DB 종료 직전 **IPCServer.stop_dispatching()** — active
-        connection의 read-only dispatch까지 `SERVICE_UNAVAILABLE`로 거부.
-    10. 각 계좌의 BrokerAdapter disconnect
-    11. Database 종료
-    12. **IPCServer.drain_connections() + unlink_socket()** — 소켓 파일 제거.
-        cold-path guard(`PID alive AND socket exists`)가 이 시점부터 'active 아님'
-        판정.
-    """
+    """종료 정리 — cold-path race window 를 막는 순서로 서비스를 멈춘다."""
     logger.info("Ante 종료 시작")
 
     from ante.eventbus.events import NotificationEvent

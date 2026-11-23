@@ -48,14 +48,12 @@ def _write_baseline(root: Path, data: object) -> None:
 def _baseline(
     comments: dict[str, int] | None = None,
     history: dict[str, int] | None = None,
-    lines: int = 0,
     excess: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     return {
         "comments": comments or {},
         "docstring_history": history or {},
         "docstring_excess": excess or {},
-        "docstring_lines": lines,
     }
 
 
@@ -70,11 +68,11 @@ def _comments(text: str) -> int:
 
 
 def _history(text: str) -> int:
-    return checker.measure_docstrings(text.encode("utf-8"))[0]
+    return checker.count_history_lines(text.encode("utf-8"))
 
 
-def _docstring_lines(text: str) -> int:
-    return checker.measure_docstrings(text.encode("utf-8"))[1]
+def _spans(text: str) -> list[tuple[int, int]]:
+    return checker.docstring_spans(ast.parse(text))
 
 
 def test_standalone_comment_is_counted() -> None:
@@ -193,10 +191,10 @@ def test_non_docstring_or_non_matching_text_is_not_history(source: str) -> None:
 )
 def test_string_statement_in_body_is_counted_as_docstring(source: str) -> None:
     assert _history(source) == 1
-    assert _docstring_lines(source) == 1
+    assert len(_spans(source)) == 1
 
 
-def test_docstring_total_lines() -> None:
+def test_docstring_spans_cover_every_string_statement() -> None:
     source = (
         '"""Module."""\n'
         "class C:\n"
@@ -211,7 +209,7 @@ def test_docstring_total_lines() -> None:
         '        string."""\n'
         '        y = "not a statement"\n'
     )
-    assert _docstring_lines(source) == 1 + 3 + 2 + 2
+    assert _spans(source) == [(1, 1), (3, 5), (7, 8), (10, 11)]
 
 
 def _tree(root: Path) -> dict[str, Any]:
@@ -227,7 +225,6 @@ def _tree(root: Path) -> dict[str, Any]:
     return _baseline(
         comments={"src/ante/a.py": 2, "src/ante/sub/b.py": 1},
         history={"src/ante/a.py": 1},
-        lines=1,
     )
 
 
@@ -238,7 +235,6 @@ def test_measure_uses_posix_paths_and_skips_zero_files(tmp_path: Path) -> None:
 
     assert result.comments == {"src/ante/a.py": 2, "src/ante/sub/b.py": 1}
     assert result.docstring_history == {"src/ante/a.py": 1}
-    assert result.docstring_lines == 1
 
 
 def test_equal_baseline_passes(tmp_path: Path, capsys: Capsys) -> None:
@@ -313,28 +309,14 @@ def test_history_increase_fails(tmp_path: Path, capsys: Capsys) -> None:
     assert "커밋 메시지" in message
 
 
-def test_docstring_lines_increase_asks_to_shrink_others(
-    tmp_path: Path, capsys: Capsys
-) -> None:
+def test_longer_docstring_within_limit_passes(tmp_path: Path, capsys: Capsys) -> None:
     _write_baseline(tmp_path, _tree(tmp_path))
     _write_source(tmp_path, "src/ante/clean.py", '"""Doc\n\nmore."""\nz = 1\n')
 
     code, message = _run(tmp_path, capsys)
 
-    assert code == 1
-    assert "docstring_lines: actual 4, baseline 1" in message
-    assert "다른 독스트링을 그만큼 줄인다" in message
-
-
-def test_docstring_lines_decrease_fails(tmp_path: Path, capsys: Capsys) -> None:
-    baseline = _tree(tmp_path)
-    baseline["docstring_lines"] = 5
-    _write_baseline(tmp_path, baseline)
-
-    code, message = _run(tmp_path, capsys)
-
-    assert code == 1
-    assert "docstring_lines를 1로 낮춘다" in message
+    assert code == 0, message
+    assert "docstring lines" not in message
 
 
 def test_empty_objects_are_valid(tmp_path: Path, capsys: Capsys) -> None:
@@ -385,9 +367,7 @@ def test_broken_json_exits_2(tmp_path: Path, capsys: Capsys) -> None:
             id="string",
         ),
         pytest.param(lambda d: d.update(comments=[]), id="comments-not-object"),
-        pytest.param(lambda d: d.update(docstring_lines=-1), id="lines-negative"),
-        pytest.param(lambda d: d.update(docstring_lines=True), id="lines-bool"),
-        pytest.param(lambda d: d.update(docstring_lines=1.0), id="lines-float"),
+        pytest.param(lambda d: d.update(docstring_lines=0), id="legacy-lines-key"),
         pytest.param(lambda d: d.update(docstring_excess=[]), id="excess-not-object"),
         pytest.param(
             lambda d: d["docstring_excess"].update({"src/ante/a.py": 0}),
@@ -441,7 +421,7 @@ def test_parse_baseline_matches_read_baseline(tmp_path: Path) -> None:
 
     assert parsed == checker.read_baseline(tmp_path)
     assert parsed == checker.Measurement(
-        baseline["comments"], baseline["docstring_history"], {}, 1
+        baseline["comments"], baseline["docstring_history"], {}
     )
 
 
@@ -452,9 +432,13 @@ def test_parse_baseline_matches_read_baseline(tmp_path: Path) -> None:
         pytest.param("[1, 2]", id="not-object"),
         pytest.param('{"comments": {}, "docstring_history": {}}', id="missing-key"),
         pytest.param(
-            '{"comments": {"a": 0}, "docstring_history": {}, '
-            '"docstring_excess": {}, "docstring_lines": 0}',
+            '{"comments": {"a": 0}, "docstring_history": {}, "docstring_excess": {}}',
             id="zero-count",
+        ),
+        pytest.param(
+            '{"comments": {}, "docstring_history": {}, "docstring_excess": {}, '
+            '"docstring_lines": 0}',
+            id="legacy-lines-key",
         ),
     ],
 )
@@ -796,7 +780,7 @@ def _excess_tree(root: Path, private_lines: int = 3) -> dict[str, Any]:
     )
     _write_source(root, "src/ante/other.py", "def _h():\n" + _doc(2))
     measured = checker.measure(root)
-    return _baseline(lines=measured.docstring_lines, excess=measured.docstring_excess)
+    return _baseline(excess=measured.docstring_excess)
 
 
 def test_measure_sums_excess_per_file(tmp_path: Path) -> None:
@@ -829,7 +813,6 @@ def test_private_docstring_growth_fails_and_lists_docstrings(
         "src/ante/m.py",
         '"""Module."""\n\n\ndef _f():\n' + _doc(2) + '\n\ndef g():\n    """G."""\n',
     )
-    baseline["docstring_lines"] += 1
     _write_baseline(tmp_path, baseline)
 
     code, message = _run(tmp_path, capsys)
@@ -854,7 +837,6 @@ def test_excess_growth_lists_every_oversized_docstring_of_the_file(
         "src/ante/m.py",
         _doc(5, "") + "\n\ndef _f():\n" + _doc(3) + "\n\nclass C:\n" + _doc(12),
     )
-    baseline["docstring_lines"] = checker.measure(tmp_path).docstring_lines
     _write_baseline(tmp_path, baseline)
 
     code, message = _run(tmp_path, capsys)
@@ -877,7 +859,6 @@ def test_comment_and_excess_growth_give_move_hint_once(
         + _doc(2)
         + '\n\ndef g():\n    """G."""\n',
     )
-    baseline["docstring_lines"] += 1
     _write_baseline(tmp_path, baseline)
 
     code, message = _run(tmp_path, capsys)
@@ -895,7 +876,6 @@ def test_shortened_docstring_without_lowering_baseline_fails(
 ) -> None:
     baseline = _excess_tree(tmp_path, private_lines=4)
     _write_source(tmp_path, "src/ante/m.py", '"""Module."""\n\n\ndef _f():\n' + _doc(3))
-    baseline["docstring_lines"] = checker.measure(tmp_path).docstring_lines
     _write_baseline(tmp_path, baseline)
 
     code, message = _run(tmp_path, capsys)
@@ -911,7 +891,6 @@ def test_docstring_within_limit_asks_to_remove_key(
 ) -> None:
     baseline = _excess_tree(tmp_path)
     _write_source(tmp_path, "src/ante/other.py", 'def _h():\n    """H."""\n')
-    baseline["docstring_lines"] = checker.measure(tmp_path).docstring_lines
     _write_baseline(tmp_path, baseline)
 
     code, message = _run(tmp_path, capsys)
@@ -929,3 +908,18 @@ def test_baseline_without_excess_key_exits_2(tmp_path: Path, capsys: Capsys) -> 
 
     assert code == 2
     assert "missing ['docstring_excess']" in message
+
+
+def test_oversized_docstring_on_empty_excess_baseline_fails(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    _write_source(tmp_path, "src/ante/clean.py", 'def _ok():\n    """Ok."""\n')
+    _write_baseline(tmp_path, _baseline())
+    assert _run(tmp_path, capsys)[0] == 0
+    _write_source(tmp_path, "src/ante/new.py", "def _f():\n" + _doc(2))
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 1
+    assert "docstring_excess\tsrc/ante/new.py: actual 1, baseline 0 (+1)" in message
+    assert "  src/ante/new.py:2 private _f 2>1" in message

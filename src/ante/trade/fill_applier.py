@@ -145,24 +145,7 @@ class FillApplier:
         avg_price: float,
         account_id: str,
     ) -> float:
-        """Lock 보유 상태에서 단일 트랜잭션 적용 + 발행. delta 반환.
-
-        ``apply_cumulative`` / ``apply_stream_increment`` 의 공통 코어. 호출자가
-        이미 ``self._lock`` 을 보유하고 ``record`` 를 조회한 상태여야 한다.
-
-        durability: outbox 가 주입되면 recorded advance + trade insert +
-        position update **와 동일 트랜잭션** 안에서 OrderFilledEvent payload 를
-        outbox 에 INSERT 한다(원자 커밋). commit 성공 = 이벤트 영속 보장이므로
-        commit↔publish 사이 crash window 가 닫힌다. 발행은 트랜잭션 밖에서
-        publisher 워커(at-least-once)에 위임한다.
-
-        open 캐시 미러: ``record_fill`` 은 트랜잭션 내부 호출이라 캐시를
-        건드리지 않는다(rollback 시 stale 방지). LIVE ``get_open_orders`` 의 sync
-        캐시는 트랜잭션 블록이 **정상 COMMIT 된 직후** ``mirror_fill_to_cache`` 로만
-        갱신한다. rollback(``_save_trade``/position/outbox 실패) 시 commit 이후
-        지점에 도달하지 못해 캐시는 불변 — DB(원복)와 일관된다. 스트림/폴 양
-        경로의 공통 코어라 미러 호출은 이 한 지점뿐이다.
-        """
+        """Lock 보유 상태의 공통 코어: 단일 트랜잭션 적용, delta 반환(0 이하면 0.0)."""
         from ante.trade.fill_outbox import make_fill_dedup_key
         from ante.trade.order_tracker import OrderTrackerRecord
 
