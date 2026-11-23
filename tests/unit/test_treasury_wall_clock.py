@@ -94,6 +94,32 @@ async def test_sync_time_survives_reload(treasury: Treasury) -> None:
     assert treasury.last_synced_at == _AT
 
 
+async def test_virtual_sync_time_survives_reload(
+    treasury: Treasury, manual_clock: Any
+) -> None:
+    manual_clock.advance(90.0)
+    expected = _AT + timedelta(seconds=90)
+    await treasury._do_sync_virtual(_positions())
+    if treasury.last_synced_at != expected:
+        pytest.fail(f"준비 실패: 동기화 시각 {treasury.last_synced_at!r}")
+
+    await treasury.load_from_db()
+
+    assert treasury.last_synced_at == expected
+
+
+async def test_fresh_instance_reads_sync_time(treasury: Treasury, db: Database) -> None:
+    await treasury._do_sync(_broker(), _positions())
+    if treasury.last_synced_at != _AT:
+        pytest.fail(f"준비 실패: 동기화 시각 {treasury.last_synced_at!r}")
+
+    fresh = Treasury(db=db, eventbus=EventBus(), account_id="acc-clock")
+    await fresh.initialize()
+
+    assert fresh.get_summary()["account_balance"] == 5_000_000.0
+    assert fresh.get_summary()["last_sync_time"] == _AT.isoformat()
+
+
 async def test_budget_last_updated_follows_clock(
     treasury: Treasury, manual_clock: Any
 ) -> None:
