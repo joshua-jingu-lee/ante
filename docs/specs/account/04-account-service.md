@@ -27,6 +27,8 @@
 | `suspend_all` | `reason: str, suspended_by: str` | `int` | 모든 ACTIVE 계좌를 SUSPENDED로 전환. 전환된 수 반환 (시스템 전체 Kill Switch) |
 | `activate_all` | `activated_by: str` | `int` | 모든 SUSPENDED 계좌를 ACTIVE로 복구. DELETED 계좌는 대상 제외 |
 
+`activate`·`delete`는 상태 UPDATE가 실패하면(작업 취소 포함) 캐시에 든 그 계좌 객체의 `status`·`updated_at`을 호출 전 값으로 제자리에서 되돌리고 같은 예외를 다시 올린다. 이벤트는 UPDATE가 성공한 뒤에만 발행한다: `activate`의 `AccountActivatedEvent`·알림, 그리고 활성 계좌를 지울 때 `delete`가 내는 `AccountSuspendedEvent`(캐시에서 계좌를 뺀 뒤 발행). UPDATE가 커밋된 뒤에 취소가 닿으면 DB는 바뀐 채 캐시만 되돌아갈 수 있다 — `activate`라면 캐시가 정지로 남아 주문이 막히고, 재시작하면 DB 값을 따른다.
+
 소스: `src/ante/account/service.py`
 
 ### 브로커 인스턴스 생성
