@@ -1256,6 +1256,25 @@ class Treasury:
         if not pending:
             return
 
+        total_released = await self._release_bot_reservations(bot_id, pending)
+
+        await self._log_transaction(
+            bot_id=bot_id,
+            tx_type="bot_stopped_release",
+            amount=total_released,
+            description=f"{len(pending)}건 예약 해제",
+        )
+        logger.info(
+            "봇 중지 예약 해제: %s -- %d건, %s원",
+            bot_id,
+            len(pending),
+            f"{total_released:,.0f}",
+        )
+
+    async def _release_bot_reservations(
+        self, bot_id: str, pending: dict[str, float]
+    ) -> float:
+        """봇의 잔여 예약을 표·행·예산에서 한 트랜잭션으로 회수하고 그 합을 돌려준다."""
         total_released = 0.0
         for order_id, amount in pending.items():
             self._reservations.pop(order_id, None)
@@ -1280,19 +1299,7 @@ class Treasury:
             for order_id, amount in pending.items():
                 self._restore_reservation(order_id, (bot_id, amount))
             raise
-
-        await self._log_transaction(
-            bot_id=bot_id,
-            tx_type="bot_stopped_release",
-            amount=total_released,
-            description=f"{len(pending)}건 예약 해제",
-        )
-        logger.info(
-            "봇 중지 예약 해제: %s -- %d건, %s원",
-            bot_id,
-            len(pending),
-            f"{total_released:,.0f}",
-        )
+        return total_released
 
     def start_sync(
         self,
