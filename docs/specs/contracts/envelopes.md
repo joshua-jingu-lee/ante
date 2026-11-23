@@ -201,7 +201,9 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
 - **streaming 핸드셰이크 passthrough(`signal connect`)**: `signal connect`의 핸드셰이크
   단계는 데몬이 생성한 IPC error envelope의 `error.code`/`error.message`를 CLI error
   envelope으로 **1회만** 옮긴다. 이때 JSON 모드의 `message`는 **verbatim
-  passthrough**한다 — CLI가 번역·재작성하지 않는다. 데몬이 낸 거부는
+  passthrough**한다 — CLI가 번역·재작성하지 않는다. 다만 데몬이 빈 `message`를
+  내면 `<code>: `가 되고 SCREAMING_SNAKE가 아닌 `code`는 `EXECUTION_ERROR`가 된다(지금
+  데몬이 내는 코드·메시지에서는 일어나지 않는다). 데몬이 낸 거부는
   `IPCRemoteError`로, 연결 실패(소켓 없음·연결 거부·응답 끊김·시간 초과)는 위 헬퍼와
   같은 `IPCServerNotRunningError`·`IPCClientTimeoutError`로 진입점 훅에 올린다.
   따라서 JSON 모드의 데몬 핸드셰이크 검증 에러는 `{status:error, code, message}`
