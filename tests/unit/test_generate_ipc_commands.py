@@ -61,6 +61,10 @@ class _Branches(IPCRequest):
     leaf: _Leaf = Field(default_factory=_Leaf)
     label: str = "IPC halt"
     empty: str = ""
+    positive: float | None = Field(default=None, gt=0)
+    bounded: int = Field(default=1, ge=0, le=10)
+    below: float = Field(default=0.5, lt=1.5)
+    count: int = Field(gt=0)
 
 
 class _SecretWithDefault(IPCRequest):
@@ -71,8 +75,24 @@ class _UnknownValidator(IPCRequest):
     value: Annotated[str, AfterValidator(_unknown)]
 
 
-class _Constrained(IPCRequest):
-    value: int = Field(default=1, ge=0)
+class _MultipleOf(IPCRequest):
+    value: int = Field(default=2, multiple_of=2)
+
+
+class _BoundedText(IPCRequest):
+    value: str | None = Field(default=None, max_length=3)
+
+
+class _BoundOnText(IPCRequest):
+    value: str = Field(default="b", gt="a")
+
+
+class _BoundAndValidator(IPCRequest):
+    value: Annotated[float, AfterValidator(_unknown)] = Field(default=1.0, gt=0)
+
+
+class _BoolBound(IPCRequest):
+    value: int = Field(default=1, gt=True)
 
 
 class _Tuple(IPCRequest):
@@ -134,6 +154,10 @@ EXPECTED_CELLS = [
     ("leaf", "`leaf: _Leaf = _Leaf()`"),
     ("label", '`label: str = "IPC halt"`'),
     ("empty", '`empty: str = ""`'),
+    ("positive", "`positive: float \\| None = null` (`> 0`)"),
+    ("bounded", "`bounded: int = 1` (`>= 0, <= 10`)"),
+    ("below", "`below: float = 0.5` (`< 1.5`)"),
+    ("count", "`count: int` (필수) (`> 0`)"),
 ]
 
 
@@ -156,7 +180,11 @@ def test_secret_default_is_not_rendered() -> None:
     ("model", "name"),
     [
         (_UnknownValidator, "value"),
-        (_Constrained, "value"),
+        (_MultipleOf, "value"),
+        (_BoundedText, "value"),
+        (_BoundOnText, "value"),
+        (_BoundAndValidator, "value"),
+        (_BoolBound, "value"),
         (_Tuple, "value"),
         (_Backtick, "value"),
         (_Newline, "value"),
