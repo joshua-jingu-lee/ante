@@ -18,7 +18,7 @@ from ante.account.errors import (
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
 from ante.account.service import AccountService
-from ante.core.database import Database
+from ante.core.database import Database, OperationalError
 from ante.core.exchange import CANONICAL_EXCHANGES
 from ante.eventbus.bus import EventBus
 
@@ -471,6 +471,55 @@ async def test_delete_succeeds_when_no_active_bots(service, db):
 
     deleted = await service.get("main")
     assert deleted.status == AccountStatus.DELETED
+
+
+class _LockedBotsDB:
+    """``bots`` 조회에서만 ``database is locked``를 던지는 DB 래퍼."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def fetch_one(self, sql, params=()):
+        if "FROM bots" in sql:
+            raise OperationalError("database is locked")
+        return await self._inner.fetch_one(sql, params)
+
+
+@pytest.mark.asyncio
+async def test_delete_blocked_when_bots_lookup_fails(service, db):
+    """활성 봇 검사가 테이블 부재 밖의 오류로 실패하면 삭제하지 않는다 (#2629)."""
+    from ante.bot.manager import BOT_SCHEMA
+
+    await service.create(_make_account())
+    await db.execute_script(BOT_SCHEMA)
+    await db.execute(
+        """INSERT INTO bots
+           (bot_id, name, strategy_id, account_id, config_json, status)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("bot-1", "테스트봇", "strat", "main", "{}", "running"),
+    )
+    service._db = _LockedBotsDB(db)
+
+    with pytest.raises(OperationalError, match="database is locked"):
+        await service.delete("main", deleted_by="admin")
+
+    row = await db.fetch_one("SELECT status FROM accounts WHERE account_id = 'main'")
+    assert row["status"] == "active"
+    assert (await service.get("main")).status == AccountStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_delete_succeeds_when_bots_table_missing(service, db):
+    """``bots`` 테이블이 없으면(봇 없음) 삭제가 진행된다 (#2629)."""
+    await service.create(_make_account())
+
+    await service.delete("main", deleted_by="admin")
+
+    row = await db.fetch_one("SELECT status FROM accounts WHERE account_id = 'main'")
+    assert row["status"] == "deleted"
 
 
 @pytest.mark.asyncio

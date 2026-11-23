@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import ExitStack, asynccontextmanager
 from pathlib import Path
@@ -690,6 +691,12 @@ def test_account_delete_requires_confirmation(mode: str) -> None:
             "EXECUTION_ERROR",
             "계좌 삭제 실패",
             id="runtime",
+        ),
+        pytest.param(
+            sqlite3.OperationalError("database is locked"),
+            "EXECUTION_ERROR",
+            "database is locked",
+            id="bots-lookup-locked",
         ),
     ],
 )

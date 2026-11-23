@@ -10,7 +10,7 @@
       "BLE001": 3
     },
     "src/ante/account/service.py": {
-      "BLE001": 2,
+      "BLE001": 1,
       "C901": 1
     },
     "src/ante/approval/handlers.py": {
