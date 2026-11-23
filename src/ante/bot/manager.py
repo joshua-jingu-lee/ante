@@ -1173,8 +1173,12 @@ class BotManager:
         )
 
     async def get_signal_key(self, bot_id: str) -> str | None:
-        """봇의 시그널 키 조회."""
+        """봇의 시그널 키 조회. 현재 전략이 외부 시그널을 받지 않으면 ``None``."""
         if not self._signal_key_manager:
+            return None
+        bot = self._get_bot(bot_id)
+        meta = await self._strategy_meta(bot)
+        if not getattr(meta, "accepts_external_signals", False):
             return None
         return await self._signal_key_manager.get_key(bot_id)
 
@@ -1204,27 +1208,7 @@ class BotManager:
         if not self._signal_key_manager:
             raise BotError("SignalKeyManager가 설정되지 않았습니다")
         bot = self._get_bot(bot_id)
-
-        meta = None
-        strategy = getattr(bot, "strategy", None)
-        if strategy is not None:
-            meta = getattr(strategy, "meta", None)
-        if meta is None:
-            strategy_cls = getattr(bot, "_strategy_cls", None)
-            if strategy_cls is not None:
-                meta = getattr(strategy_cls, "meta", None)
-        if meta is None:
-            from ante.strategy.loader import StrategyLoader
-            from ante.strategy.registry import StrategyRegistry
-
-            registry = StrategyRegistry(self._db)
-            await registry.initialize()
-            record = await registry.get(bot.config.strategy_id)
-            if record is None:
-                raise BotError(f"전략 미발견: {bot.config.strategy_id}")
-            loaded_cls = StrategyLoader.load(Path(record.filepath))
-            meta = getattr(loaded_cls, "meta", None)
-
+        meta = await self._strategy_meta(bot)
         if not getattr(meta, "accepts_external_signals", False):
             raise BotNotAcceptingSignals(
                 f"이 봇의 전략은 외부 시그널을 받지 않습니다: "
@@ -1237,6 +1221,29 @@ class BotManager:
             reg.bump_generation(bot_id)
             reg.close_bot(bot_id, "rotated")
         return new_key
+
+    async def _strategy_meta(self, bot: Bot) -> Any:
+        """봇에 지금 묶인 전략의 meta(인스턴스 → 클래스 → 레지스트리 로드 순)."""
+        strategy = getattr(bot, "strategy", None)
+        if strategy is not None:
+            meta = getattr(strategy, "meta", None)
+            if meta is not None:
+                return meta
+        strategy_cls = getattr(bot, "_strategy_cls", None)
+        if strategy_cls is not None:
+            meta = getattr(strategy_cls, "meta", None)
+            if meta is not None:
+                return meta
+        from ante.strategy.loader import StrategyLoader
+        from ante.strategy.registry import StrategyRegistry
+
+        registry = StrategyRegistry(self._db)
+        await registry.initialize()
+        record = await registry.get(bot.config.strategy_id)
+        if record is None:
+            raise BotError(f"전략 미발견: {bot.config.strategy_id}")
+        loaded_cls = StrategyLoader.load(Path(record.filepath))
+        return getattr(loaded_cls, "meta", None)
 
     def get_restart_count(self, bot_id: str) -> int:
         """봇의 현재 재시작 시도 횟수."""
