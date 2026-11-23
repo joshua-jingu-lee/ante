@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
     from ante.gateway.gateway import APIGateway
+    from ante.trade.fill_applier import FillApplier
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,7 @@ class VirtualExecutor:
         slippage_rate: float = 0.0,
         runtime_readiness: RuntimeReadinessRegistry | None = None,
         account_service: AccountService | None = None,
+        fill_applier: FillApplier | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._gateway = gateway
@@ -167,6 +169,7 @@ class VirtualExecutor:
         self._bot_configs: dict[str, Any] = {}
         self._runtime_readiness = runtime_readiness
         self._account_service = account_service
+        self._fill_applier = fill_applier
 
     def register_bot(self, bot_id: str, portfolio: VirtualPortfolioView) -> None:
         """Virtual 계좌 봇의 PortfolioView 등록."""
@@ -350,6 +353,44 @@ class VirtualExecutor:
 
         trade_amount = fill_price * quantity
         commission = self._commission_info.calculate(side, trade_amount)
+        filled_at = clock.now(UTC)
+
+        if self._fill_applier is None:
+            logger.warning(
+                "VirtualExecutor: fill_applier 미주입 — 가상 체결을 trades·positions에 "
+                "기록하지 않는다 (order_id=%s)",
+                order_id,
+            )
+        else:
+            try:
+                recorded = await self._fill_applier.apply_direct_fill(
+                    account_id=account_id,
+                    order_id=order_id,
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    price=fill_price,
+                    commission=commission,
+                    order_type=order_type,
+                    exchange=event.exchange,
+                    timestamp=filled_at,
+                )
+            except Exception:
+                logger.exception(
+                    "Virtual 체결 기록 실패 — 주문 실패 종결 (order_id=%s)", order_id
+                )
+                await self._fail_order(
+                    event, error_message="virtual_fill_record_failed"
+                )
+                return
+            if not recorded:
+                logger.warning(
+                    "Virtual 체결 중복 — 포트폴리오 반영·발행 생략 (order_id=%s)",
+                    order_id,
+                )
+                return
 
         portfolio.apply_fill(symbol, side, quantity, fill_price, commission)
 
@@ -366,7 +407,7 @@ class VirtualExecutor:
                 price=fill_price,
                 commission=commission,
                 order_type=order_type,
-                timestamp=clock.now(UTC),
+                timestamp=filled_at,
                 fill_dedup_key="",
                 exchange=event.exchange,
             )
