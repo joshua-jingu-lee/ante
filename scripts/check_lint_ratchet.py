@@ -8,8 +8,8 @@ exit, output that is not a JSON list, an item without a string ``filename``, a
 matching ``CODE_RE`` is exit 2.
 
 ``TID251`` reads the ``banned-api`` list in ``pyproject.toml`` (direct clock
-calls outside ``ante.core.clock``). It is not in the default ``select``, so
-``ruff check`` does not report it; only this ratchet counts it.
+calls outside ``ante.core.clock``). It is also in the default ``select``; this
+ratchet adds ``--ignore-noqa``, so a ``# noqa: TID251`` line still counts.
 
 ``mypy --strict`` is not counted here: ``[tool.mypy] strict = true`` in
 ``pyproject.toml`` makes ``mypy src/`` fail on any error.
@@ -72,8 +72,9 @@ RUFF_ALTERNATIVES = (
     ("C901", "함수를 나눈다."),
     (
         "TID251",
+        "기준선을 올리지 않는다(noqa로 끄지도 않는다). "
         "ante.core.clock의 now(tz)·monotonic()을 쓴다. "
-        "운영 코드는 시계를 바꾸지 않는다. 테스트는 use_clock으로 바꾼다.",
+        "운영 코드는 시계를 바꾸지 않는다.",
     ),
 )
 LOWER_HINT = "기준선을 낮춘다(0이면 키를 지운다)."

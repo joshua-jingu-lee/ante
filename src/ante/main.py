@@ -16,7 +16,7 @@ from ante.account.readiness import (
     is_flag_exempt,
 )
 from ante.config import Config, DynamicConfigService
-from ante.core import Database
+from ante.core import Database, clock
 from ante.eventbus import EventBus, EventHistoryStore
 
 logger = logging.getLogger(__name__)
@@ -607,7 +607,7 @@ def _connect_failure_reason(exc: BaseException, default: str) -> str:
 
 async def _get_broker_with_auth_retry(account_service: Any, account_id: str) -> Any:
     """get_broker(account_id) 를 EGW00133 흡수용 bounded retry 로 감싼다 (T4 c)."""
-    from datetime import UTC, datetime
+    from datetime import UTC
 
     from ante.broker.exceptions import TokenRateLimitError
     from ante.broker.kis import (
@@ -625,7 +625,7 @@ async def _get_broker_with_auth_retry(account_service: Any, account_id: str) -> 
             attempt += 1
             cooldown_until = getattr(e, "cooldown_until", None)
             if cooldown_until is not None:
-                remaining = (cooldown_until - datetime.now(UTC)).total_seconds()
+                remaining = (cooldown_until - clock.now(UTC)).total_seconds()
                 sleep_seconds = max(0.0, remaining)
             else:
                 sleep_seconds = TOKEN_AUTH_BACKOFF_SECONDS
