@@ -321,12 +321,7 @@ class DARTSource:
                                 data = json.loads(body)
                             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                                 body = body or str(exc)
-                            if isinstance(data, dict):
-                                status = str(data.get("status", "900"))
-                                message = str(data.get("message", ""))
-                            else:
-                                status = "900"
-                                message = body[:200]
+                            status, message = self._response_status(data, body[:200])
 
                             action = classify_error(status)
 
@@ -416,15 +411,8 @@ class DARTSource:
             await self._rate_limiter.acquire()
             self._rate_limiter.increment_daily()
 
-            decode_error: str | None = None
             try:
-                data: Any = await asyncio.wait_for(
-                    self._do_request(session, url, params),
-                    timeout=REQUEST_TIMEOUT,
-                )
-            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                data = None
-                decode_error = str(exc)[:200]
+                data, decode_error = await self._request_decoded(session, url, params)
             except (TimeoutError, aiohttp.ClientError) as exc:
                 if (
                     isinstance(exc, aiohttp.ClientResponseError)
@@ -449,12 +437,7 @@ class DARTSource:
                 await asyncio.sleep(delay)
                 continue
 
-            if isinstance(data, dict):
-                status = str(data.get("status", "900"))
-                message = str(data.get("message", ""))
-            else:
-                status = "900"
-                message = decode_error or f"객체가 아닌 응답: {type(data).__name__}"
+            status, message = self._response_status(data, decode_error)
             action = classify_error(status)
 
             if action == ErrorAction.OK:
@@ -503,6 +486,29 @@ class DARTSource:
         msg = f"DART fnlttMultiAcnt 요청 최종 실패: year={year}, reprt={reprt_code}"
         logger.error(msg)
         raise DARTError(msg) from last_error
+
+    async def _request_decoded(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        params: dict[str, str],
+    ) -> tuple[Any, str | None]:
+        """요청해 응답을 돌려주고, 본문 디코드 실패는 (None, 사유)로 바꾼다."""
+        try:
+            data = await asyncio.wait_for(
+                self._do_request(session, url, params),
+                timeout=REQUEST_TIMEOUT,
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            return None, str(exc)[:200]
+        return data, None
+
+    @staticmethod
+    def _response_status(data: Any, detail: str | None) -> tuple[str, str]:
+        """응답의 status를 구하고, 해석할 수 없는 응답은 900으로 둔다."""
+        if isinstance(data, dict):
+            return str(data.get("status", "900")), str(data.get("message", ""))
+        return "900", detail or f"객체가 아닌 응답: {type(data).__name__}"
 
     async def _do_request(
         self,
