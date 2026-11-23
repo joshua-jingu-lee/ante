@@ -232,7 +232,7 @@ D-020 필수 운영값 세 가지는 운영 GitHub 저장소 설정에서 유지
 
 ## 4. 로컬 개발 시 사전 검증
 
-`PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py`로 현재 worktree의 `ante`가 import되는지 확인한 뒤, `.github/workflows/ci.yml`의 lint·test 잡 명령을 `PYTHONPATH=$PWD/src`로 로컬에서 실행한다.
+`PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py`로 현재 worktree의 `ante`가 import되는지 확인한 뒤, `.github/workflows/ci.yml`의 lint 잡 명령과 `test-shard`·`test` 잡의 pytest 명령(`tests/unit/`·`tests/integration/`·`tests/e2e/`)을 `PYTHONPATH=$PWD/src`로 로컬에서 실행한다.
 
 내부 브랜치 리뷰(`/code-review`) 전 이 검증을 통과시켜야 사전 리뷰 루프가 짧아진다.
 

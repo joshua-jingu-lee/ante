@@ -140,7 +140,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - 타입 라벨과 area 라벨이 모두 없으면 큐에 편입하지 않는다.
 - 미편입 이슈에는 아래 `3단계: Plan Preflight 사이클`의 `🤖 **Autopilot 보류**` 코멘트를 사유 `타입 라벨 부재`로 남기고 `needs-triage`를 부착한다. 결과 분류는 기존 `deferred-triage`를 재사용한다.
 - 라벨 판정이 아래 `내부 생성 미검증 버그 후보 검증 선행`의 `이슈 검증` 게이트보다 먼저다. 큐 후보가 아닌 이슈에는 `@issue-reviewer`를 호출하지 않으며, 사람이 라벨을 정리해 재평가될 때 `이슈 검증`이 선행한다.
-- `needs-triage` 부착 후에는 자동 경로는 2단계 snapshot의 server-side 필터가, 수동 `/implement-issue`는 자체 거부 규칙이 걸러내 양쪽에서 보이지 않는다. 사람이 라벨을 정리할 때까지의 절충으로 수용한다.
+- `needs-triage` 부착 후에는 자동 경로는 2단계 수집 스크립트(`scripts/collect_autopilot_queue.py`)의 server-side 제외 라벨이, 수동 `/implement-issue`는 자체 거부 규칙이 걸러내 양쪽에서 보이지 않는다. 사람이 라벨을 정리할 때까지의 절충으로 수용한다.
 - 불변식: 이 절의 판정으로 미편입되는 이슈는 그 배치의 2단계 snapshot에 남고 위 `🤖 **Autopilot 보류**` 코멘트로 관측된다.
 
 ### 내부 생성 미검증 버그 후보 검증 선행
@@ -205,7 +205,7 @@ mkdir -p docs/temp && python3 scripts/collect_autopilot_queue.py > docs/temp/aut
 저장소 루트에서 실행하며 출력은 JSON 배열 하나이고, `docs/temp/autopilot-queue.json`에서 필드 단위로 읽는다. 종료 코드가 0이 아니면 수집 실패이며 빈 큐로 취급하지 않고 배치를 시작하지 않는다.
 
 - 스크립트가 수집한 전체 snapshot에 대해서만 open PR 존재, 선행 의존 이슈 close 여부, `--label` 좁히기처럼 server-side로 표현하기 어려운 후행 검사를 적용한다. 이 후행 검사가 해당 제외의 소유 단계이며, 3단계 per-issue 루프의 open PR·선행 의존 항목은 배치 도중의 상태 변화를 잡는 stale snapshot 재확인이다.
-- 타입·area 라벨 판정(위 `타입 라벨이 없는 이슈`)은 server-side 필터가 아니라 3단계 per-issue 루프의 `타입·area 라벨 판정` 항목에서 집행한다. 판정 대상 이슈는 2단계 snapshot에 그대로 남는다.
+- 타입·area 라벨 판정(위 `타입 라벨이 없는 이슈`)은 수집 스크립트의 server-side 필터가 아니라 3단계 per-issue 루프의 `타입·area 라벨 판정` 항목에서 집행한다. 판정 대상 이슈는 2단계 snapshot에 그대로 남는다.
 - snapshot 후 실제 처리 대상은 정렬 결과 상위 `min(limit, 25)`건으로 자른다.
 - 큐 snapshot이 1건 이상이면 `default`·`handoff-only`·`dry-run` 공통으로 첫 리포트를 쓰기 전에 `mkdir -p docs/temp`를 실행한다. `docs/temp/`는 gitignore 대상이므로 clean clone/worktree에 없을 수 있다.
 - 이번 배치 큐가 1건 이상이면 실행 모드와 관계없이 `docs/temp/autopilot-report-<YYYYMMDD-HHMM>.md` 리포트를 반드시 생성한다.

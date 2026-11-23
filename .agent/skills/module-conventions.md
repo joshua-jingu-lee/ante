@@ -110,6 +110,7 @@ try:
 except BrokerTimeoutError:
     raise OrderExecutionError(f"주문 타임아웃: {order.symbol}")
 ```
+광범위한 예외(`except Exception`)를 잡아 무시하지 않는다(`src/`의 새 위반은 BLE001 래칫이 실패시킨다 — 같은 파일의 기존 건과 맞바꾸면 통과한다).
 
 ## 5. 의존성 주입
 
