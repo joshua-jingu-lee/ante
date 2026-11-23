@@ -116,6 +116,14 @@ def _transition_status(account: Account, target: AccountStatus) -> AccountStatus
     return target
 
 
+def _restore_status(
+    account: Account, status: AccountStatus, updated_at: datetime | None
+) -> None:
+    """상태 쓰기가 실패한 캐시 계좌를 호출 전 상태로 되돌린다."""
+    account.status = status
+    account.updated_at = updated_at
+
+
 STRUCTURAL_FIELDS: frozenset[str] = frozenset(
     {
         "credentials",
@@ -596,13 +604,18 @@ class AccountService:
         if account.status == AccountStatus.ACTIVE:
             return
 
+        previous_status, previous_updated_at = account.status, account.updated_at
         status = _transition_status(account, AccountStatus.ACTIVE)
         account.updated_at = clock.now(UTC)
 
-        await self._db.execute(
-            "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
-            (status, account.updated_at.isoformat(), account_id),
-        )
+        try:
+            await self._db.execute(
+                "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
+                (status, account.updated_at.isoformat(), account_id),
+            )
+        except BaseException:
+            _restore_status(account, previous_status, previous_updated_at)
+            raise
 
         from ante.eventbus.events import AccountActivatedEvent, NotificationEvent
 
@@ -641,7 +654,23 @@ class AccountService:
                 account_id=account_id, bot_count=active_bot_count
             )
 
-        if account.status not in (AccountStatus.SUSPENDED, AccountStatus.DELETED):
+        previous_status, previous_updated_at = account.status, account.updated_at
+        status = _transition_status(account, AccountStatus.DELETED)
+        account.updated_at = clock.now(UTC)
+
+        try:
+            await self._db.execute(
+                "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
+                (status, account.updated_at.isoformat(), account_id),
+            )
+        except BaseException:
+            _restore_status(account, previous_status, previous_updated_at)
+            raise
+
+        self._accounts.pop(account_id, None)
+        self._brokers.pop(account_id, None)
+
+        if previous_status not in (AccountStatus.SUSPENDED, AccountStatus.DELETED):
             from ante.eventbus.events import AccountSuspendedEvent
 
             await self._eventbus.publish(
@@ -651,17 +680,6 @@ class AccountService:
                     suspended_by=deleted_by,
                 )
             )
-
-        status = _transition_status(account, AccountStatus.DELETED)
-        account.updated_at = clock.now(UTC)
-
-        await self._db.execute(
-            "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
-            (status, account.updated_at.isoformat(), account_id),
-        )
-
-        self._accounts.pop(account_id, None)
-        self._brokers.pop(account_id, None)
 
         logger.info("계좌 삭제: %s (요청자: %s)", account_id, deleted_by)
 
