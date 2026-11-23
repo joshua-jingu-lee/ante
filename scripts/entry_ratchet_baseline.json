@@ -17,9 +17,6 @@
     "src/ante/cli/commands/system.py": 2,
     "src/ante/cli/commands/treasury.py": 3
   },
-  "raw_legacy_contracts": [
-    "signal connect"
-  ],
   "cli_direct_output": {
     "src/ante/cli/commands/feed.py": 60,
     "src/ante/cli/commands/init.py": 22,

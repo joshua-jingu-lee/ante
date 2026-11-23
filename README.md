@@ -54,6 +54,7 @@ ante backtest run strategies/my_strategy.py \
 - [전략 작성](guide/strategy.md) — 전략 클래스·시그널·지표
 - [에이전트 가이드](guide/agent.md) — 에이전트 등록·인증·활용
 - [CLI 레퍼런스](guide/cli.md) — 전체 명령어 (`--format json` 지원)
+- [CLI JSON 출력 마이그레이션](guide/migration.md) — `--format json` 성공 출력의 봉투 전환과 고칠 경로
 - [보안](guide/security.md) — 보안 주의사항
 - [기여 가이드](CONTRIBUTING.md) — 외부 fork PR 기여 계약
 - [보안 정책](SECURITY.md) — 취약점 비공개 신고 절차

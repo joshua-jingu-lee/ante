@@ -4,8 +4,9 @@
 ``AuthenticatedGroup.invoke`` 가 돌려받은 값을 본다.
 
 - ``CommandResult`` 가 아니면(``None`` 포함) 아무것도 하지 않는다.
-- ``CommandResult`` 이고 계약의 ``envelope`` 이 ``standard`` 면 직렬화한다.
-- ``CommandResult`` 인데 계약이 ``raw_legacy`` 이거나 없으면 ``TypeError``.
+- ``CommandResult`` 이고 계약의 ``kind`` 가 ``stream`` 이 아니면 직렬화한다.
+- ``CommandResult`` 인데 계약의 ``kind`` 가 ``stream`` 이거나 계약이 없으면
+  ``TypeError``.
 
 계약 불일치의 ``TypeError`` 는 런타임에서는 명령의 부수효과가 끝난 뒤에
 나므로, 여기서는 훅 함수를 직접 불러 가짜 계약으로 확인한다.
@@ -35,7 +36,7 @@ from ante.contracts.cli_registry import (
     OutputContract,
     get_contract,
 )
-from ante.contracts.vocab import EnvelopeForm
+from ante.contracts.vocab import ContractKind
 
 _PATH = ("fake", "leaf")
 _ROOT = Path(__file__).resolve().parents[3]
@@ -43,12 +44,12 @@ _BASELINE = _ROOT / "scripts" / "entry_ratchet_baseline.json"
 
 
 def _contract(
-    envelope: EnvelopeForm = "standard", data_key: str | None = None
+    kind: ContractKind = "raw", data_key: str | None = None
 ) -> CliCommandContract:
     return CliCommandContract(
         path=_PATH,
         auth=AuthContract(mode="authenticated"),
-        output=OutputContract(kind="raw", envelope=envelope, data_key=data_key),
+        output=OutputContract(kind=kind, data_key=data_key),
         execution="offline",
     )
 
@@ -104,6 +105,11 @@ class TestCommandResult:
     @pytest.mark.parametrize("text", [["a"], [], b"a", 1])
     def test_text_not_tuple_is_type_error(self, text: Any) -> None:
         with pytest.raises(TypeError, match="tuple of lines"):
+            CommandResult(text=text)
+
+    @pytest.mark.parametrize("text", [(1,), ("a", None), ("a", b"b")])
+    def test_text_non_str_line_is_type_error(self, text: Any) -> None:
+        with pytest.raises(TypeError, match="lines must all be str"):
             CommandResult(text=text)
 
     def test_repr_has_no_data_or_text(self) -> None:
@@ -206,8 +212,9 @@ class TestLazyText:
             ("한 줄", "not a str"),
             (["a"], "tuple of lines"),
             (None, "tuple of lines"),
+            (("a", 1), "lines must all be str"),
         ],
-        ids=["empty", "str", "list", "none"],
+        ids=["empty", "str", "list", "none", "int-line"],
     )
     def test_bad_return_is_type_error(
         self, value: Any, match: str, capsys: pytest.CaptureFixture[str]
@@ -265,12 +272,21 @@ class TestLazyText:
 
 class TestContractMismatch:
     @pytest.mark.parametrize("mode", ["text", "json"])
-    def test_raw_legacy_is_type_error(
+    def test_stream_kind_is_type_error(
         self, mode: str, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        with pytest.raises(TypeError, match="raw_legacy"):
-            _emit(CommandResult(message="m"), mode, _contract("raw_legacy"))
+        with pytest.raises(TypeError, match="'stream'"):
+            _emit(CommandResult(message="m"), mode, _contract("stream"))
         assert capsys.readouterr().out == ""
+
+    @pytest.mark.parametrize(
+        "kind", [k for k in typing.get_args(ContractKind) if k != "stream"]
+    )
+    def test_non_stream_kind_is_serialized(
+        self, kind: ContractKind, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _emit(CommandResult(data={"a": 1}, message="m"), "json", _contract(kind))
+        assert capsys.readouterr().out == _envelope("m", {"a": 1})
 
     @pytest.mark.parametrize("mode", ["text", "json"])
     def test_missing_contract_is_type_error(
@@ -287,11 +303,11 @@ class TestNotCommandResult:
         [None, {"status": "ok", "message": "m", "data": {}}, [1], "m", 0, True],
         ids=["none", "dict", "list", "str", "int", "bool"],
     )
-    @pytest.mark.parametrize("contract", ["standard", "raw_legacy", None])
+    @pytest.mark.parametrize("contract", [*typing.get_args(ContractKind), None])
     def test_no_output(
         self,
         rv: object,
-        contract: EnvelopeForm | None,
+        contract: ContractKind | None,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         fake = _contract(contract) if contract else None
@@ -396,8 +412,8 @@ def _module_file(module: str) -> str:
     return path.relative_to(_ROOT).as_posix()
 
 
-def test_command_result_leaves_have_standard_contracts() -> None:
-    """반환 주석이 ``CommandResult`` 를 담는 leaf의 계약은 전부 ``standard`` 다."""
+def test_command_result_leaves_have_non_stream_contracts() -> None:
+    """반환 주석이 ``CommandResult`` 를 담는 leaf는 계약이 있고 ``stream`` 이 아니다."""
     from ante.cli.main import cli
 
     checked = []
@@ -408,8 +424,8 @@ def test_command_result_leaves_have_standard_contracts() -> None:
             continue
         contract = get_contract(path)
         assert contract is not None, f"{path}: CommandResult를 돌려주는데 계약이 없다"
-        assert contract.output.envelope == "standard", (
-            f"{path}: CommandResult를 돌려주는데 계약이 {contract.output.envelope!r}다"
+        assert contract.output.kind != "stream", (
+            f"{path}: CommandResult를 돌려주는데 계약의 kind가 stream이다"
         )
         checked.append(path)
     assert checked, "반환 주석이 CommandResult인 leaf가 하나도 없다(검사가 비었다)"
@@ -444,3 +460,49 @@ def test_leaves_outside_direct_output_baseline_return_command_result() -> None:
         )
         checked.add(module)
     assert checked == targets
+
+
+_STREAM_RETURNS_NONE = "stream"
+
+_RETURNS_NONE_EXEMPT: dict[tuple[str, ...], str] = {
+    ("system", "start"): (
+        "자식 프로세스의 출력을 그대로 흘리고 늘 SystemExit로 끝난다 — "
+        "출력이 오래 도는 부수효과보다 앞서야 해서 CommandResult로 옮기지 않는다"
+    ),
+}
+
+
+def test_every_contract_leaf_returns_command_result() -> None:
+    """레지스트리의 계약 경로마다 콜백의 반환 주석이 정확히 ``CommandResult`` 다.
+
+    예외는 둘이다. ``kind == "stream"`` 인 계약과 :data:`_RETURNS_NONE_EXEMPT`
+    의 경로는 반환 주석이 ``None`` 이어야 한다. 훅은 ``None`` 을 오류로 만들지
+    않으므로(부수효과 뒤에 돈다) ``None`` 반환은 이 테스트가 닫는다.
+    """
+    from ante.cli.main import cli
+    from ante.contracts.cli_registry import CLI_COMMAND_REGISTRY
+
+    contracts = list(CLI_COMMAND_REGISTRY.values())
+    leaves = dict(_iter_leaves(cli))
+    paths = set(CLI_COMMAND_REGISTRY)
+    assert set(_RETURNS_NONE_EXEMPT) <= paths, "예외 목록의 경로가 레지스트리에 없다"
+
+    checked = 0
+    for contract in contracts:
+        cmd = leaves.get(contract.path)
+        assert cmd is not None and cmd.callback is not None, (
+            f"{contract.path}: 계약은 있는데 Click leaf가 없다"
+        )
+        hint = _return_hint(cmd.callback)
+        if (
+            contract.output.kind == _STREAM_RETURNS_NONE
+            or contract.path in _RETURNS_NONE_EXEMPT
+        ):
+            assert hint is type(None), f"{contract.path}: 반환 주석이 {hint!r}다"
+        else:
+            assert hint is CommandResult, f"{contract.path}: 반환 주석이 {hint!r}다"
+        checked += 1
+    assert checked > len(_RETURNS_NONE_EXEMPT), "검사한 계약이 없다(검사가 비었다)"
+    assert any(c.output.kind == _STREAM_RETURNS_NONE for c in contracts), (
+        "스트림 계약이 없다(예외 분기가 비었다)"
+    )

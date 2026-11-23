@@ -681,6 +681,7 @@ guide/
 ├── cli.md                            # CLI 레퍼런스 (자동 생성)
 ├── concepts.md
 ├── getting-started.md                # 설치·초기 설정 가이드
+├── migration.md
 ├── modules.md
 ├── security.md                       # 보안 가이드
 └── strategy.md                       # 전략 개발 가이드

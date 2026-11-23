@@ -71,6 +71,8 @@ def _checked_lines(text: object) -> tuple[str, ...]:
         raise TypeError("CommandResult.text must be None or a tuple of lines")
     if text == ():
         raise TypeError("CommandResult.text must be None or a non-empty tuple")
+    if not all(isinstance(line, str) for line in text):
+        raise TypeError("CommandResult.text lines must all be str")
     return text
 
 

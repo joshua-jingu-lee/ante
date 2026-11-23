@@ -266,8 +266,17 @@ def history(
         ]
         return CommandResult(
             data={"strategy_name": strategy_name, "runs": rows},
-            text=tuple(table_lines(rows, columns)),
+            text=lambda: _history_rows_text(rows, columns),
         )
+    except Exception as e:
+        raise BacktestError(str(e)) from e
+
+
+def _history_rows_text(
+    rows: list[dict[str, Any]], columns: list[str]
+) -> tuple[str, ...]:
+    try:
+        return tuple(table_lines(rows, columns))
     except Exception as e:
         raise BacktestError(str(e)) from e
 
