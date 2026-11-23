@@ -59,7 +59,7 @@ class BrokerAdapter(ABC):
 
 - `dataclass(frozen=True)` 기본 사용 (불변 객체). 가변 필요 시 `frozen=False` 명시.
 - 기본값·`field(default_factory=...)`로 안전한 초기값을 제공한다.
-- Enum은 `enum.StrEnum` 상속 (직렬화 용이). `class X(str, Enum)`은 쓰지 않는다.
+- Enum은 `enum.StrEnum` 상속 (직렬화 용이).
 - 타임스탬프는 `datetime` (UTC 권장).
 - 모델은 순수 데이터 구조로, 비즈니스 로직을 담지 않는다.
 
@@ -109,12 +109,6 @@ try:
     result = await self._broker.place_order(order)
 except BrokerTimeoutError:
     raise OrderExecutionError(f"주문 타임아웃: {order.symbol}")
-
-# 나쁨: 광범위한 예외 무시
-try:
-    result = await self._broker.place_order(order)
-except Exception:
-    pass
 ```
 
 ## 5. 의존성 주입
@@ -151,10 +145,6 @@ from ante.eventbus import EventBus, Event
 
 # 금지: 다른 모듈의 내부 구현
 from ante.eventbus.service import _internal_method
-
-# 금지: 순환 import
-# ante.bot이 ante.strategy를 import하면서
-# ante.strategy가 ante.bot을 import하는 것
 ```
 
 ## 7. 로깅
@@ -214,7 +204,6 @@ total = price * quantity
 
 - 새 테이블 추가 시 해당 모듈의 `store.py` 또는 `service.py`에 `{DOMAIN}_SCHEMA` 상수 필수
 - `{DOMAIN}_SCHEMA`에 `CREATE TABLE IF NOT EXISTS`와 `CREATE INDEX IF NOT EXISTS`를 모두 포함
-- 스키마 변경 시 `{DOMAIN}_SCHEMA`를 먼저 수정 → `python scripts/generate_db_schema.py` 실행으로 문서 재생성
 
 ### 패턴
 
