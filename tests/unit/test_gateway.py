@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from unittest.mock import AsyncMock, MagicMock
 
@@ -264,6 +265,17 @@ class TestAPIGateway:
         await gateway.get_current_price("005930", account_id="acc-001")
         await gateway.get_current_price("005930", account_id="acc-002")
         assert broker.get_current_price.call_count == 2
+
+    async def test_get_current_price_rejects_exchange_argument(self, gateway, broker):
+        """거래소는 계좌가 정하므로 ``exchange`` 인자를 받지 않는다 (#2713)."""
+        assert (
+            "exchange" not in inspect.signature(APIGateway.get_current_price).parameters
+        )
+        with pytest.raises(TypeError):
+            await gateway.get_current_price(
+                "005930", account_id="acc-001", exchange="NASDAQ"
+            )
+        broker.get_current_price.assert_not_awaited()
 
     async def test_get_positions(self, gateway, broker):
         """포지션 조회 — account_id로 라우팅."""
