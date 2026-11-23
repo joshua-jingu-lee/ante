@@ -410,7 +410,11 @@ def _guards_before_transition(method: ast.AsyncFunctionDef) -> list[str]:
             _MEMBER,
             {
                 "reactivate": ["_assert_master", "raise MemberStateConflictError"],
-                "revoke": ["_assert_master", "_assert_not_master", "_assert_status"],
+                "revoke": [
+                    "_assert_master",
+                    "_assert_not_master",
+                    "raise MemberStateConflictError",
+                ],
                 "suspend": [
                     "_assert_master",
                     "_assert_not_master",

@@ -217,6 +217,27 @@ class TestGetBrokerClosesDbOnError:
 
         mock_db.close.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_account_service_initialize_failure_closes_db(self) -> None:
+        """``AccountService.initialize()`` 가 raise 해도 연 db 를 닫는다 (#2725)."""
+        mock_db = MagicMock()
+        mock_db.connect = AsyncMock()
+        mock_db.close = AsyncMock()
+
+        with (
+            patch("ante.cli.main.get_db_path", return_value="unused.db"),
+            patch("ante.core.database.Database", return_value=mock_db),
+            patch(
+                "ante.account.service.AccountService.initialize",
+                new=AsyncMock(side_effect=RuntimeError("initialize failed")),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="initialize failed"):
+                await _get_broker(_MISSING_ACCOUNT_ID)
+
+        mock_db.connect.assert_awaited_once()
+        mock_db.close.assert_awaited_once()
+
 
 # ── balance 명령 exit code + 메시지 회귀 ────────────────────────────────────
 

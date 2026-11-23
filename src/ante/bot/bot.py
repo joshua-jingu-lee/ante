@@ -127,8 +127,13 @@ class Bot:
             except asyncio.CancelledError:
                 pass
 
+        on_stop_error: Exception | None = None
         if self.strategy:
-            self.strategy.on_stop()
+            try:
+                self.strategy.on_stop()
+            except Exception as e:
+                logger.exception("on_stop 실패 — 정지는 마친다: %s", self.bot_id)
+                on_stop_error = e
 
         _transition_status(self, BotStatus.STOPPED)
         self.stopped_at = clock.now(UTC)
@@ -137,6 +142,8 @@ class Bot:
             BotStoppedEvent(bot_id=self.bot_id, account_id=self.config.account_id)
         )
         logger.info("봇 중지: %s", self.bot_id)
+        if on_stop_error is not None:
+            raise on_stop_error
 
     async def _run_loop(self) -> None:
         """메인 실행 루프."""
