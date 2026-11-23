@@ -7,7 +7,7 @@ import json
 import os
 import tempfile
 from collections.abc import Coroutine
-from datetime import UTC, datetime
+from datetime import UTC
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,6 +22,7 @@ from ante.contracts.cli_errors import (
     AccountTestInactiveError,
     CliAlreadyInitializedError,
 )
+from ante.core import clock
 
 _SYSTEM_TOML_FILENAME = "system.toml"
 _SECRETS_ENV_FILENAME = "secrets.env"
@@ -112,7 +113,7 @@ def _read_existing_encryption_key_line(secrets_env_path: Path) -> str | None:
 
 def _atomic_backup_secrets_env(secrets_env_path: Path) -> Path:
     """기존 secrets.env 파일을 0600 권한으로 원자적 백업한다."""
-    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    ts = clock.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup_path = secrets_env_path.parent / f"secrets.env.bak.{ts}"
     content = secrets_env_path.read_bytes()
     fd, tmp_path = tempfile.mkstemp(

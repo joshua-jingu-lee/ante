@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from ante.core import clock
 from ante.ipc.requests import (
     AccountActivateRequest,
     AccountSuspendRequest,
@@ -139,14 +140,14 @@ class CommandRegistry:
 
 def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict[str, Any]:
     """Kill Switch IPC 응답 envelope."""
-    from datetime import UTC, datetime
+    from datetime import UTC
 
     from ante.core.time import format_utc
 
     return {
         "status": status,
         "accounts_changed": sum(1 for a in accounts if a.get("changed")),
-        "changed_at": format_utc(datetime.now(UTC)),
+        "changed_at": format_utc(clock.now(UTC)),
         "accounts": accounts,
     }
 
@@ -609,7 +610,7 @@ async def _handle_treasury_set_balance(
     svc: ServiceRegistry, request: TreasurySetBalanceRequest, actor: str
 ) -> dict[str, Any]:
     """Treasury balance 설정 IPC handler."""
-    from datetime import UTC, datetime
+    from datetime import UTC
 
     account_id = request.account_id
     balance = request.balance
@@ -619,7 +620,7 @@ async def _handle_treasury_set_balance(
     return {
         "account_id": account_id,
         "total_balance": treasury.account_balance,
-        "updated_at": datetime.now(UTC).isoformat(),
+        "updated_at": clock.now(UTC).isoformat(),
         "_audit_detail": {
             "resource": f"treasury:{account_id}",
             "detail": f"balance={balance:,.0f}",

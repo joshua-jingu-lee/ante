@@ -69,9 +69,6 @@
     "src/ante/cli/commands/account.py": {
       "C901": 1
     },
-    "src/ante/cli/commands/approval.py": {
-      "TID251": 1
-    },
     "src/ante/cli/commands/backtest.py": {
       "C901": 1
     },
@@ -85,14 +82,10 @@
     },
     "src/ante/cli/commands/init.py": {
       "BLE001": 4,
-      "C901": 1,
-      "TID251": 1
+      "C901": 1
     },
     "src/ante/cli/commands/instrument.py": {
       "C901": 1
-    },
-    "src/ante/cli/commands/report.py": {
-      "TID251": 1
     },
     "src/ante/cli/commands/rule.py": {
       "BLE001": 2
@@ -105,8 +98,7 @@
       "C901": 2
     },
     "src/ante/cli/commands/treasury.py": {
-      "S608": 2,
-      "TID251": 9
+      "S608": 2
     },
     "src/ante/cli/commands/update.py": {
       "C901": 1
@@ -170,9 +162,6 @@
       "ASYNC240": 1,
       "BLE001": 1
     },
-    "src/ante/ipc/registry.py": {
-      "TID251": 2
-    },
     "src/ante/ipc/server.py": {
       "ASYNC109": 1,
       "ASYNC240": 2,
@@ -182,8 +171,7 @@
     "src/ante/main.py": {
       "ASYNC240": 1,
       "BLE001": 2,
-      "C901": 5,
-      "TID251": 1
+      "C901": 5
     },
     "src/ante/member/service.py": {
       "BLE001": 1,
