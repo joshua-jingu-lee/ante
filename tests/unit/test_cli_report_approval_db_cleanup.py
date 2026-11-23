@@ -147,9 +147,8 @@ class TestReportListNoStderrTraceback:
             f"stderr 에 aiosqlite worker noise 노출: {result.stderr!r}"
         )
         # JSON payload 가 유효해야 한다.
-        payload = _parse_json_payload(result.stdout)
-        # report list 는 빈 array 또는 dict envelope 둘 다 가능.
-        assert isinstance(payload, dict | list)
+        payload = json.loads(result.stdout)
+        assert isinstance(payload["data"]["reports"], list)
 
 
 # ────────────────────────────────────────────────────────────────────

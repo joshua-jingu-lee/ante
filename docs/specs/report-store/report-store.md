@@ -105,7 +105,7 @@ AI Agent가 전략 백테스트 후 리포트를 제출하면 시스템에 축�
 
 ### 리포트 제출 스키마 (Agent 참조용)
 
-`ante --format json report schema` 로 조회 가능한 스키마 (`--format`은 root 전역 옵션):
+`ante --format json report schema` 출력의 `data`로 조회 가능한 스키마 (`--format`은 root 전역 옵션):
 
 ```json
 {

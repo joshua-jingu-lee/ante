@@ -124,7 +124,7 @@ class TestSystemCommands:
             ):
                 result = runner.invoke(cli, ["--format", "json", "system", "status"])
                 assert result.exit_code == 0
-                data = json.loads(result.output)
+                data = json.loads(result.output)["data"]
                 assert data["trading_state"] == "active"
                 assert data["bot_count"] == 2
 
@@ -578,7 +578,7 @@ class TestRuleCommands:
                     ],
                 )
                 assert result.exit_code == 0
-                data = json.loads(result.output)
+                data = json.loads(result.output)["data"]
                 assert len(data["rules"]) == 1
                 assert data["rules"][0]["rule_id"] == "daily_loss"
 
@@ -660,7 +660,7 @@ class TestRuleCommands:
                     ["--format", "json", "rule", "list", "--account", "acc-1"],
                 )
                 assert result.exit_code == 0
-                data = json.loads(result.output)
+                data = json.loads(result.output)["data"]
                 assert data["message"] == "등록된 룰이 없습니다."
                 assert data["rules"] == []
 

@@ -167,6 +167,102 @@ class TestStandardContract:
         assert capsys.readouterr().out == ""
 
 
+def _never() -> tuple[str, ...]:
+    raise AssertionError("JSON 모드에서 text callable이 불렸다")
+
+
+class TestLazyText:
+    """``text`` 가 callable이면 훅은 text 모드에서만 한 번 부른다."""
+
+    def test_callable_is_accepted_and_not_called(self) -> None:
+        result = CommandResult(text=_never)
+        assert result.text is _never
+
+    def test_repr_hides_callable_capture(self) -> None:
+        secret = "tok-fixture-0002"
+        result = CommandResult(message="done", text=lambda: (f"토큰: {secret}",))
+        assert secret not in repr(result)
+        assert repr(result) == "CommandResult(message='done')"
+
+    def test_json_does_not_call(self, capsys: pytest.CaptureFixture[str]) -> None:
+        _emit(CommandResult(data={"a": 1}, text=_never), "json", _contract())
+        assert capsys.readouterr().out == _envelope("", {"a": 1})
+
+    def test_text_calls_once_in_order(self, capsys: pytest.CaptureFixture[str]) -> None:
+        calls: list[int] = []
+
+        def lines() -> tuple[str, ...]:
+            calls.append(1)
+            return ("\n제목", "  끝")
+
+        _emit(CommandResult(message="무시", text=lines), "text", _contract())
+        assert capsys.readouterr().out == "\n제목\n  끝\n"
+        assert calls == [1]
+
+    @pytest.mark.parametrize(
+        ("value", "match"),
+        [
+            ((), "non-empty"),
+            ("한 줄", "not a str"),
+            (["a"], "tuple of lines"),
+            (None, "tuple of lines"),
+        ],
+        ids=["empty", "str", "list", "none"],
+    )
+    def test_bad_return_is_type_error(
+        self, value: Any, match: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with pytest.raises(TypeError, match=match):
+            _emit(CommandResult(text=lambda: value), "text", _contract())
+        assert capsys.readouterr().out == ""
+
+    def test_raise_goes_to_error_exit(self) -> None:
+        from ante.cli.middleware import (
+            AuthenticatedGroup,
+            _text_error_line,
+            error_spec_for_exception,
+            ipc_error_payload,
+        )
+
+        boom = RuntimeError("줄 계산 실패")
+
+        def lines() -> tuple[str, ...]:
+            raise boom
+
+        @click.group(cls=AuthenticatedGroup)
+        @click.option("--format", "output_format", default="text")
+        @click.pass_context
+        def root(ctx: click.Context, output_format: str) -> None:
+            ctx.ensure_object(dict)
+            ctx.obj["formatter"] = OutputFormatter(output_format)
+
+        @root.command("leaf")
+        def leaf() -> CommandResult:
+            return CommandResult(data={"a": 1}, text=lines)
+
+        with (
+            patch(
+                "ante.cli.main.authenticate_member",
+                side_effect=lambda ctx: ctx.obj.update({"member": object()}),
+            ),
+            patch("ante.cli.middleware.get_contract", return_value=_contract()),
+            patch.object(
+                AuthenticatedGroup,
+                "_should_enforce_encryption_gate",
+                return_value=False,
+            ),
+        ):
+            text = CliRunner(mix_stderr=False).invoke(root, ["leaf"])
+            json_mode = CliRunner().invoke(root, ["--format", "json", "leaf"])
+
+        error = ipc_error_payload(boom)
+        assert text.exit_code == (error_spec_for_exception(boom).exit_code or 1)
+        assert text.stdout == ""
+        assert text.stderr == _text_error_line(error["code"], error["message"]) + "\n"
+        assert json_mode.exit_code == 0, json_mode.output
+        assert json_mode.output == _envelope("", {"a": 1})
+
+
 class TestContractMismatch:
     @pytest.mark.parametrize("mode", ["text", "json"])
     def test_raw_legacy_is_type_error(

@@ -362,5 +362,5 @@ class TestReportCommands:
     def test_schema_json(self, runner):
         result = runner.invoke(cli, ["--format", "json", "report", "schema"])
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert "strategy_name" in data or isinstance(data, dict)

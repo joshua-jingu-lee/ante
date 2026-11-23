@@ -143,10 +143,10 @@ cli.add_command(approval)
 cli.add_command(init)  # type: ignore[has-type]
 cli.add_command(bot)  # type: ignore[has-type]
 cli.add_command(broker)  # type: ignore[has-type]
-cli.add_command(config)  # type: ignore[has-type]
+cli.add_command(config)
 cli.add_command(strategy)  # type: ignore[has-type]
 cli.add_command(data)
-cli.add_command(backtest)  # type: ignore[has-type]
+cli.add_command(backtest)
 cli.add_command(report)  # type: ignore[has-type]
 cli.add_command(instrument)
 cli.add_command(member)  # type: ignore[has-type]

@@ -98,7 +98,7 @@ class TestSystemStatusFormatJson:
         ):
             result = runner.invoke(cli, ["system", "status", "--format", "json"])
             assert result.exit_code == 0, result.output
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert "trading_state" in data
             assert "bot_count" in data
             assert data["trading_state"] == "active"
@@ -130,7 +130,7 @@ class TestSystemStatusFormatJson:
         ):
             result = runner.invoke(cli, ["--format", "json", "system", "status"])
             assert result.exit_code == 0, result.output
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["trading_state"] == "suspended"
 
     def test_text_format_default(self, runner: CliRunner) -> None:

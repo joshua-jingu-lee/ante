@@ -260,6 +260,6 @@ class TestReportViewCLI:
             )
             result = runner.invoke(cli, ["--format", "json", "report", "view", "rpt-1"])
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["report_id"] == "rpt-1"
             assert data["status"] == "draft"

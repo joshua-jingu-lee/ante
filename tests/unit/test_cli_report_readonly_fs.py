@@ -184,7 +184,7 @@ class TestReportListReadOnlyFilesystem:
 
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
-        rows = payload["data"] if isinstance(payload, dict) else payload
+        rows = payload["data"]["reports"]
         assert any(r["report_id"] == _REPORT_ID for r in rows), payload
 
     def test_list_on_readonly_fs_with_wal_sidecars(self, runner, tmp_path) -> None:
@@ -209,7 +209,7 @@ class TestReportListReadOnlyFilesystem:
 
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
-        rows = payload["data"] if isinstance(payload, dict) else payload
+        rows = payload["data"]["reports"]
         assert any(r["report_id"] == _REPORT_ID for r in rows), payload
 
 
@@ -241,7 +241,7 @@ class TestReportViewReadOnlyFilesystem:
         )
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert payload["report_id"] == _REPORT_ID, payload
         assert payload["total_trades"] == 42, payload
 
@@ -274,5 +274,5 @@ class TestReportViewReadOnlyFilesystem:
         )
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert payload["report_id"] == _REPORT_ID, payload

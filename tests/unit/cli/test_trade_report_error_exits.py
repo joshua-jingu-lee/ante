@@ -416,8 +416,9 @@ class TestReportPerformance:
         )
         assert result.exit_code == 0, (result.stdout, result.stderr)
         assert json.loads(result.stdout) == {
-            "message": "집계 데이터가 없습니다.",
-            "summaries": [],
+            "status": "ok",
+            "message": "",
+            "data": {"message": "집계 데이터가 없습니다.", "summaries": []},
         }
         assert result.stderr == ""
 
