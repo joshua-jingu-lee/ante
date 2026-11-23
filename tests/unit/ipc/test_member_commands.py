@@ -140,14 +140,11 @@ async def test_update_scopes_passes_the_list_and_audits() -> None:
 
 
 @pytest.mark.asyncio
-async def test_update_scopes_without_scopes_sends_an_empty_list() -> None:
+async def test_update_scopes_without_scopes_is_rejected() -> None:
     harness = _Harness()
     response = await harness.send("member.update_scopes", {"member_id": "m-7"})
-    assert response["status"] == "ok", response
-    harness.member.update_scopes.assert_awaited_once_with(
-        "m-7", [], updated_by="ops-lead"
-    )
-    harness.assert_audited("member.update_scopes", "member:m-7", "scopes=[]")
+    assert response == _rejected("member.update_scopes", "scopes", "missing")
+    harness.assert_no_service_call()
 
 
 @pytest.mark.asyncio

@@ -193,7 +193,7 @@ preflight를 재사용한다(`validate_signal_key`는 #2334에서 신설되는 `
 | `ante member reactivate` | `member.reactivate` | `MemberService.reactivate()` | 인증 상태 변경을 런타임 API에 즉시 반영 |
 | `ante member revoke` | `member.revoke` | `MemberService.revoke()` | 토큰 해시 삭제 + 세션 무효화 + 되돌릴 수 없는 감사 이벤트 |
 | `ante member rotate-token` | `member.rotate_token` | `MemberService.rotate_token()` | 기존 토큰 즉시 무효화 + 새 토큰 1회 반환 |
-| `ante member update-scopes` | `member.update_scopes` | `MemberService.update_scopes()` | master-only scope 변경을 서버 MemberService에서 처리 |
+| `ante member update-scopes` | `member.update_scopes` | `MemberService.update_scopes()` | master-only scope 변경을 서버 MemberService에서 처리. `scopes`는 필수다. 생략은 `VALIDATION_ERROR`, 권한을 모두 지우려면 빈 목록을 명시한다(#2703) |
 | `ante member reset-password` | `member.reset_password` | `MemberService.reset_password()` | recovery key 검증 + 세션 무효화 + 보안 알림 |
 | `ante member regenerate-recovery-key` | `member.regenerate_recovery_key` | `MemberService.regenerate_recovery_key()` | 기존 recovery key 폐기 + 보안 알림 |
 
