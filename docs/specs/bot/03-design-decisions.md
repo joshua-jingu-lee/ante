@@ -210,7 +210,7 @@ signal key를 바꾸면 `_bots`, 실행 task, EventBus 구독, 외부 signal cha
 `ante bot start/stop/status`의 CLI/IPC 계약은 서버 BotManager 동작과 정렬된다.
 CLI/IPC가 같은 BotManager 인스턴스를 통해 같은 검증·실행·이벤트·감사 경로를
 사용해야 모든 호출자가 같은 봇에 대해 같은 결과를 얻고 같은 audit trail을 남긴다.
-`start`의 `app_key` 사전 검증, `BotError` → state conflict 매핑,
+`start`의 계좌 프리셋 필수 인증정보 사전 검증, `BotError` → state conflict 매핑,
 `bot.start`/`bot.stop` audit action 이름, `{"bot": ...}` envelope는 모두 CLI/IPC
 계약에서 가져온다. cold-path fallback이나 직접 DB 수정으로 봇을 시작/중지하는
 경로는 허용하지 않는다.

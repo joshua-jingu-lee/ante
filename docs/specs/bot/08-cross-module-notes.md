@@ -8,5 +8,5 @@
 - **Treasury 스펙 작성 시**: ContextFactory가 계좌별 자금 할당(`TreasuryManager.get(account_id)`) + 포지션 조회(Trade) 인터페이스를 StrategyContext에 주입
 - **Data Pipeline 스펙 작성 시**: ContextFactory가 DataProvider를 StrategyContext에 주입
 - **Rule Engine 스펙 작성 시**: OrderRequestEvent에 bot_id, account_id 포함 — 봇별·계좌별 룰 조회에 활용
-- **CLI/IPC 스펙 작성 시**: `bot create/start/stop/remove`와 `signal-key --rotate`는 런타임 IPC로 서버 BotManager에 위임한다. 실행 중 조회는 서버 live 상태가 필요하면 IPC를 우선 사용하고, 서버 정지 중에는 persisted snapshot만 조회한다. `ante bot start/stop/status`는 서버 BotManager 동작과 정렬되며, `start`의 `app_key` credential preflight·`{"bot": ...}` envelope·`bot.start`/`bot.stop` audit action 이름은 CLI/IPC 계약의 SSOT를 사용한다.
+- **CLI/IPC 스펙 작성 시**: `bot create/start/stop/remove`와 `signal-key --rotate`는 런타임 IPC로 서버 BotManager에 위임한다. 실행 중 조회는 서버 live 상태가 필요하면 IPC를 우선 사용하고, 서버 정지 중에는 persisted snapshot만 조회한다. `ante bot start/stop/status`는 서버 BotManager 동작과 정렬되며, `start`의 계좌 프리셋 필수 인증정보 preflight·`{"bot": ...}` envelope·`bot.start`/`bot.stop` audit action 이름은 CLI/IPC 계약의 SSOT를 사용한다.
 - **Notification 스펙 작성 시**: BotErrorEvent 구독 → 텔레그램 알림 발송

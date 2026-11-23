@@ -27,7 +27,7 @@ ante bot create --name "Momentum Bot" --strategy momentum_breakout_v1.0.0 --acco
 ante bot create --name "Agent Relay" --strategy agent_relay_v1.0.0 --account us-stock
 # → bot_id: bot_002, signal_key: sk_a1b2c3d4 (외부 시그널 수신 가능)
 
-# 봇 시작 — app_key 사전 검증 + audit bot.start
+# 봇 시작 — 계좌 프리셋의 필수 인증정보 사전 검증 + audit bot.start
 ante bot start bot_001
 
 # 봇 목록 조회
