@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 from enum import StrEnum
@@ -246,11 +247,15 @@ class DataGoKrSource:
             await self._rate_limiter.acquire()
             self._rate_limiter.increment_daily()
 
+            decode_error: str | None = None
             try:
-                data = await asyncio.wait_for(
+                data: Any = await asyncio.wait_for(
                     self._do_request(session, params),
                     timeout=REQUEST_TIMEOUT,
                 )
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                data = None
+                decode_error = str(exc)[:200]
             except (TimeoutError, aiohttp.ClientError) as exc:
                 if (
                     isinstance(exc, aiohttp.ClientResponseError)
@@ -274,7 +279,11 @@ class DataGoKrSource:
                 await asyncio.sleep(delay)
                 continue
 
-            result_code, result_msg = self._extract_result_code(data)
+            if isinstance(data, dict):
+                result_code, result_msg = self._extract_result_code(data)
+            else:
+                result_code = "99"
+                result_msg = decode_error or f"객체가 아닌 응답: {type(data).__name__}"
             action = classify_error(result_code)
 
             if action == ErrorAction.OK:

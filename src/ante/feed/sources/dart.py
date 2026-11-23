@@ -314,12 +314,17 @@ class DARTSource:
                             return await resp.read()
 
                         if "json" in content_type or "text" in content_type:
-                            body = await resp.text()
+                            body = ""
+                            data: Any = None
                             try:
+                                body = await resp.text()
                                 data = json.loads(body)
+                            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                                body = body or str(exc)
+                            if isinstance(data, dict):
                                 status = str(data.get("status", "900"))
                                 message = str(data.get("message", ""))
-                            except json.JSONDecodeError:
+                            else:
                                 status = "900"
                                 message = body[:200]
 
@@ -411,11 +416,15 @@ class DARTSource:
             await self._rate_limiter.acquire()
             self._rate_limiter.increment_daily()
 
+            decode_error: str | None = None
             try:
-                data = await asyncio.wait_for(
+                data: Any = await asyncio.wait_for(
                     self._do_request(session, url, params),
                     timeout=REQUEST_TIMEOUT,
                 )
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                data = None
+                decode_error = str(exc)[:200]
             except (TimeoutError, aiohttp.ClientError) as exc:
                 if (
                     isinstance(exc, aiohttp.ClientResponseError)
@@ -440,8 +449,12 @@ class DARTSource:
                 await asyncio.sleep(delay)
                 continue
 
-            status = str(data.get("status", "900"))
-            message = str(data.get("message", ""))
+            if isinstance(data, dict):
+                status = str(data.get("status", "900"))
+                message = str(data.get("message", ""))
+            else:
+                status = "900"
+                message = decode_error or f"객체가 아닌 응답: {type(data).__name__}"
             action = classify_error(status)
 
             if action == ErrorAction.OK:
