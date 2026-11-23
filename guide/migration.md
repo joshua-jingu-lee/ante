@@ -3,11 +3,11 @@
 `--format json` 출력을 스크립트나 에이전트로 읽고 있다면, 이 문서에서 고쳐야 할 경로를 찾으세요.
 
 > [!NOTE]
-> 이 문서는 명령이 직접 만든 JSON을 내던 CLI 명령을 모두 공통 성공 봉투로 옮긴 뒤 처음 나오는 릴리스에 맞춘 스냅샷입니다. 그 뒤의 변경은 담지 않습니다. 명령과 옵션의 현재 목록은 [CLI 레퍼런스](cli.md)에 있습니다.
+> 이 문서는 명령이 직접 만든 JSON 성공 출력을 내던 CLI 명령을 공통 성공 봉투로 옮긴 뒤 처음 나오는 릴리스에 맞춘 스냅샷입니다. 옮긴 대상은 `feed`·`init`·`update`와 `signal connect`를 뺀 계약 명령입니다(`system start`는 전부터 봉투를 직접 냅니다). 이 문서는 그 전환과 그에 딸린 실패 출력의 변경만 다루며, 그 뒤의 변경은 담지 않습니다. 명령과 옵션의 현재 목록은 [CLI 레퍼런스](cli.md)에 있습니다.
 
 ## 요약
 
-명령 67개의 JSON 성공 출력이 공통 봉투로 바뀌었습니다. 봉투의 모양은 `{"status": "ok", "message": …, "data": …}`입니다. 전에는 이 명령들이 자기 객체나 배열을 최상위에 그대로 냈습니다. 이제는 그 객체가 키 하나 바뀌지 않고 `data` 아래에 들어가고, 배열은 `data`의 키 하나 아래에 들어갑니다. 이로써 모든 명령의 성공 출력을 같은 방법으로 읽을 수 있습니다.
+명령 67개의 JSON 성공 출력이 공통 봉투로 바뀌었습니다. 봉투의 모양은 `{"status": "ok", "message": …, "data": …}`입니다. 전에는 이 명령들이 자기 객체나 배열을 최상위에 그대로 냈습니다. 이제는 그 객체가 키 하나 바뀌지 않고 `data` 아래에 들어가고, 배열은 `data`의 키 하나 아래에 들어갑니다. 이로써 `feed`·`init`·`update`(각자의 JSON을 직접 냅니다)와 `signal connect`(성공 봉투가 없는 스트림)를 뺀 명령의 성공 출력을 같은 방법으로 읽을 수 있습니다.
 
 다음은 바뀌지 않았습니다.
 
@@ -22,7 +22,7 @@
 {"status": "ok", "message": "", "data": {"bots": [...]}}
 ```
 
-옮겨진 명령의 `message`는 빈 문자열(`""`)입니다. 사람이 읽는 안내 문장은 text 출력에만 나갑니다.
+옮겨진 명령의 봉투 `message`는 빈 문자열(`""`)입니다. 옛 payload 안에 있던 `message` 키는 `.data.message`에 남습니다(아래 표).
 
 ---
 
@@ -111,11 +111,12 @@ ante member register --id agent-2 --type agent --name "새 에이전트" --forma
 | `report list` | `.data.reports` |
 | `treasury snapshot` (`--from`/`--to`) | `.data.snapshots` |
 
-빈 결과의 모양은 다른 명령이 있습니다. 이 명령들은 빈 결과일 때 전부터 배열이 아니라 객체를 냈고, 그 객체가 그대로 `data`에 들어갑니다.
+빈 결과의 모양이 다른 명령이 둘 있습니다. 이 명령들은 빈 결과일 때 전부터 배열이 아니라 객체를 냈고, 그 객체가 키 그대로 `data`에 들어갑니다.
 
 - `instrument list`의 빈 결과: `.data.instruments`(빈 배열)와 `.data.count`.
 - `instrument search`의 빈 결과: `.data.results`(빈 배열)와 `.data.count`. 행이 있을 때(`.data.instruments`)와 키가 다릅니다.
-- `treasury snapshot`에서 날짜 하나를 조회하면(`--date` 또는 오늘): 객체가 `.data` 아래에 그대로 들어갑니다.
+
+`treasury snapshot`은 옵션에 따라 모양이 다릅니다. `--from`/`--to`는 배열이라 `.data.snapshots` 아래에 들어갑니다. 날짜 하나를 조회하면(`--date` 또는 생략 시 오늘) 전부터 객체를 냈고, 그 객체가 `.data` 아래에 키 그대로 들어갑니다.
 
 ```bash
 # 전
@@ -137,9 +138,9 @@ ante bot list --format json | jq '.bots[]'
 ante bot list --format json | jq '.data.bots[]'
 
 # 전
-ante config set risk.max_orders 12 --format json | jq -r '.value'
+ante config set system.log_level DEBUG --format json | jq -r '.value'
 # 뒤
-ante config set risk.max_orders 12 --format json | jq -r '.data.value'
+ante config set system.log_level DEBUG --format json | jq -r '.data.value'
 ```
 
 ### account 4개
@@ -249,7 +250,7 @@ ante config set risk.max_orders 12 --format json | jq -r '.data.value'
 
 | 명령 | 전 (최상위 키) | 뒤 | 주의 |
 |------|----------------|-----|------|
-| `backtest run` | {`strategy`·`period`·`initial_balance`·`final_balance`·`total_return_pct`·`total_trades` 외 9개} / {`final_balance`·`total_return_pct`·`total_trades`·`metrics`·`result_path`·`strategy_name` 외 2개} | `.data` 아래 같은 키 |  |
+| `backtest run` | {`strategy`·`period`·`initial_balance`·`final_balance`·`total_return_pct`·`total_trades` 외 9개} | `.data` 아래 같은 키 |  |
 | `backtest history` | {`message`·`runs`} / {`strategy_name`·`runs`} | `.data` 아래 같은 키 | 빈 결과일 때 `.message` → `.data.message` |
 
 ### report 4개
@@ -293,7 +294,11 @@ ante config set risk.max_orders 12 --format json | jq -r '.data.value'
 
 ## ❌ 실패 출력의 변경
 
-JSON 모드의 실패는 다음 모양의 에러 봉투로 stdout에 한 줄로 나갑니다. text 모드의 실패는 stderr에 `Error: <code>: <message>` 한 줄로 나갑니다.
+JSON 모드의 실패는 다음 모양의 에러 봉투로 stdout에 한 줄로 나갑니다. text 모드의 실패는 stderr의 첫 줄이 `Error: <code>: <message>`입니다. 다음 자리에서는 그 앞이나 뒤로 줄이 더 나갑니다.
+
+- `strategy validate`·`strategy submit`의 검증 실패(text): 첫 줄 뒤에 오류마다 `  - <오류>` 줄이 이어지고, `validate`는 경고마다 `  [warn] <경고>` 줄도 이어집니다.
+- `update`의 마이그레이션 실패(text): 에러 줄 앞에 마이그레이션 실패·롤백 안내 줄이 먼저 나갑니다(stderr. 롤백이 끝났다는 안내는 stdout).
+- `init`이 master를 만든 뒤 테스트 계좌 생성에 실패할 때(JSON): 에러 봉투 앞에 복구용 한 줄 JSON이 stderr로 먼저 나갑니다.
 
 ```json
 {"status": "error", "code": "<STABLE_ERROR_CODE>", "message": "<사람이 읽는 메시지>", "details": {"stage": "load"}}
@@ -311,7 +316,7 @@ JSON 모드의 실패는 다음 모양의 에러 봉투로 stdout에 한 줄로 
 | `submit` 검증 실패 (JSON) | `{"submitted": false, "stage": "validate", "code", "errors": [...]}` | `{"status": "error", "code", "message", "details": {"stage": "validate", "errors": [...]}}` |
 | `submit` 로드 실패 (JSON) | `{"submitted": false, "stage": "load", "code": "STRATEGY_LOAD_ERROR", "error": "<원인>"}` | `{"status": "error", "code": "STRATEGY_LOAD_ERROR", "message": "Load test failed: <원인>", "details": {"stage": "load"}}` |
 | `submit` meta 실패 (JSON) | `{"submitted": false, "stage": "meta_validation", "code": "STRATEGY_VALIDATION_ERROR", "error": "<한국어 문장>"}` | `{"status": "error", "code": "STRATEGY_VALIDATION_ERROR", "message": "Invalid meta shape: expected StrategyMeta, got <타입>", "details": {"stage": "meta_validation"}}` |
-| `submit` 등록 실패 (JSON) | `{"submitted": false, "stage": "register", "code": "STRATEGY_ERROR", "error": "<원인>"}` | `{"status": "error", "code": "STRATEGY_ERROR", "message": "<원인>", "details": {"stage": "register"}}` |
+| `submit` 등록 실패 (JSON) | `{"submitted": false, "stage": "register", "code": <예외의 code, 기본 "STRATEGY_ERROR">, "error": "<원인>"}` | `{"status": "error", "code": <예외의 code, 기본 "STRATEGY_ERROR">, "message": "<원인>", "details": {"stage": "register"}}` |
 
 `submit`의 실패 출력에서 바뀐 것은 다음과 같습니다.
 
@@ -338,7 +343,7 @@ JSON 모드의 실패는 다음 모양의 에러 봉투로 stdout에 한 줄로 
 ## ✅ 바뀌지 않은 것
 
 - **text 출력** — 위 실패 출력의 접두와 예외 하나를 빼고 그대로입니다.
-- **종료 코드** — 그대로입니다.
+- **종료 코드** — 이 문서의 명령 모두 그대로입니다.
 - **전부터 봉투였던 명령의 JSON** — 다음 명령은 전부터 `{"status": "ok", "message", "data"}`를 냈고 그대로입니다.
   - `account activate`·`create`·`delete`·`repair-timezone`·`suspend`
   - `approval approve`·`cancel`·`cancel-invalid`·`reject`·`reopen`·`request`·`review`
@@ -349,6 +354,6 @@ JSON 모드의 실패는 다음 모양의 에러 봉투로 stdout에 한 줄로 
   - `system clear-halt`·`halt`·`stop`
   - `treasury allocate`·`deallocate`
   - 위 표에서 「전부터 봉투」로 적은 분기
-- **`feed`·`init`·`update`** — 이 출력 규칙의 대상이 아니며 그대로입니다.
+- **`feed`·`init`·`update`** — 이 문서의 봉투 전환 대상이 아니며, 각자의 JSON을 직접 냅니다.
 - **`system start`** — 자식 프로세스를 띄우기 전에 봉투를 한 번 직접 냅니다. JSON 모드에서는 자식의 출력을 stderr로 보냅니다. 자식의 종료 코드로 끝나고, Ctrl+C에서는 종료 코드 0으로 끝납니다. 모두 그대로입니다.
 - **`signal connect`의 스트림** — stdin·stdout 위의 JSON Lines 스트림은 그대로입니다. 성공 봉투는 내지 않고, 연결 실패는 위와 같이 에러 봉투를 냅니다.
