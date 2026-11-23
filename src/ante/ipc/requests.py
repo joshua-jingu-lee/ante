@@ -213,7 +213,7 @@ class BotUpdateFields(IPCRequest):
     name: str | None = None
     strategy_id: str | None = None
     interval_seconds: int | None = None
-    budget: float | None = None
+    budget: float | None = Field(default=None, gt=0)
     auto_restart: bool | None = None
     max_restart_attempts: int | None = None
     restart_cooldown_seconds: int | None = None
