@@ -7,10 +7,11 @@ file (base = merge-base of ``--base`` and ``--head``) gets one class:
 A doc path is one under ``docs/``, ``.agent/`` or ``guide/``, or a ``*.md``
 file at the repository root. A regular file mode is ``100644`` or ``100755``.
 
-- ``doc``: a doc path that is added as a regular file, deleted from a regular
-  file, or modified with the same regular file mode before and after; or a
-  rename whose old and new paths are both doc paths, with the same regular
-  file mode before and after.
+- ``doc``: a doc path other than the prose baseline that is added as a
+  regular file, deleted from a regular file, or modified with the same regular
+  file mode before and after; or a rename whose old and new paths are both doc
+  paths and neither is the prose baseline, with the same regular file mode
+  before and after.
 - ``ast-identical``: a modified ``.py`` file under ``src/`` with the same
   regular file mode before and after, whose base and head both parse and give
   the same AST once every docstring is dropped. A docstring here is the first
@@ -31,7 +32,13 @@ file at the repository root. A regular file mode is ``100644`` or ``100755``.
   and passing ``parse_baseline`` of ``check_spec_code_blocks.py`` (loaded by
   file path next to this script), and every head value not above base. That
   ``parse_baseline`` requires the same three keys on both sides, so a key
-  added or removed is ``review``.
+  added or removed is ``review``. Also ``.agent/prose-baseline.txt`` (the
+  prose baseline) modified with the same regular file mode before and after,
+  both sides decoding as UTF-8 and passing ``parse_baseline`` of
+  ``check_prose_budget.py`` (loaded by file path next to this script), and the
+  head count not above base. The prose baseline is checked before the rename
+  and doc path rules, so it is never ``doc``: adding, deleting, renaming it
+  (from or to its path) or changing its mode is ``review``.
 - ``review``: anything else, including copies, type changes, symlinks,
   submodules and any rename outside doc paths.
 
@@ -40,7 +47,9 @@ change that removes comments from a file and adds fewer new ones there, or
 rewrites docstrings without adding lines, still skips. When ``comments`` in
 the baseline is ``{}``, any added comment creates a new key and is ``review``.
 A doc change that changes a block's language and lowers the spec code block
-baseline skips.
+baseline skips. The prose baseline guards only the line count of the files
+``check_prose_budget.py`` measures: rewriting them at the same line count, or
+moving or writing prose in other doc paths, is ``doc`` (target set: #2809).
 
 Exit 0: every changed file is ``doc``, ``ast-identical`` or
 ``baseline-lowered``.
@@ -76,6 +85,8 @@ COMMENT_BASELINE_PATH = "scripts/comment_baseline.json"
 CHECK_COMMENTS_PATH = Path(__file__).with_name("check_comments.py")
 SPEC_BASELINE_PATH = "scripts/spec_code_block_baseline.json"
 CHECK_SPEC_BLOCKS_PATH = Path(__file__).with_name("check_spec_code_blocks.py")
+PROSE_BASELINE_PATH = ".agent/prose-baseline.txt"
+CHECK_PROSE_BUDGET_PATH = Path(__file__).with_name("check_prose_budget.py")
 
 
 class ScopeError(RuntimeError):
@@ -196,6 +207,14 @@ def classify_without_content(change: Change) -> str | None:
     """Return DOC/REVIEW when paths and modes decide; None when content must be read."""
     if change.status not in ("A", "M", "D", "R"):
         return REVIEW
+    if PROSE_BASELINE_PATH in (change.path, change.old_path):
+        if (
+            change.status == "M"
+            and change.old_mode == change.new_mode
+            and change.new_mode in REGULAR_MODES
+        ):
+            return None
+        return REVIEW
     if change.status == "R":
         assert change.old_path is not None
         if (
@@ -242,6 +261,10 @@ def _load_spec_baseline_parser() -> Callable[[str], Any]:
     return _load_parser("_check_review_scope_spec_blocks", CHECK_SPEC_BLOCKS_PATH)
 
 
+def _load_prose_baseline_parser() -> Callable[[str], Any]:
+    return _load_parser("_check_review_scope_prose", CHECK_PROSE_BUDGET_PATH)
+
+
 def _not_above(head: dict[str, int], base: dict[str, int]) -> bool:
     return all(path in base and count <= base[path] for path, count in head.items())
 
@@ -278,6 +301,19 @@ def spec_baseline_lowered(old: bytes, new: bytes) -> bool:
         return False
 
 
+def prose_baseline_lowered(old: bytes, new: bytes) -> bool:
+    """True when both prose baselines read as a count and head is not above base."""
+    try:
+        parse = _load_prose_baseline_parser()
+        before = parse(old.decode("utf-8"))
+        after = parse(new.decode("utf-8"))
+        return bool(
+            isinstance(before, int) and isinstance(after, int) and after <= before
+        )
+    except (Exception, SystemExit):
+        return False
+
+
 def classify(change: Change) -> str:
     decided = classify_without_content(change)
     if decided is not None:
@@ -288,6 +324,8 @@ def classify(change: Change) -> str:
         return BASELINE_LOWERED if baseline_lowered(old, new) else REVIEW
     if change.path == SPEC_BASELINE_PATH:
         return BASELINE_LOWERED if spec_baseline_lowered(old, new) else REVIEW
+    if change.path == PROSE_BASELINE_PATH:
+        return BASELINE_LOWERED if prose_baseline_lowered(old, new) else REVIEW
     return AST_IDENTICAL if ast_identical_without_docstrings(old, new) else REVIEW
 
 

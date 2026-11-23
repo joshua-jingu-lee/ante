@@ -275,7 +275,8 @@ crash하면 이벤트가 유실된다. 체결(`OrderFilledEvent`)은 Treasury �
 - **결정적 `fill_dedup_key`**: 모든 outbox 발행 이벤트는
   `fill_dedup_key = order_id:canonical(confirmed_cumulative)`(CAS로 확정된 누적
   체결량 기준)를 싣는다. 소비자가 at-least-once 재전달을 식별·멱등 처리하는 키다.
-  outbox 미경유 직접 발행 경로(VirtualProvider)는 dedup 비대상이며 빈키(`""`)다.
+  outbox 미경유 직접 발행 경로(VirtualProvider — FillApplier direct 적용 후
+  발행)는 dedup 비대상이며 빈키(`""`)다.
 - **소비자 멱등화 (#1957 완료)**: at-least-once 재전달 시 비멱등 소비자의
   이중처리는 #1957에서 `fill_dedup_key`를 소비해 소비자별로 해소했다. 정책은
   소비자 효과의 reversibility에 따라 두 단계로 나뉜다.
@@ -294,9 +295,9 @@ crash하면 이벤트가 유실된다. 체결(`OrderFilledEvent`)은 Treasury �
     소실, `maxlen` 윈도우를 벗어난 재전달은 식별 못 함(이중 처리 가능).
     DB-persisted exactly-once로의 승격은 #1957 비목표이며 **follow-up 후보**다.
   - **Gateway = 무변경**: cache invalidate는 멱등이라 dedup 불필요.
-  - **빈키(`""`) = dedup 비대상**: VirtualProvider 직접발행·FillApplier outbox
-    미주입 fallback은 단발 in-memory 발행(재전달 없음)이라 네 소비자 모두
-    빈키는 항상 처리한다(비빈키만 dedup).
+  - **빈키(`""`) = dedup 비대상**: VirtualProvider 직접발행(FillApplier direct
+    적용 후)·FillApplier outbox 미주입 fallback은 단발 in-memory 발행(재전달
+    없음)이라 네 소비자 모두 빈키는 항상 처리한다(비빈키만 dedup).
   - #1949는 소비자 무변경(무손실 전달 + 결정적 키 제공까지)이었고, 소비는 #1957.
 
 상세: `docs/specs/broker-adapter/18-fill-recovery.md` §10.

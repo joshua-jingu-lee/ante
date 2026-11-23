@@ -439,6 +439,37 @@ async def test_virtual_order_fills_when_main_marked_ready(
     assert [e.account_id for e in cap.of(OrderFilledEvent)] == ["test"]
 
 
+async def test_virtual_fill_is_recorded_through_main_fill_applier(
+    assemble: AssembleFn,
+) -> None:
+    """main 은 VirtualExecutor 에 같은 FillApplier 를 주입하고, 가상 체결은 발행 전에
+    trades 와 positions 에 기록된다(#2611)."""
+    asm = await assemble([])
+    s = asm.s
+    assert s.fill_applier is not None
+    assert s.virtual_executor._fill_applier is s.fill_applier
+    await _fund(s, "test", "bot-1")
+    s.virtual_executor.register_bot(
+        "bot-1", SimpleNamespace(apply_fill=lambda *args: None)
+    )
+    cap = _capture(s, OrderFilledEvent, OrderFailedEvent)
+
+    await s.eventbus.publish(_request("test"))
+
+    assert cap.of(OrderFailedEvent) == []
+    (filled,) = cap.of(OrderFilledEvent)
+    trades = await s.db.fetch_all(
+        "SELECT order_id, account_id, status FROM trades WHERE bot_id = ?", ("bot-1",)
+    )
+    assert trades == [
+        {"order_id": filled.order_id, "account_id": "test", "status": "filled"}
+    ]
+    positions = await s.db.fetch_all(
+        "SELECT account_id, quantity FROM positions WHERE bot_id = ?", ("bot-1",)
+    )
+    assert positions == [{"account_id": "test", "quantity": 10.0}]
+
+
 async def _submit_live_buy(
     asm: _Assembly, account_id: str, *, quantity: float = 10.0
 ) -> OrderSubmittedEvent:
