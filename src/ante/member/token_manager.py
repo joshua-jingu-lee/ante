@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from ante.core import clock
 from ante.member.auth import generate_token, hash_token
+from ante.member.errors import MemberStateConflictError
 from ante.member.models import Member, MemberStatus
 
 if TYPE_CHECKING:
@@ -45,8 +46,11 @@ class TokenManager:
     ) -> tuple[Member, str]:
         """토큰 재발급. 기존 토큰 즉시 무효화. 새 TTL 적용."""
         if member.status != MemberStatus.ACTIVE:
-            msg = f"비활성 멤버는 rotate_token할 수 없습니다 (현재: {member.status})"
-            raise PermissionError(msg)
+            raise MemberStateConflictError(
+                member.member_id,
+                current_status=str(member.status),
+                requested_action="rotate_token",
+            )
 
         token, t_hash, expires_at = self.create_token(member.type)
 

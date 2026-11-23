@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import uuid
 from datetime import UTC
 from typing import TYPE_CHECKING
@@ -313,9 +314,11 @@ class FillApplier:
         )
         if not order_id:
             raise ValueError("apply_direct_fill: order_id must not be empty")
-        if quantity <= 0 or price <= 0:
+        if not (math.isfinite(quantity) and quantity > 0) or not (
+            math.isfinite(price) and price > 0
+        ):
             raise ValueError(
-                f"apply_direct_fill: quantity and price must be positive "
+                f"apply_direct_fill: quantity and price must be finite and positive "
                 f"(quantity={quantity}, price={price})"
             )
         trade = TradeRecord(

@@ -61,23 +61,28 @@ class Checkpoint:
             return None
 
         try:
-            data: dict[str, Any] = json.loads(
-                self._file_path.read_text(encoding="utf-8")
-            )
-            logger.debug(
-                "체크포인트 로드: source=%s, data_type=%s, last_date=%s",
-                data.get("source"),
-                data.get("data_type"),
-                data.get("last_date"),
-            )
-            return data
-        except (json.JSONDecodeError, OSError) as exc:
+            data: Any = json.loads(self._file_path.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as exc:
             logger.warning(
                 "체크포인트 파일 읽기 실패: %s (%s)",
                 self._file_path,
                 exc,
             )
             return None
+        if not isinstance(data, dict):
+            logger.warning(
+                "체크포인트 파일 읽기 실패: %s (객체가 아닌 JSON: %s)",
+                self._file_path,
+                type(data).__name__,
+            )
+            return None
+        logger.debug(
+            "체크포인트 로드: source=%s, data_type=%s, last_date=%s",
+            data.get("source"),
+            data.get("data_type"),
+            data.get("last_date"),
+        )
+        return data
 
     def save(self, last_date: str) -> None:
         """체크포인트를 원자적으로 저장한다.
