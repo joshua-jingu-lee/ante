@@ -136,7 +136,10 @@ class TestCooldownAtSource:
         assert s2.post_count == 0
         assert a2.access_token is None
 
-    async def test_cooldown_blocked_raise_carries_cooldown_until(self) -> None:
+    @pytest.mark.parametrize("manual_clock", [_COOLDOWN_AT], indirect=True)
+    async def test_cooldown_blocked_raise_carries_cooldown_until(
+        self, manual_clock: Any
+    ) -> None:
         """cooldown 내 차단 raise 는 기존 cooldown_until 을 동봉(연장 금지)."""
         until = _record_token_cooldown("shared_key")
         s = _FakeSession([_success_response()])
@@ -148,10 +151,17 @@ class TestCooldownAtSource:
         assert ei.value.cooldown_until == until
         assert ei.value.error_code == "EGW00133"
 
-    async def test_cooldown_expiry_reopens_issue(self) -> None:
+        manual_clock.advance(10)
+        with pytest.raises(TokenRateLimitError) as later:
+            await a._authenticate()
+        assert s.post_count == 0
+        assert later.value.cooldown_until == until
+
+    @pytest.mark.parametrize("manual_clock", [_COOLDOWN_AT], indirect=True)
+    async def test_cooldown_expiry_reopens_issue(self, manual_clock: Any) -> None:
         """cooldown 만료 후 같은 app_key 발급 1회 재개."""
-        # 이미 만료된 cooldown 을 직접 심는다(과거 시각).
-        _token_cooldowns["shared_key"] = datetime.now(UTC) - timedelta(seconds=1)
+        _record_token_cooldown("shared_key")
+        manual_clock.advance(TOKEN_RATE_LIMIT_COOLDOWN_SECONDS)
         # 만료된 cooldown 은 None 으로 보고된다(자동 만료).
         assert _token_cooldown_until("shared_key") is None
 
