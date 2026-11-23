@@ -10,15 +10,7 @@ from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleRe
 
 
 def _is_finite_numeric(value: Any) -> bool:
-    """``value`` 가 finite int/float 인지 판정 (bool 명시 제외).
-
-    이중 방어 layer: RuleUpdateRequest 단에서 NaN/Inf 가 거부되지만,
-    DynamicConfig load 등 다른 경로에서 invalid value 가 들어와도 RULE_REGISTRY
-    가 fail-closed 로 막아야 한다. ``bool`` 은 numeric 흉내 방지를 위해 명시
-    제외한다 (``isinstance(True, int) == True``). 거대 ``int`` 는 ``float``
-    변환 시 ``OverflowError`` 가 발생하므로 finite 가 아니라고 판정한다 —
-    rule/engine.py:69-80 ``_is_finite_quantity`` 와 동일한 정책.
-    """
+    """``value`` 가 finite int/float 인지 판정(bool·거대 ``int`` 는 False)."""
     if isinstance(value, bool):
         return False
     if not isinstance(value, (int, float)):
