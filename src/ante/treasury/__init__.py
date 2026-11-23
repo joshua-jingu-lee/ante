@@ -2,6 +2,7 @@
 
 from ante.treasury.exceptions import (
     BotNotStoppedError,
+    DuplicateReservationError,
     InsufficientFundsError,
     TreasuryBudgetNotFoundError,
     TreasuryDeallocateExceedsAvailableError,
@@ -17,6 +18,7 @@ from ante.treasury.treasury import Treasury
 __all__ = [
     "BotBudget",
     "BotNotStoppedError",
+    "DuplicateReservationError",
     "InsufficientFundsError",
     "Treasury",
     "TreasuryBudgetNotFoundError",
