@@ -1305,14 +1305,12 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
         파티션을 결합-불가(non-coercible·읽기 가능)로 배치해 merge 실패를
         유발한다. Q1~Q3는 정상 저장되어 Q3까지 전진하지만, trailing Q4는
         store-merge 실패로 미전진한다(checkpoint=Q3, 다음 run에 Q4부터 재시도).
-        store-merge는 halt가 아니므로 Q1~Q3 전진은 기존대로 유지되고 결합-불가
-        trailing 분기만 막힌다. 대상 월(Q4)에만 배치하므로 전역 concat
+        merge 실패는 그 분기부터의 전진만 막으므로 앞선 Q1~Q3 전진은 유지되고
+        결합-불가 trailing 분기만 막힌다. 대상 월(Q4)에만 배치하므로 전역 concat
         monkeypatch 없이 per-quarter 선택성이 보존된다.
 
-        주의: store-merge는 halt를 세우지 않으므로(지침), 내부(non-trailing)
-        분기가 막히면 후속 데이터 분기의 save가 checkpoint를 jump 전진시킨다.
-        따라서 단일 분기 미전진을 결정적으로 검증하려면 trailing 분기를
-        결합-불가로 만든다(daily 경로의 단일 분기 케이스와 동형).
+        내부(non-trailing) 분기의 merge 실패는 그 뒤 분기의 save도 막는다
+        (#2578, ``test_backfill_inner_merge_failure_retried_next_run`` 이 잠금).
         """
         behaviors: dict[tuple[str, str], object] = {
             ("2015", "11013"): [_raw_item("2015", "11013")],
