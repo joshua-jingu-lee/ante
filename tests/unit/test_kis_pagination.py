@@ -15,6 +15,7 @@ KISDomesticAdapter 조회 메서드가 2페이지 이후 잔고·미체결·체�
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,6 +26,7 @@ from ante.broker.kis import (
     DEFAULT_MAX_PAGINATION_PAGES,
     KISDomesticAdapter,
 )
+from ante.core import clock
 
 _CONFIG = {
     "app_key": "test-key",
@@ -617,10 +619,11 @@ async def test_get_order_history_selects_tr_id_by_kst_three_month_boundary(
 async def test_get_order_history_default_from_date_is_inner(
     monkeypatch: pytest.MonkeyPatch, is_paper: bool
 ) -> None:
-    """기본 from_date(now-7d, UTC 현행 유지)는 항상 inner(0081R 계열) 회귀.
+    """기본 from_date(KST 오늘의 달력 7일 전)는 항상 inner(0081R 계열) 회귀.
 
-    호출자가 from_date 를 명시하지 않으면 종전과 동일하게 inner 경로로 동작해야
-    한다(tr_id 만 0081R 계열로 교체). UTC 기본 날짜 산출은 무변경이다.
+    호출자가 from_date 를 명시하지 않으면 inner 경로로 동작해야 한다(tr_id 만
+    0081R 계열로 교체). 거래일 헬퍼를 상수로 바꿔 두므로 이 테스트는 tr_id 만
+    잠근다. 기본 구간의 값은 시계 대역만 쓰는 경계 테스트가 잠근다.
     """
     monkeypatch.setattr("ante.broker.kis.business_date_kst", lambda *a, **k: "20260611")
     expected = "VTTC0081R" if is_paper else "TTTC0081R"
@@ -632,6 +635,64 @@ async def test_get_order_history_default_from_date_is_inner(
 
     assert captured["tr_id"] == expected
     assert captured["params"]["EXCG_ID_DVSN_CD"] == "KRX"
+
+
+_KST = timezone(timedelta(hours=9))
+
+
+@pytest.mark.parametrize(
+    ("manual_clock", "expected_start", "expected_end"),
+    [
+        (datetime(2026, 6, 10, 23, 59, tzinfo=UTC), "20260604", "20260611"),
+        (datetime(2026, 6, 11, 0, 0, tzinfo=UTC), "20260604", "20260611"),
+        (datetime(2026, 6, 10, 15, 0, tzinfo=UTC), "20260604", "20260611"),
+        (datetime(2026, 6, 10, 14, 59, 59, tzinfo=UTC), "20260603", "20260610"),
+    ],
+    indirect=["manual_clock"],
+    ids=["kst-0859", "kst-0900", "kst-midnight", "kst-235959"],
+)
+async def test_get_order_history_default_window_is_kst_calendar(
+    manual_clock, expected_start: str, expected_end: str
+) -> None:
+    """기본 구간은 KST 오늘과 그 달력 7일 전 사이다 (#2783)."""
+    adapter = _make_ccld_adapter(is_paper=True)
+    captured = _capture_ccld_call(adapter)
+
+    await adapter.get_order_history()
+
+    assert captured["params"]["INQR_END_DT"] == expected_end
+    assert captured["params"]["INQR_STRT_DT"] == expected_start
+    assert captured["tr_id"] == "VTTC0081R"
+
+
+class _CountingClock:
+    """now 호출 수를 세는 고정 시계."""
+
+    def __init__(self, at: datetime) -> None:
+        self._at = at
+        self.now_calls = 0
+
+    def now(self, tz: tzinfo | None) -> datetime:
+        self.now_calls += 1
+        if tz is None:
+            return self._at.astimezone().replace(tzinfo=None)
+        return self._at.astimezone(tz)
+
+    def monotonic(self) -> float:
+        return 1000.0
+
+
+async def test_get_order_history_reads_clock_once() -> None:
+    """기본 구간과 3개월 cutoff 는 시계를 한 번만 읽어 만든다 (#2783)."""
+    counting = _CountingClock(datetime(2026, 6, 11, 8, 59, tzinfo=_KST))
+    adapter = _make_ccld_adapter(is_paper=True)
+    captured = _capture_ccld_call(adapter)
+
+    with clock.use_clock(counting):
+        await adapter.get_order_history()
+
+    assert counting.now_calls == 1
+    assert captured["params"]["INQR_END_DT"] == "20260611"
 
 
 async def test_get_order_history_crossing_window_uses_single_before_query(
