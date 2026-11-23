@@ -457,11 +457,11 @@ ante --format json treasury snapshot --from <날짜> --to <날짜> --account <ac
 ante --format json treasury snapshot --date <날짜> --account <account_id>          # 특정일 스냅샷
 ```
 
-`treasury snapshot`의 `--from`/`--to`가 모두 지정되고 시작일(`--from`)이
-종료일(`--to`) 이후이면(inverted date range), `--date`/`--from`/`--to` 배타
-검증(`CLI_OPTION_CONFLICT`) 직후·서비스 호출 이전에 `INVALID_DATE_RANGE` 에러
-코드와 exit code 1로 거부한다(빈 결과 반환 금지). 한쪽만 지정·둘 다
-미지정·동일 날짜는 정상 처리한다.
+`treasury snapshot`(`--from`/`--to` 중 하나 이상 지정 시)과 `treasury portfolio history`는 빈 쪽을
+기본값(snapshot 시작 `2000-01-01`·끝 KST 오늘, history 시작 KST 오늘−30일·끝 KST 오늘)으로
+채운 실효 구간의 시작일이 종료일 이후이면(inverted date range), 서비스 호출 이전에
+`INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(빈 결과 반환 금지; snapshot은
+`--date`/`--from`/`--to` 배타 검증(`CLI_OPTION_CONFLICT`) 직후). 동일 날짜는 정상 처리한다.
 
 > 스냅샷 스펙: [treasury.md — 일별 자산 스냅샷](../treasury/treasury.md#일별-자산-스냅샷-daily-asset-snapshot)
 
