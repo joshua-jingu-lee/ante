@@ -110,7 +110,7 @@ class TreasuryDeallocateExceedsAvailableError(TreasuryError):
 
 
 class DuplicateReservationError(ValueError):
-    """같은 ``order_id`` 의 예약 항목이 이미 있어 재예약을 거부함 (#2775)."""
+    """같은 ``order_id`` 의 예약 항목이 이미 있어 재예약을 거부함."""
 
     def __init__(self, order_id: str) -> None:
         self.order_id = order_id
