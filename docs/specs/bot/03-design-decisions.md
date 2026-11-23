@@ -264,6 +264,7 @@ ante signal connect --key sk_a1b2c3d4
 2. 봇의 전략이 `accepts_external_signals=True`인지 확인
 3. 봇이 RUNNING 상태인지 확인
 4. 양방향 JSON Lines 스트림 수립 (stdin/stdout)
+   - 표준 입력에 리다이렉트한 파일(`< signals.jsonl`)은 파이프와 같이 읽고, 파일이 끝나면 송신 쪽을 닫는다.
 
 **채널이 봇에 전달하는 이벤트**:
 - 외부 → Ante: `{"type": "signal", ...}` → ExternalSignalEvent 발행 → `on_data()` 호출
