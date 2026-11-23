@@ -320,7 +320,7 @@ envelope `message`(CLI error의 `message`, IPC error의 `error.message`)는 사�
 
 - envelope shape(`status`/`code`/`message`/`error.code`/`error.message`/`id`/
   `result`/`data`/`details`)의 정의 — [envelopes.md](envelopes.md) SSOT.
-- vocabulary code module(`ContractKind`/`EnvelopeForm`/`AuthMode`) —
+- vocabulary code module(`ContractKind`/`AuthMode`) —
   [src/ante/contracts/vocab.py](../../../src/ante/contracts/vocab.py) (#1822) SSOT.
 - drift test 공통 helper — [tests/unit/contracts/helpers.py](../../../tests/unit/contracts/helpers.py) (#1823) SSOT.
 - migration domain 순서 — [contracts/README.md](README.md)의 Migration Domain

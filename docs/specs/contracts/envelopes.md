@@ -29,7 +29,7 @@ Ante의 외부 표면 envelope은 다음 4형태만이 normative다.
 
 ## CLI success envelope
 
-CLI 계약의 `envelope`이 `standard`인 커맨드가 `--format json` 모드에서 성공한 경우
+CLI 계약이 있고 그 `kind`가 `stream`이 아닌 커맨드가 `--format json` 모드에서 성공한 경우
 `stdout`으로 출력하는 형태다.
 
 ```json
@@ -57,26 +57,31 @@ CLI 계약의 `envelope`이 `standard`인 커맨드가 `--format json` 모드에
 ## CLI 성공 출력과 계약
 
 - CLI 명령의 `--format json` 성공 출력 형태는 CLI 계약
-  (`src/ante/contracts/cli_registry.py`)의 `OutputContract.envelope`이 정한다. 값은
-  `standard`와 `raw_legacy` 둘이고(`EnvelopeForm`), 명령별 값의 정본은 계약이다.
-- 계약의 `envelope`이 `standard`인 명령의 성공 출력은 CLI success envelope이다. 명령이
-  결과 값(`CommandResult`)을 돌려주면 진입점 훅이 그 값으로 envelope을 한 번
-  직렬화한다. 결과 값의 `text`(text 모드의 줄)는 줄의 tuple이거나 그것을 돌려주는
-  callable이며, envelope은 `text`를 쓰지 않고 callable은 text 모드에서만 불린다. 결과 값을 돌려주는데 계약이 없거나 `envelope`이 `standard`가 아니면 훅은
-  envelope을 내지 않고 `TypeError`를 낸다.
+  (`src/ante/contracts/cli_registry.py`)의 `OutputContract`가 정하며, 명령별 계약의
+  정본은 레지스트리다. 진입점 훅이 읽는 계약 값은 `kind`가 `stream`인가와
+  `data_key`다.
+- 계약이 있고 `kind`가 `stream`이 아닌 명령의 성공 출력은 CLI success envelope이다.
+  명령이 결과 값(`CommandResult`)을 돌려주면 진입점 훅이 그 값으로 envelope을 한 번
+  직렬화한다. 결과 값의 `text`(text 모드의 줄)는 `str` 줄의 tuple이거나 그것을
+  돌려주는 callable이며, envelope은 `text`를 쓰지 않고 callable은 text 모드에서만
+  불린다. 예외는 `system start` 하나다: 결과 값을 돌려주지 않고 자식 프로세스를
+  띄우기 전에 envelope을 직접 한 번 내며, 자식의 종료 코드로 끝난다.
+- 계약의 `kind`가 `stream`인 명령(`signal connect`)은 성공 출력으로 envelope을 내지
+  않는다. 출력은 스트림 프로토콜이며 실패는 아래 [CLI error envelope](#cli-error-envelope)을
+  따른다.
+- 계약이 없는 명령(`feed`·`init`·`update`)에는 훅이 관여하지 않는다.
+- 결과 값을 돌려주는데 계약이 없거나 계약의 `kind`가 `stream`이면 훅은 envelope을
+  내지 않고 `TypeError`를 낸다. 결과 값이 아닌 반환(`None` 포함)에는 훅이 아무것도
+  하지 않는다. 계약이 있고 `kind`가 `stream`이 아닌 명령의 콜백이 결과 값을
+  돌려주는가는 반환 타입 주석의 정적 테스트와 `mypy`가 잠근다.
 - `data` 배치: 결과 값의 payload가 객체면 그대로 `data`다. 배열이면
   `{<계약의 data_key>: 배열}`이다. 계약의 `data_key`가 없는데 payload가 배열이면 훅은
   envelope을 내지 않고 `TypeError`를 낸다. `data_key`의 이름은 배열의 행이 나타내는
   자원의 복수형 snake_case 명사다(예: 결재 요청 행의 배열은 `approvals`).
-- 계약의 `envelope`이 `raw_legacy`인 명령의 성공 출력은 CLI success envelope이 아니다.
-  명령이 직접 만든 payload(평면 객체나 배열 등)가 그대로 나가며, 본 SSOT의 4형태 밖이다.
-  `raw_legacy`는 계약에서 사라져 가는 값이다. 새 계약은 이 값을 쓰지 않으며,
-  `raw_legacy_contracts` 래칫(`scripts/check_entry_ratchet.py`)이 이 값을 가진 계약
-  집합이 기준선보다 늘어나는 것을 막는다.
-- 계약의 `envelope`을 `raw_legacy`에서 `standard`로 바꾸는 명령은 payload의 키와 값을
-  바꾸지 않는다. 옛 payload가 객체면 그대로 `data`에 들어가고 `message`는 빈 문자열이며,
-  payload 안의 `message` 키는 `data`에 남는다. 옛 payload가 배열이면 계약에 `data_key`를
-  채운다.
+- 명령이 직접 만든 payload(평면 객체나 배열)를 내던 명령을 envelope으로 옮길 때는
+  payload의 키와 값을 바꾸지 않았다. 옛 payload가 객체면 그대로 `data`에 들어가고
+  `message`는 빈 문자열이며, payload 안의 `message` 키는 `data`에 남는다. 옛 payload가
+  배열이면 계약에 `data_key`를 채운다.
 - 이 전환의 버전 정책은 [D-021](../../decisions/D-021-trust-pyramid-governance.md)을
   따른다.
 
@@ -188,10 +193,10 @@ IPC 서버가 요청 처리 중 실패한 경우 응답으로 직렬화하는 �
 CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응답을 두 형태로
 이중 wrapping 하지 않는다.
 
-- **오프라인 CLI**: 직접 모듈 임포트로 실행되는 명령 가운데 계약의 `envelope`이
-  `standard`인 명령은 결과를 한 번 wrapping 해 CLI success envelope으로 출력한다.
-- **IPC passthrough CLI**: 런타임 IPC 위임 명령 가운데 계약의 `envelope`이 `standard`인
-  명령은 IPC `result`를 다시 IPC envelope으로 감싸지 않고 CLI success envelope을 1회
+- **오프라인 CLI**: 직접 모듈 임포트로 실행되는 명령 가운데 계약이 있고 그
+  `kind`가 `stream`이 아닌 명령은 결과를 한 번 wrapping 해 CLI success envelope으로 출력한다.
+- **IPC passthrough CLI**: 런타임 IPC 위임 명령 가운데 계약이 있고 그 `kind`가 `stream`이
+  아닌 명령은 IPC `result`를 다시 IPC envelope으로 감싸지 않고 CLI success envelope을 1회
   구성한다.
 - **CLI IPC 헬퍼 계약**: `src/ante/cli/commands/ipc_helpers.py`의 `ipc_send`는
   IPC 성공 응답의 `result`만 호출자에 돌려주고, 실패는 타입 예외로 올린다:
@@ -219,7 +224,7 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
   [#2334](https://github.com/joshua-jingu-lee/ante/issues/2334)이며 **구현 PR 머지
   후 동작**한다(동기 버그 #2333 unblock; spec 단계에서는 미동작).
 - **결론**: 어느 표면이든 사용자/Agent에게 보이는 envelope은 CLI envelope 2형태
-  중 하나(JSON. 계약이 `raw_legacy`인 명령의 성공 출력은 envelope이 아니다), IPC
+  중 하나(JSON. 계약의 `kind`가 `stream`인 명령의 성공 출력은 envelope이 아니다), IPC
   envelope 2형태 중 하나(서버 응답)다. CLI가 IPC
   envelope 그대로를 출력하거나, IPC가 CLI envelope을 반환하는 시나리오는 본
   SSOT가 정의하는 envelope 형태가 아니다.
@@ -244,9 +249,6 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
   exception → code 매핑은 #1816의 책임이다. CLI 일부 분야는
   `docs/specs/cli/02-design-decisions.md`의 입력 계약 에러 코드 표를 SSOT로
   유지한다.
-- **명령군별 전환**: 계약이 `raw_legacy`인 명령을 `standard`로 옮기는 일은 명령군마다
-  별도 이슈로 한다. 본 SSOT는 그 전환의 규칙만 정한다
-  ([CLI 성공 출력과 계약](#cli-성공-출력과-계약)).
 - **IPC CommandSpec metadata**: IPC 핸들러의 args/result schema, audit
   metadata, service 의존성 선언은 #1819의 책임이다. 본 SSOT는 IPC
   `result`/`error` 슬롯의 외형만 lock 한다.

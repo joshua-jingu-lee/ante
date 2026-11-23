@@ -25,7 +25,7 @@ socket)이 사용자/Agent에게 노출하는 **wire-level 계약의 SSOT**를 �
 | 축 | SSOT 위치 | 소유 이슈 | 비고 |
 |---|---|---|---|
 | Envelope shape | [docs/specs/contracts/envelopes.md](envelopes.md) | #1821 | CLI success/error, IPC success/error 4형태 lock |
-| Vocabulary code | [src/ante/contracts/vocab.py](../../../src/ante/contracts/vocab.py) | #1822 | `ContractKind`, `EnvelopeForm`, `AuthMode` Literal SSOT |
+| Vocabulary code | [src/ante/contracts/vocab.py](../../../src/ante/contracts/vocab.py) | #1822 | `ContractKind`, `AuthMode` Literal SSOT |
 | Drift helper skeleton | [tests/unit/contracts/helpers.py](../../../tests/unit/contracts/helpers.py) | #1823 | Click/IPC iterator, `*Error` class / `fmt.error` callsite helper |
 | Error taxonomy | [docs/specs/contracts/error-taxonomy.md](error-taxonomy.md) | #1816 / #1839 | `code` vocabulary + 8 category + auth legacy alias + 대표 fault lock |
 | Offline service factory contract | [docs/specs/contracts/offline-factory.md](offline-factory.md) | #1818 / #1854 / #1974 | CLI `offline`/`cold-path` factory 책임·비책임 + `read_only` 정책(옵션 B skip + 옵션 A Database read-only 연결 모드) + ctx path resolution + read-only 예외 |
@@ -46,29 +46,22 @@ shape을 추가하거나 기존 4형태를 변경하려면 envelopes.md 자체�
 
 ### Vocabulary code (#1822)
 
-[`src/ante/contracts/vocab.py`](../../../src/ante/contracts/vocab.py)가 3개
+[`src/ante/contracts/vocab.py`](../../../src/ante/contracts/vocab.py)가 2개
 Literal type alias의 단일 코드 SSOT다.
 
 - `ContractKind = Literal["entity", "operation", "collection", "raw", "stream"]`
-- `EnvelopeForm = Literal["standard", "raw_legacy"]`
 - `AuthMode = Literal["public", "authenticated", "scoped", "master"]`
 
 본 모듈은 runtime behavior를 가지지 않고 Literal type alias만 export한다.
 enum/dataclass/helper/validator는 의도적으로 제외되어 있다 — 후속 에픽이
 필요해지면 별도 이슈로 분리한다.
 
-#### `raw_legacy` 표현
+#### `kind`의 쓰임
 
-`raw_legacy`는 `ContractKind`가 **아니다**. `raw_legacy`는 `EnvelopeForm`에만
-존재한다. 기존 raw JSON 출력 예외는 다음처럼 표현한다.
-
-```python
-OutputContract(kind="raw", envelope="raw_legacy")
-```
-
-즉, `kind`(result shape 종류) 축과 `envelope`(응답 envelope 형태) 축은 독립이며,
-legacy raw JSON 출력은 `ContractKind="raw"` + `EnvelopeForm="raw_legacy"`
-조합이다. 본 정렬은 #1820/#1822에서 결정되었고 후속 #1815가 reference한다.
+CLI 계약의 `OutputContract.kind` 가운데 동작에 닿는 값은 `stream` 하나다. 진입점
+훅은 계약의 `kind`가 `stream`인가만 읽는다(스트림 계약의 명령은 envelope을 내지
+않는다 — [envelopes.md](envelopes.md)의 「CLI 성공 출력과 계약」). 나머지 값
+(`entity`·`operation`·`collection`·`raw`)은 문서 값이며 출력을 바꾸지 않는다.
 
 ### Drift helper skeleton (#1823)
 
@@ -180,7 +173,7 @@ account → member → approval → bot → treasury → broker → strategy →
 
 | 에픽 | Envelope (#1821) | Vocabulary (#1822) | Drift helper (#1823) | Migration order (#1820) | 추가 reference |
 |---|---|---|---|---|---|
-| #1815 CLI command contract | CLI success/error | `ContractKind`, `EnvelopeForm`, `AuthMode` | `iter_click_leaf_commands` | 1차: `account` | #1819 IPC registry (server-side SSOT 분리), #1816 error taxonomy |
+| #1815 CLI command contract | CLI success/error | `ContractKind`, `AuthMode` | `iter_click_leaf_commands` | 1차: `account` | #1819 IPC registry (server-side SSOT 분리), #1816 error taxonomy |
 | #1816 Stable error contract | CLI error, IPC error | (선택) | `iter_exception_classes`, `iter_fmt_error_calls` | 1차: `account` | #1815 auth registry, #1819 `SERVICE_NOT_CONFIGURED` 소비 |
 | #1818 Offline service factory | (에러 발화 시) CLI error | (독립) | (해당 없음) | 1차: `account` + `member`/`approval` 예외 허용 | #1816 error taxonomy(에러 발화 시), [offline-factory.md](offline-factory.md) (#1854), generated artifact policy |
 | #1819 IPC CommandSpec metadata | IPC success/error | `ContractKind` | `iter_ipc_command_specs` | 1차: `account` | #1816 `SERVICE_NOT_CONFIGURED`, #1815 CLI ↔ IPC drift test |
@@ -205,25 +198,21 @@ account → member → approval → bot → treasury → broker → strategy →
 | 검사 항목 | #1815 | #1816 | #1818 | #1819 |
 |---|---|---|---|---|
 | `#1820` parent reference (선행 의존) | OK | OK | OK | OK |
-| `ContractKind`/`EnvelopeForm`/`AuthMode` vocabulary reference | OK | (선택) | (독립) | OK (`ContractKind`) |
+| `ContractKind`/`AuthMode` vocabulary reference | OK | (선택) | (독립) | OK (`ContractKind`) |
 | Envelope shape SSOT reference (`docs/specs/contracts/envelopes.md`) | OK | OK (CLI/IPC error) | OK (에러 발화 시) | OK (IPC success/error) |
 | Drift test 공통 helper reference (#1823) | OK | OK | (해당 없음) | OK |
 | Migration domain 순서 (`account → … → 기타`) lock | OK | OK | OK (cleanup 예외 명시) | OK |
-| `raw_legacy`를 `EnvelopeForm`으로 표현 | OK | (해당 없음) | (해당 없음) | (해당 없음) |
 | Generated artifact policy 명시 | OK | OK | OK | OK |
 
 해석:
 
-- 4 에픽 prelude는 본 인덱스가 등록되기 전부터 `#1820`/`ContractKind`/`EnvelopeForm`/`AuthMode`/envelope shape SSOT/drift
+- 4 에픽 prelude는 본 인덱스가 등록되기 전부터 `#1820`/`ContractKind`/`AuthMode`/envelope shape SSOT/drift
   helper/migration order를 일관되게 reference한다. #1824 인덱스 등록 후 본
   인덱스(`docs/specs/contracts/README.md`)를 별도 entry로 가리키도록 4 에픽
   본문을 추가 수정할 필요는 없다.
 - 본 인덱스는 4 에픽 본문에 새 normative reference를 강제 삽입하지 않는다.
   4 에픽의 Plan Preflight나 실제 구현 PR에서 본 인덱스를 reference하는 것은
   허용/권장이며, 본 인덱스에서 강제하지 않는다.
-- `raw_legacy` 표현은 #1815 prelude와 본 인덱스에서 모두 `EnvelopeForm`으로
-  정렬되어 있다. #1816/#1818/#1819는 `raw_legacy`를 직접 다루지 않으므로 해당
-  축은 표에서 "(해당 없음)"이다.
 - generated artifact policy(`docs/architecture/generated/project-structure.md`
   영향 여부, `guide/cli.md` 재생성 조건)는 4 에픽 본문에 각자 명시되어 있다.
   본 인덱스 추가에 따른 project-structure 재생성은 본 PR이 수행한다.
