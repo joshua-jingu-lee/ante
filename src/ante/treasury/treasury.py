@@ -93,8 +93,17 @@ CREATE TABLE IF NOT EXISTS treasury_daily_snapshots (
     created_at           TEXT    DEFAULT (datetime('now')),
     PRIMARY KEY (account_id, snapshot_date)
 );
+CREATE TABLE IF NOT EXISTS treasury_reservations (
+    order_id     TEXT PRIMARY KEY,
+    bot_id       TEXT NOT NULL,
+    account_id   TEXT NOT NULL,
+    remaining    REAL NOT NULL,
+    updated_at   TEXT DEFAULT (datetime('now'))
+);
 CREATE INDEX IF NOT EXISTS idx_bot_budgets_account
     ON bot_budgets(account_id);
+CREATE INDEX IF NOT EXISTS idx_treasury_reservations_account
+    ON treasury_reservations(account_id);
 CREATE INDEX IF NOT EXISTS idx_treasury_transactions_account
     ON treasury_transactions(account_id);
 """
@@ -502,10 +511,15 @@ class Treasury:
         released = budget.allocated
         self._unallocated += released
 
-        await self._db.execute(
-            "DELETE FROM bot_budgets WHERE bot_id = ?",
-            (bot_id,),
-        )
+        async with self._db.transaction():
+            await self._db.execute(
+                "DELETE FROM bot_budgets WHERE bot_id = ?",
+                (bot_id,),
+            )
+            await self._db.execute(
+                "DELETE FROM treasury_reservations WHERE bot_id = ? AND account_id = ?",
+                (bot_id, self._account_id),
+            )
         await self._save_state()
         await self._log_transaction(
             bot_id, "release", released, "봇 삭제에 의한 예산 전액 환수"
@@ -592,12 +606,21 @@ class Treasury:
         if not budget or budget.available < amount:
             return False
 
+        budget_snapshot = replace(budget)
+        previous = self._reservations.get(order_id)
         budget.available -= amount
         budget.reserved += amount
         budget.last_updated = clock.now(UTC)
         self._reservations[order_id] = (bot_id, amount)
 
-        await self._save_budget(budget)
+        try:
+            async with self._db.transaction():
+                await self._save_budget(budget)
+                await self._persist_reservation(order_id)
+        except BaseException:
+            self._restore_budget(budget, budget_snapshot)
+            self._restore_reservation(order_id, previous)
+            raise
         return True
 
     async def release_reservation(self, bot_id: str, order_id: str) -> None:
@@ -611,14 +634,23 @@ class Treasury:
         budget = self._budgets.get(bot_id)
         entry = self._reservations.pop(order_id, None)
         remaining = entry[1] if entry else 0.0
-        if not budget or remaining <= 0:
-            return
+        settle = budget if budget is not None and remaining > 0 else None
+        budget_snapshot = replace(settle) if settle is not None else None
+        if settle is not None:
+            settle.reserved = max(0.0, settle.reserved - remaining)
+            settle.available += remaining
+            settle.last_updated = clock.now(UTC)
 
-        budget.reserved = max(0.0, budget.reserved - remaining)
-        budget.available += remaining
-        budget.last_updated = clock.now(UTC)
-
-        await self._save_budget(budget)
+        try:
+            async with self._db.transaction():
+                if settle is not None:
+                    await self._save_budget(settle)
+                await self._persist_reservation(order_id)
+        except BaseException:
+            if settle is not None and budget_snapshot is not None:
+                self._restore_budget(settle, budget_snapshot)
+            self._restore_reservation(order_id, entry)
+            raise
 
     def get_reservations(self, bot_id: str) -> dict[str, float]:
         """특정 봇의 미체결 예약 내역 조회.
@@ -631,6 +663,36 @@ class Treasury:
         return {
             oid: amt for oid, (bid, amt) in self._reservations.items() if bid == bot_id
         }
+
+    async def _persist_reservation(self, order_id: str) -> None:
+        """예약 표의 그 주문 항목을 행에 upsert하고, 항목이 없으면 행을 지운다."""
+        entry = self._reservations.get(order_id)
+        if entry is None:
+            await self._db.execute(
+                "DELETE FROM treasury_reservations "
+                "WHERE order_id = ? AND account_id = ?",
+                (order_id, self._account_id),
+            )
+            return
+        await self._db.execute(
+            """INSERT INTO treasury_reservations
+               (order_id, bot_id, account_id, remaining)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(order_id) DO UPDATE SET
+                 bot_id = excluded.bot_id,
+                 remaining = excluded.remaining,
+                 updated_at = datetime('now')""",
+            (order_id, entry[0], self._account_id, entry[1]),
+        )
+
+    def _restore_reservation(
+        self, order_id: str, entry: tuple[str, float] | None
+    ) -> None:
+        """rollback 시 예약 표의 그 주문 항목을 연산 전 값(없었으면 부재)으로."""
+        if entry is None:
+            self._reservations.pop(order_id, None)
+        else:
+            self._reservations[order_id] = entry
 
     def _is_my_event(self, event: object) -> bool:
         """이벤트가 이 Treasury의 계좌에 해당하는지 확인."""
@@ -1026,36 +1088,27 @@ class Treasury:
         if not budget:
             return
 
-        if not event.fill_dedup_key:
-            await self._apply_fill_settlement(event, budget)
-            return
-
         bot_id = event.bot_id
         order_id = event.order_id
         budget_snapshot = replace(budget)
-        reservation_present = order_id in self._reservations
-        reservation_snapshot = (
-            self._reservations[order_id] if reservation_present else None
-        )
+        reservation_snapshot = self._reservations.get(order_id)
 
         try:
             async with self._db.transaction():
-                inserted = await self._db.execute_fetch_one(
-                    """INSERT OR IGNORE INTO treasury_fill_dedup
-                       (fill_dedup_key, bot_id, account_id)
-                       VALUES (?, ?, ?)
-                       RETURNING fill_dedup_key""",
-                    (event.fill_dedup_key, bot_id, self._account_id),
-                )
-                if inserted is None:
-                    return
+                if event.fill_dedup_key:
+                    inserted = await self._db.execute_fetch_one(
+                        """INSERT OR IGNORE INTO treasury_fill_dedup
+                           (fill_dedup_key, bot_id, account_id)
+                           VALUES (?, ?, ?)
+                           RETURNING fill_dedup_key""",
+                        (event.fill_dedup_key, bot_id, self._account_id),
+                    )
+                    if inserted is None:
+                        return
                 await self._apply_fill_settlement(event, budget)
         except BaseException:
             self._restore_budget(budget, budget_snapshot)
-            if reservation_present:
-                self._reservations[order_id] = reservation_snapshot  # type: ignore[assignment]
-            else:
-                self._reservations.pop(order_id, None)
+            self._restore_reservation(order_id, reservation_snapshot)
             raise
 
     async def _apply_fill_settlement(self, event: Any, budget: BotBudget) -> None:
@@ -1072,6 +1125,8 @@ class Treasury:
 
         budget.last_updated = clock.now(UTC)
         await self._save_budget(budget)
+        if event.side == "buy":
+            await self._persist_reservation(event.order_id)
         await self._log_transaction(
             bot_id=event.bot_id,
             tx_type="fill",
@@ -1207,11 +1262,24 @@ class Treasury:
             total_released += amount
 
         budget = self._budgets.get(bot_id)
+        budget_snapshot = replace(budget) if budget else None
         if budget:
             budget.reserved = max(0.0, budget.reserved - total_released)
             budget.available += total_released
             budget.last_updated = clock.now(UTC)
-            await self._save_budget(budget)
+
+        try:
+            async with self._db.transaction():
+                if budget:
+                    await self._save_budget(budget)
+                for order_id in pending:
+                    await self._persist_reservation(order_id)
+        except BaseException:
+            if budget and budget_snapshot is not None:
+                self._restore_budget(budget, budget_snapshot)
+            for order_id, amount in pending.items():
+                self._restore_reservation(order_id, (bot_id, amount))
+            raise
 
         await self._log_transaction(
             bot_id=bot_id,
@@ -1525,8 +1593,29 @@ class Treasury:
                 last_updated=datetime.fromisoformat(r["last_updated"]),
             )
 
+        rows = await self._db.fetch_all(
+            "SELECT order_id, bot_id, remaining FROM treasury_reservations "
+            "WHERE account_id = ?",
+            (self._account_id,),
+        )
+        for r in rows:
+            self._reservations[r["order_id"]] = (r["bot_id"], float(r["remaining"]))
+        self._warn_unattributed_reserved()
+
         total_allocated = sum(b.allocated for b in self._budgets.values())
         self._unallocated = self._account_balance - total_allocated
+
+    def _warn_unattributed_reserved(self) -> None:
+        """봇의 ``reserved``와 그 봇 잔여 예약 합의 차이를 경고만 한다(값은 그대로)."""
+        for bot_id, budget in self._budgets.items():
+            gap = budget.reserved - sum(self.get_reservations(bot_id).values())
+            if abs(gap) > 1e-6:
+                logger.warning(
+                    "unattributed_reserved: bot=%s account=%s gap=%s",
+                    bot_id,
+                    self._account_id,
+                    f"{gap:,.2f}",
+                )
 
     async def _save_state(self) -> None:
         """계좌 상태 저장."""
