@@ -2126,3 +2126,218 @@ class TestSingleClockReadPerProcessing:
 
         assert stepping.now_calls == 1
         eventbus.publish.assert_not_called()
+
+
+class TestSingleTerminalPerOrder:
+    """#2874: 한 스탑 주문의 종결(발동·만료·취소)은 한 번만 일어난다."""
+
+    @staticmethod
+    async def _register_two(manager: StopOrderManager) -> tuple[str, str]:
+        ids = []
+        for order_id in ("ord-x", "ord-y"):
+            ids.append(
+                await manager.register(
+                    order_id=order_id,
+                    bot_id="bot-001",
+                    strategy_id="stg-001",
+                    symbol="005930",
+                    side="sell",
+                    quantity=10.0,
+                    order_type="stop",
+                    stop_price=49000.0,
+                    account_id="acc-test",
+                )
+            )
+        return ids[0], ids[1]
+
+    @staticmethod
+    def _gated_publish(
+        eventbus: MagicMock, gate_type: type, gate_id: str
+    ) -> tuple[list[object], asyncio.Event, asyncio.Event]:
+        published: list[object] = []
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _publish(event: object) -> None:
+            published.append(event)
+            if (
+                isinstance(event, gate_type)
+                and getattr(event, "stop_order_id", None) == gate_id
+            ):
+                entered.set()
+                await release.wait()
+
+        eventbus.publish = AsyncMock(side_effect=_publish)
+        return published, entered, release
+
+    @staticmethod
+    def _count(published: list[object], event_type: type, stop_id: str) -> int:
+        if event_type is OrderRequestEvent:
+            return sum(
+                1
+                for e in published
+                if isinstance(e, OrderRequestEvent)
+                and e.reason == f"stop_triggered: {stop_id}"
+            )
+        return sum(
+            1
+            for e in published
+            if isinstance(e, event_type)
+            and getattr(e, "stop_order_id", None) == stop_id
+        )
+
+    async def test_two_price_updates_trigger_once(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """(a) 시세 처리 둘이 같은 주문을 목록에 담아도 발동은 하나."""
+        manager.start()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            x_id, y_id = await self._register_two(manager)
+            published, entered, release = self._gated_publish(
+                eventbus, StopOrderTriggeredEvent, x_id
+            )
+            task_a = asyncio.create_task(
+                manager.on_price_update("005930", 48000.0, account_id="acc-test")
+            )
+            await asyncio.wait_for(entered.wait(), timeout=1.0)
+            await manager.on_price_update("005930", 48000.0, account_id="acc-test")
+            release.set()
+            await asyncio.wait_for(task_a, timeout=1.0)
+
+        assert self._count(published, StopOrderTriggeredEvent, y_id) == 1
+        assert self._count(published, OrderRequestEvent, y_id) == 1
+        assert self._count(published, OrderRequestEvent, x_id) == 1
+
+    async def test_expire_then_trigger_does_not_trigger(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """(b) 만료된 주문을 낡은 시세 목록이 발동하지 않는다."""
+        manager.start()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            x_id, y_id = await self._register_two(manager)
+            published, entered, release = self._gated_publish(
+                eventbus, StopOrderTriggeredEvent, x_id
+            )
+            task_a = asyncio.create_task(
+                manager.on_price_update("005930", 48000.0, account_id="acc-test")
+            )
+            await asyncio.wait_for(entered.wait(), timeout=1.0)
+            order_y = manager.get_order(y_id)
+            assert order_y is not None
+            assert order_y.entered_session is True
+            await manager._expire_order(order_y, "session_ended")
+            release.set()
+            await asyncio.wait_for(task_a, timeout=1.0)
+
+        assert self._count(published, StopOrderExpiredEvent, y_id) == 1
+        assert self._count(published, StopOrderTriggeredEvent, y_id) == 0
+        assert self._count(published, OrderRequestEvent, y_id) == 0
+
+    async def test_trigger_then_expire_does_not_expire(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """(c) 발동된 주문을 낡은 만료 목록이 만료하지 않는다."""
+        manager.start()
+        session = {"active": True}
+        with patch.object(
+            StopOrderManager,
+            "_is_session_type_active_now",
+            side_effect=lambda *_a, **_k: session["active"],
+        ):
+            x_id, y_id = await self._register_two(manager)
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+            published, entered, release = self._gated_publish(
+                eventbus, StopOrderExpiredEvent, x_id
+            )
+            session["active"] = False
+            sweep = asyncio.create_task(manager.check_session_expiry())
+            await asyncio.wait_for(entered.wait(), timeout=1.0)
+            session["active"] = True
+            await manager.on_price_update("005930", 48000.0, account_id="acc-test")
+            session["active"] = False
+            release.set()
+            await asyncio.wait_for(sweep, timeout=1.0)
+            await asyncio.wait_for(manager.stop(), timeout=1.0)
+
+        assert self._count(published, StopOrderTriggeredEvent, y_id) == 1
+        assert self._count(published, StopOrderExpiredEvent, y_id) == 0
+        assert self._count(published, StopOrderExpiredEvent, x_id) == 1
+        assert len(manager._inflight_expires) == 0
+
+    async def test_cancel_then_trigger_does_not_trigger(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """(d) 취소된 주문을 낡은 시세 목록이 발동하지 않는다."""
+        manager.start()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            x_id, y_id = await self._register_two(manager)
+            published, entered, release = self._gated_publish(
+                eventbus, StopOrderTriggeredEvent, x_id
+            )
+            task_a = asyncio.create_task(
+                manager.on_price_update("005930", 48000.0, account_id="acc-test")
+            )
+            await asyncio.wait_for(entered.wait(), timeout=1.0)
+            assert manager.cancel(y_id) is True
+            release.set()
+            await asyncio.wait_for(task_a, timeout=1.0)
+
+        assert self._count(published, StopOrderTriggeredEvent, y_id) == 0
+        assert self._count(published, OrderRequestEvent, y_id) == 0
+
+    async def test_scheduled_expire_then_stop_expires_once(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """(e) 예약만 된 세션 만료 뒤 정지가 와도 만료는 하나(session_ended)."""
+        manager.start()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            x_id, y_id = await self._register_two(manager)
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+        assert manager.cancel(y_id) is True
+        order_x = manager.get_order(x_id)
+        assert order_x is not None
+
+        published: list[object] = []
+
+        async def _publish(event: object) -> None:
+            published.append(event)
+
+        eventbus.publish = AsyncMock(side_effect=_publish)
+
+        scheduled = asyncio.Event()
+        original = manager._do_expire_order
+
+        def _spy(order: object, reason: str) -> object:
+            if reason == "session_ended":
+                scheduled.set()
+            return original(order, reason)  # type: ignore[arg-type]
+
+        with (
+            patch.object(manager, "_do_expire_order", new=_spy),
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=False
+            ),
+        ):
+            sweep = asyncio.create_task(manager.check_session_expiry())
+            await asyncio.wait_for(scheduled.wait(), timeout=1.0)
+            assert order_x.expired is False
+            sweep.cancel()
+            await asyncio.wait_for(manager.stop(), timeout=1.0)
+            with pytest.raises(asyncio.CancelledError):
+                await sweep
+
+        expired = [
+            e
+            for e in published
+            if isinstance(e, StopOrderExpiredEvent) and e.stop_order_id == x_id
+        ]
+        assert [e.reason for e in expired] == ["session_ended"]
+        assert len(manager._inflight_expires) == 0
