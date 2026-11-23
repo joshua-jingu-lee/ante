@@ -50,7 +50,7 @@ PositionReconciler는 `TradeService`, `EventBus`를 주입받아 동작한다.
 
 ReconcileScheduler는 `PositionReconciler`(Trade 모듈), `BrokerAdapter`(실제 잔고 조회), `BotManager`(활성 봇 목록), `EventBus`를 positional 인자로 주입받는다. 추가로 keyword-only 인자를 받는다:
 
-- `broker_account_id`(필수): 이 스케줄러 인스턴스가 바인딩된 broker 계좌의 account_id. 빈 값이면 `ValueError`. `run_once()`는 이 account_id에 일치하는 봇만 대사 대상으로 삼고, 다른 계좌의 봇은 명시적으로 skip한다(SPLIT-1 단일 broker 바인딩 가드). multi-broker pool은 SPLIT-3에서 도입한다(`src/ante/main.py`의 `_init_reconcile_scheduler`가 활성 broker별 스케줄러를 생성·관리).
+- `broker_account_id`(필수): 이 스케줄러 인스턴스가 바인딩된 broker 계좌의 account_id. 빈 값이면 `ValueError`. `run_once()`는 이 account_id에 일치하는 봇만 대사 대상으로 삼고, 다른 계좌의 봇은 명시적으로 skip한다(SPLIT-1 단일 broker 바인딩 가드). multi-broker pool은 SPLIT-3(#1242)에서 도입되었다(`src/ante/main.py`의 `_init_reconcile_scheduler`가 활성 broker별 스케줄러를 생성·관리한다).
 - `interval_seconds`(기본 `DEFAULT_INTERVAL_SECONDS` = 1800초 = 30분): 대사 반복 주기.
 - `skip_initial_external_buy`(기본 `False`): True면 `start()`의 **기동 즉시 1회 대사에서만** "외부 매수" 분류 보정을 건너뛴다(이후 주기 대사는 정상 처리). 단일봇+running 보정 경로에만 적용된다.
 
