@@ -730,6 +730,7 @@ def test_nullable_fields_accept_null_and_reject_other_types() -> None:
         ("BotListRequest", "account_id"),
         ("BrokerOrderHistoryRequest", "from_date"),
         ("BrokerOrderHistoryRequest", "to_date"),
+        ("RuleUpdateRequest", "enabled"),
         *(
             ("BotUpdateFields", name)
             for name in (

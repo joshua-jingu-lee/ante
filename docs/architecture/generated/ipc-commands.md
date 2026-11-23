@@ -49,7 +49,7 @@
 | `member.set_emoji` | mutating | `audit_logger`, `member_service` | `member.set_emoji` | `MemberSetEmojiRequest` | `member_id: str` (필수)<br>`emoji: str` (필수) | `ante member set-emoji` |
 | `member.suspend` | mutating | `audit_logger`, `member_service` | `member.suspend` | `MemberSuspendRequest` | `member_id: str` (필수) | `ante member suspend` |
 | `member.update_scopes` | mutating | `audit_logger`, `member_service` | `member.update_scopes` | `MemberUpdateScopesRequest` | `member_id: str` (필수)<br>`scopes: list[str]` (필수) | `ante member update-scopes` |
-| `rule.update` | mutating | `account`, `audit_logger`, `dynamic_config` | `account.rule.update` | `RuleUpdateRequest` | `account_id: AccountId` (필수)<br>`rule_type: str` (필수)<br>`enabled: bool = true`<br>`params: dict[str, Any] = {}` | `ante rule update` |
+| `rule.update` | mutating | `account`, `audit_logger`, `dynamic_config` | `account.rule.update` | `RuleUpdateRequest` | `account_id: AccountId` (필수)<br>`rule_type: str` (필수)<br>`enabled: bool \| None = null`<br>`params: dict[str, Any] = {}` | `ante rule update` |
 | `signal.connect` | read-only | `bot_manager` | — | `SignalConnectRequest` | `key: SecretStr` (필수) | — |
 | `strategy.set_status` | mutating | `audit_logger`, `strategy_registry` | `strategy.set_status` | `StrategySetStatusRequest` | `strategy_id: str` (필수)<br>`status: Literal["registered", "adopted", "archived"]` (필수) | `ante strategy set-status` |
 | `system.clear_halt` | mutating | `account`, `audit_logger` | `system.clear_halt` | `SystemClearHaltRequest` | — | `ante system clear-halt` |

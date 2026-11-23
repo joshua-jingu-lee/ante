@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, date, timedelta, timezone
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -477,32 +477,6 @@ def snapshot(
 @treasury.group("portfolio")
 def portfolio() -> None:
     """포트폴리오 가치와 추이 조회."""
-
-
-def _portfolio_value_from_snapshot_or_summary(treasury_obj: Treasury) -> dict[str, Any]:
-    async def _inner() -> dict[str, Any]:
-        snapshot = await treasury_obj.get_latest_snapshot()
-        if snapshot is not None:
-            return {
-                "account_id": treasury_obj.account_id,
-                "total_value": snapshot["total_asset"],
-                "daily_pnl": snapshot["daily_pnl"],
-                "daily_return": snapshot["daily_return"],
-                "unrealized_pnl": snapshot["unrealized_pnl"],
-                "snapshot_date": snapshot["snapshot_date"],
-                "updated_at": snapshot["created_at"],
-            }
-        summary = treasury_obj.get_summary()
-        return {
-            "account_id": treasury_obj.account_id,
-            "total_value": summary.get("total_evaluation", 0.0),
-            "daily_pnl": 0.0,
-            "daily_return": 0.0,
-            "unrealized_pnl": 0.0,
-            "updated_at": clock.now(UTC).isoformat(),
-        }
-
-    return cast("dict[str, Any]", _run(_inner()))
 
 
 @portfolio.command("value")
