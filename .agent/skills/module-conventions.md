@@ -54,7 +54,6 @@ class BrokerAdapter(ABC):
 
 - `ABC` 사용 (Protocol은 duck typing 필요할 때만)
 - 모든 I/O 메서드는 `async`
-- 반환 타입 명시
 
 ## 3. 데이터 모델 (models.py)
 
@@ -192,26 +191,7 @@ class EventBus:
 (이벤트 enum이나 문자열 토픽으로 구독하지 않는다 — 실제 API는
 `src/ante/eventbus/bus.py`, 이벤트 타입은 `src/ante/eventbus/events.py` 참조.)
 
-## 9. 타입 힌트
-
-```python
-# 모든 public 함수에 타입 힌트 필수
-async def get_balance(self, bot_id: str) -> float:
-    ...
-
-# 컬렉션은 구체적 타입 사용 (실제: src/ante/eventbus/bus.py::get_handlers)
-def get_handlers(self, event_type: type[Event]) -> list[tuple[int, EventHandler]]:
-    ...
-
-# Optional은 명시적으로
-def find_bot(self, bot_id: str) -> Bot | None:
-    ...
-
-# 콜백 타입
-EventHandler = Callable[[Event], Awaitable[None]]
-```
-
-## 10. 금액 처리
+## 9. 금액 처리
 
 ```python
 # float 사용 (스펙 문서 기준)
@@ -224,7 +204,7 @@ total = price * quantity
 - DB 저장 시 `REAL` 타입 사용
 - 국내주식 외 다양한 상품 확장성을 위해 float 채택
 
-## 11. DDL 컨벤션 (db-schema.md SSOT)
+## 10. DDL 컨벤션 (db-schema.md SSOT)
 
 모든 모듈의 테이블 정의는 모듈 레벨 `*_SCHEMA` 문자열 상수로 관리한다. 이 상수가 `docs/architecture/generated/db-schema.md` 자동 생성의 원본(SSOT)이다.
 
@@ -257,7 +237,7 @@ CREATE INDEX IF NOT EXISTS idx_{테이블명}_name
 
 보존 정책이 있는 테이블은 `scripts/generate_db_schema.py`의 `RETENTION_POLICIES`에 테이블명과 정책 문자열(예: `"30일 후 삭제"`)로 등록한다. 생성기가 이를 `db-schema.md`의 보존 정책 표로 내며, 등록하지 않은 테이블은 `영구 보존`으로 표기된다.
 
-## 12. CLI/IPC 응답 규칙
+## 11. CLI/IPC 응답 규칙
 
 새 CLI/IPC 표면은 사람이 읽는 text 출력과 agent가 읽는 JSON 출력을 모두
 고려한다.
