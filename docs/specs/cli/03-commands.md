@@ -94,7 +94,7 @@ allowlist 후보에서 제거한다.
 | `ante bot positions <bot_id>` | `runtime IPC + snapshot fallback` | live 포지션 조회 우선 |
 | `ante bot signal-key <bot_id>` | `runtime IPC + snapshot fallback` | live signal key 상태 조회 우선 |
 | `ante bot create --name <name> --strategy <strategy_id> ...` | `runtime IPC` | 서버 BotManager 생성 |
-| `ante bot start <bot_id>` | `runtime IPC` | `BotManager.start_bot()` 실행 task 생성. `app_key` 사전 검증 + audit `bot.start` |
+| `ante bot start <bot_id>` | `runtime IPC` | `BotManager.start_bot()` 실행 task 생성. 계좌 프리셋의 필수 인증정보 사전 검증 + audit `bot.start` |
 | `ante bot stop <bot_id>` | `runtime IPC` | `BotManager.stop_bot()` 실행 task 중지. audit `bot.stop` |
 | `ante bot update <bot_id> ...` | `runtime IPC` | 중지 상태 봇 설정 수정 |
 | `ante bot remove <bot_id> --yes` | `runtime IPC + cold-path fallback` | 실행 중이면 서버 BotManager 정리, 정지 중이면 persisted bot cleanup |
@@ -361,7 +361,7 @@ fallback이 없다 — 서버가 정지된 상태에서는 `BotManager`가 부�
 
 - `ante bot start <bot_id>`: live
   `BotManager.get_bot(bot_id)`로 존재 확인 후, `account_service.get(bot.config.account_id)`로
-  `app_key` 사전 검증. `BotManager.start_bot()` 호출 후 audit action `bot.start`를 기록한다.
+  계좌 프리셋의 필수 인증정보 사전 검증. `BotManager.start_bot()` 호출 후 audit action `bot.start`를 기록한다.
   성공 응답 payload는 `{"bot": bot.get_info()}`다(IPC `result`에서는 최상위,
   CLI `--format json`에서는 `data.bot`). cold-path fallback은 없다.
 - `ante bot stop <bot_id>`: live
@@ -377,7 +377,7 @@ fallback이 없다 — 서버가 정지된 상태에서는 `BotManager`가 부�
 
 세 명령 모두 `BotManager.get_bot()`이 `None`을 반환하면
 stable error code `BOT_NOT_FOUND` (SSOT: `src/ante/bot/exceptions.py:BOT_NOT_FOUND_CODE`)
-로 실패한다. `start`에서 `app_key` 누락은 stable error code
+로 실패한다. `start`에서 계좌 프리셋의 필수 인증정보 누락은 stable error code
 `BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`로 실패한다. `start`/`stop`에서 `BotError`는
 stable error code `BOT_STATE_CONFLICT`로 매핑한다. JSON 모드는
 IPC error envelope에서 받은 `code`/`message`를 그대로 보존한다.

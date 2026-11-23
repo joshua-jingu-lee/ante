@@ -29,9 +29,9 @@ class BotNotFoundError(BotError):
 
 
 class BotAccountCredentialsNotConfigured(BotError):  # noqa: N818
-    """봇 시작 시 account 의 ``app_key`` 가 부재.
+    """봇 시작 시 account 프리셋의 필수 인증정보가 부재.
 
-    봇 시작 전 ``app_key`` preflight 거부 (``계좌에 인증정보(app_key)가
+    봇 시작 전 필수 인증정보 preflight 거부 (``계좌에 인증정보(<key>)가
     설정되지 않았습니다``) 를 표현하는 IPC 오류. IPC ``server.py`` 의
     ``ipc_error_payload`` 가 ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED``
     envelope 으로 변환한다.

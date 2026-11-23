@@ -190,7 +190,9 @@ async def test_ipc_bot_lifecycle_state_conflict_maps_to_bot_state_conflict(
         side_effect=BotStateConflict("실행 중이 아닌 봇입니다")
     )
     service_registry.account.get = AsyncMock(
-        return_value=SimpleNamespace(credentials={"app_key": "k"})
+        return_value=SimpleNamespace(
+            broker_type="test", credentials={"app_key": "k", "app_secret": "s"}
+        )
     )
     cmd_registry = CommandRegistry()
     register_all_handlers(cmd_registry)

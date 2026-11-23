@@ -77,7 +77,10 @@ class _Harness:
         self.bot_manager = manager
         account = MagicMock()
         account.get = AsyncMock(
-            return_value=SimpleNamespace(credentials={"app_key": "ak"})
+            return_value=SimpleNamespace(
+                broker_type="test",
+                credentials={"app_key": "ak", "app_secret": "as"},
+            )
         )
         self.account = account
         strategy_registry = MagicMock()
