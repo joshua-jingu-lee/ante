@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time
@@ -41,8 +40,6 @@ if TYPE_CHECKING:
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
-logger = logging.getLogger(__name__)
-
 
 @click.group()
 def bot() -> None:
@@ -76,18 +73,6 @@ async def _create_services(
         manager = BotManager(eventbus=eventbus, db=db)
         await manager.initialize()
         yield db, eventbus, manager, account_service
-
-
-async def _audit_log(db: Database, **kwargs: Any) -> None:
-    """감사 로그 기록 (실패해도 주 동작에 영향 없음)."""
-    try:
-        from ante.audit import AuditLogger
-
-        al = AuditLogger(db=db)
-        await al.initialize()
-        await al.log(**kwargs)
-    except Exception as e:
-        logger.warning("감사 로그 기록 실패: %s", e)
 
 
 async def _run_bot_remove_cold_path(

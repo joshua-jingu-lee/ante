@@ -336,6 +336,8 @@ class StopOrderManager:
 
     async def _trigger_order(self, order: StopOrder, trigger_price: float) -> None:
         """스탑 주문 트리거 → 시장가/지정가 주문으로 변환."""
+        if order.triggered or order.expired:
+            return
         order.triggered = True
 
         converted_type = "limit" if order.order_type == "stop_limit" else "market"
@@ -395,6 +397,8 @@ class StopOrderManager:
 
     async def _do_expire_order(self, order: StopOrder, reason: str) -> None:
         """스탑 주문 만료 terminal 발행(shield 된 inner)."""
+        if order.triggered or order.expired:
+            return
         order.expired = True
 
         logger.info(
