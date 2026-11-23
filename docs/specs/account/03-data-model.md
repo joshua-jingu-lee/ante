@@ -21,44 +21,22 @@
 
 ### Account
 
-```python
-@dataclass
-class Account:
-    # --- 식별 ---
-    account_id: str                    # 영문+숫자+하이픈, 3–30자
-    name: str                          # 표시 이름
-
-    # --- 시장 ---
-    exchange: str                      # "KRX", "NYSE", "NASDAQ", "TEST"
-    currency: str                      # "KRW", "USD"
-    timezone: str                      # "Asia/Seoul", "America/New_York"
-    trading_hours_start: str           # "09:00" (현지 시간, HH:MM)
-    trading_hours_end: str             # "15:30" (현지 시간, HH:MM)
-
-    # --- 거래 모드 ---
-    trading_mode: TradingMode          # VIRTUAL / LIVE
-
-    # --- 브로커 ---
-    broker_type: str                   # "kis-domestic", "test" (kis-overseas는 1.1)
-    credentials: dict[str, str] = field(default_factory=dict)  # 인증 정보 (암호화 저장)
-    broker_config: dict[str, Any] = field(default_factory=dict) # 브로커 동작 설정
-
-    # --- 비용 ---
-    buy_commission_rate: Decimal = Decimal("0")    # 매수 수수료율
-    sell_commission_rate: Decimal = Decimal("0")   # 매도 수수료율 (세금 포함)
-    # 시장가 매수 reserve buffer 비율 (Account-level Treasury reserve policy, #1333).
-    # quote 만으로 reserve 하면 가격 변동을 흡수하지 못하므로
-    # ``reserve_basis = quantity * quote * (1 + market_order_reserve_buffer_rate)``
-    # 식으로 보수적으로 잠근다.
-    market_order_reserve_buffer_rate: Decimal = Decimal("0")
-
-    # --- 상태 ---
-    status: AccountStatus = AccountStatus.ACTIVE
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-```
-
 소스: `src/ante/account/models.py`
+
+- `account_id`: 영문+숫자+하이픈, 3–30자
+- `name`: 표시 이름
+- `exchange`: "KRX", "NYSE", "NASDAQ", "TEST"
+- `currency`: "KRW", "USD"
+- `timezone`: "Asia/Seoul", "America/New_York"
+- `trading_hours_start`: "09:00" (현지 시간, HH:MM)
+- `trading_hours_end`: "15:30" (현지 시간, HH:MM)
+- `trading_mode`: VIRTUAL / LIVE
+- `broker_type`: "kis-domestic", "test" (kis-overseas는 1.1)
+- `credentials`: 인증 정보 (암호화 저장)
+- `broker_config`: 브로커 동작 설정
+- `buy_commission_rate`: 매수 수수료율
+- `sell_commission_rate`: 매도 수수료율 (세금 포함)
+- `market_order_reserve_buffer_rate`: 시장가 매수 reserve buffer 비율 (Account-level Treasury reserve policy, #1333). quote 만으로 reserve 하면 가격 변동을 흡수하지 못하므로 ``reserve_basis = quantity * quote * (1 + market_order_reserve_buffer_rate)`` 식으로 보수적으로 잠근다.
 
 ### 필드 설명
 
@@ -115,24 +93,9 @@ class Account:
 
 브로커별 프리셋을 내부에 정의하여, 계좌 생성 시 거래소·브로커 선택만으로 나머지 필드를 자동 채운다. 사용자가 명시적으로 지정하지 않은 필드는 프리셋 기본값이 적용된다.
 
-```python
-@dataclass
-class BrokerPreset:
-    exchange: str
-    currency: str
-    timezone: str
-    trading_hours_start: str
-    trading_hours_end: str
-    buy_commission_rate: Decimal
-    sell_commission_rate: Decimal
-    # #1333: Account 의 ``market_order_reserve_buffer_rate`` 초기값.
-    market_order_reserve_buffer_rate: Decimal
-    default_account_id: str
-    default_name: str
-    required_credentials: list[str]
-```
-
 소스: `src/ante/account/models.py`
+
+- `market_order_reserve_buffer_rate`: #1333: Account 의 ``market_order_reserve_buffer_rate`` 초기값.
 
 ### BROKER_PRESETS
 
@@ -158,14 +121,9 @@ class BrokerPreset:
 
 ### BROKER_REGISTRY
 
-```python
-_BROKER_REGISTRY: dict[str, type[BrokerAdapter]] = {
-    "test": TestBrokerAdapter,
-    "kis-domestic": KISDomesticAdapter,
-    "mock": MockBrokerAdapter,
-    # "kis-overseas": KISOverseasAdapter,  ← 1.1 에서 등록
-}
-```
+정의: `ante.account.service._BROKER_REGISTRY` (코드가 정본이다).
+
+- `_BROKER_REGISTRY`: "kis-overseas": KISOverseasAdapter,  ← 1.1 에서 등록
 
 `BROKER_PRESETS`, 이 `_BROKER_REGISTRY`, CLI의 `--broker-type` 검증에 쓰는
 `ante.broker.registry.BROKER_REGISTRY`([broker-adapter/05-broker-registry.md](../broker-adapter/05-broker-registry.md))
