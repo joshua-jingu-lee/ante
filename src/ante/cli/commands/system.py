@@ -217,7 +217,7 @@ def clear_halt(ctx: click.Context, reason: str) -> CommandResult:
 
     actor = get_member_id(ctx)
 
-    data = _run(ipc_send("system.clear_halt", {}, actor=actor))
+    data = _run(ipc_send("system.clear_halt", {"reason": reason}, actor=actor))
     count = data.get("accounts_changed", 0)
     return CommandResult(
         data=data,

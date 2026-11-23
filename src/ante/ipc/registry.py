@@ -176,7 +176,7 @@ async def _handle_system_clear_halt(
     payload = _kill_switch_payload("halt_cleared", accounts)
     payload["_audit_detail"] = {
         "resource": "system:kill_switch",
-        "detail": "",
+        "detail": f"reason={request.reason}",
         "ip": "",
     }
     return payload
