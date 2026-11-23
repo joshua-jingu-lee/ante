@@ -10,9 +10,7 @@
 
 ### 생성자
 
-```python
-RuleEngineManager(eventbus: EventBus, account_service: AccountService)
-```
+정의: `ante.rule.manager.RuleEngineManager` (코드가 정본이다).
 
 ### 퍼블릭 메서드
 

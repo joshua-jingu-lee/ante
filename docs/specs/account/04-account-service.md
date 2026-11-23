@@ -6,9 +6,7 @@
 
 ### 생성자
 
-```python
-AccountService(db: Database, eventbus: EventBus)
-```
+정의: `ante.account.service.AccountService` (코드가 정본이다).
 
 ### 퍼블릭 메서드
 
@@ -93,17 +91,13 @@ CLI cold-path 명령(`ante account create/delete/set-credentials`)은 `_assert_n
 
 ### 에러 클래스
 
-```python
-class AccountError(Exception): ...
-class AccountNotFoundError(AccountError): ...
-class AccountAlreadyExistsError(AccountError): ...
-class InvalidBrokerTypeError(AccountError): ...
-class AccountDeletedException(AccountError): ...  # DELETED 계좌 수정/활성화 시도 시
-class AccountImmutableFieldError(AccountError): ...  # 불변 필드 수정 시도 시 (exchange, currency, trading_mode, broker_type)
-class AccountAlreadySuspendedError(AccountError): ...  # 이미 정지된 계좌 재정지 시도 시 (409)
-class AccountStructuralChangeRequiresStoppedServerError(AccountError): ...  # 런타임 구조 변경 차단
-class AccountHasActiveBotsError(AccountError): ...  # delete() 시 활성(non-deleted) 봇 잔존 시 (orphan bot 무결성)
-```
-
 소스: `src/ante/account/errors.py`. `AccountError`는 `src/ante/core/account_id.py`에
 정의되고 `ante.account.errors`가 재수출한다.
+
+에러 코드: [`error-codes.md`](../../architecture/generated/error-codes.md)
+
+- `AccountDeletedException`: DELETED 계좌 수정/활성화 시도 시
+- `AccountImmutableFieldError`: 불변 필드 수정 시도 시 (exchange, currency, trading_mode, broker_type)
+- `AccountAlreadySuspendedError`: 이미 정지된 계좌 재정지 시도 시 (409)
+- `AccountStructuralChangeRequiresStoppedServerError`: 런타임 구조 변경 차단
+- `AccountHasActiveBotsError`: delete() 시 활성(non-deleted) 봇 잔존 시 (orphan bot 무결성)

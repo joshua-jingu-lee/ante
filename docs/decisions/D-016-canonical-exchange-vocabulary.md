@@ -33,7 +33,7 @@ canonical-known vs 1.0 account-supported 구분, exchange vs market/source/broke
     (`docs/specs/instrument/instrument.md:32-34`).
   - Strategy: `{KRX, NYSE, NASDAQ, AMEX, TEST, *}`
     (`src/ante/strategy/validator.py:9` `VALID_EXCHANGES`).
-  - Account: `{KRX, NYSE, NASDAQ, TEST}` (`docs/specs/account/03-data-model.md:34`),
+  - Account: `{KRX, NYSE, NASDAQ, TEST}` (`docs/specs/account/03-data-model.md`의 「필드 설명」 표 `exchange` 행),
     1.0 preset은 `KRX`,`TEST`만 (`docs/specs/account/03-data-model.md`의
     `BROKER_PRESETS` `test`/`kis-domestic` 항목).
   - DataStore: `{KRX, NYSE, NASDAQ, AMEX, TEST}`를 path migration 판별에 사용

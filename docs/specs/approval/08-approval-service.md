@@ -55,17 +55,7 @@ source_path=...)`를 호출한다. `strategy_cls`는 JSON params에 저장하지
 
 `expire_stale()`은 **주기적 스케줄러**로 호출한다. `main.py`의 `asyncio` 이벤트 루프에서 5분 간격 태스크로 등록한다.
 
-```python
-# main.py 초기화 시
-async def _expire_loop(approval_service: ApprovalService, interval: float = 300.0):
-    while True:
-        await asyncio.sleep(interval)
-        expired = await approval_service.expire_stale()
-        if expired:
-            logger.info("결재 만료 처리: %d건", expired)
-
-asyncio.create_task(_expire_loop(approval_service))
-```
+정의: `ante.main._approval_expire_loop` (코드가 정본이다).
 
 만료 처리 시 건별로 `ApprovalResolvedEvent(status=expired)`가 발행되어 사용자에게 알림이 전달된다.
 

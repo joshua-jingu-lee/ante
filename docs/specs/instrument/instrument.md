@@ -40,18 +40,18 @@ Instrument 모듈은 **종목 마스터 데이터를 중앙 관리하는 모듈*
 
 ## Instrument 모델
 
-```python
-@dataclass(frozen=True)
-class Instrument:
-    symbol: str           # 종목코드 (예: "005930")
-    exchange: str         # 거래소 (예: "KRX")
-    name: str = ""        # 한글명 (예: "삼성전자")
-    name_en: str = ""     # 영문명 (예: "Samsung Electronics")
-    instrument_type: str = ""  # 유형 (예: "stock", "etf", "etn")
-    logo_url: str = ""    # 로고 이미지 URL
-    listed: bool = True   # 상장 여부
-    updated_at: str = ""  # 마지막 갱신 시각 (datetime string)
-```
+정의: `ante.instrument.models.Instrument` (코드가 정본이다).
+
+- `symbol`: 종목코드 (예: "005930")
+- `exchange`: 거래소 (예: "KRX")
+- `name`: 한글명 (예: "삼성전자")
+- `name_en`: 영문명 (예: "Samsung Electronics")
+- `instrument_type`: 유형 (예: "stock", "etf", "etn")
+- `logo_url`: 로고 이미지 URL
+- `listed`: 상장 여부
+- `updated_at`: 마지막 갱신 시각 (datetime string)
+
+`symbol`·`exchange`는 기본값이 없다(필수). `listed`의 기본값은 `True`, 나머지 필드의 기본값은 `""`이다.
 
 ## DB 스키마
 

@@ -6,17 +6,9 @@
 
 ### 생성자
 
-```python
-Treasury(
-    db: Database,
-    eventbus: EventBus,
-    account_id: str,
-    currency: str = "KRW",
-    buy_commission_rate: float = 0.00015,
-    sell_commission_rate: float = 0.00195,
-    bot_status_checker: Callable[[str], str] | None = None,
-)
-```
+정의: `ante.treasury.treasury.Treasury` (코드가 정본이다).
+
+기본값: `currency` = `"KRW"`, `buy_commission_rate` = `0.00015`, `sell_commission_rate` = `0.00195`.
 
 - `account_id`: 이 Treasury가 관리하는 계좌의 ID. 이벤트 필터링 및 DB 데이터 격리에 사용된다.
 - `currency`: 계좌의 통화 단위. Account에서 주입된다.

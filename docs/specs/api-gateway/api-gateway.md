@@ -125,10 +125,7 @@ TTL 기반 응답 캐시. 동일 시세 조회 등 중복 API 호출을 방지�
 
 **브로커 라우팅**:
 
-```python
-def _get_broker(self, account_id: str) -> BrokerAdapter:
-    return self._account_service.get_broker(account_id)
-```
+정의: `ante.gateway.gateway.APIGateway._get_broker` (코드가 정본이다).
 
 **공개 메서드**:
 
@@ -314,10 +311,7 @@ KRX는 네이티브 스탑 주문을 지원하지 않으므로, 실시간 시세
 
 KISStreamClient로부터 수신된 실시간 시세를 ResponseCache에 반영한다. 캐시 키는 `account_id` 기반 네임스페이스를 사용한다.
 
-```python
-# 기존: cache_key = f"price:KRX:{symbol}" (하드코딩)
-# 변경: cache_key = f"{account_id}:price:{symbol}" (account_id 기반)
-```
+캐시 키 형식은 `{account_id}:price:{symbol}`이다(이전에는 `price:KRX:{symbol}`로 하드코딩했다).
 
 ## 타 모듈 설계 시 참고
 

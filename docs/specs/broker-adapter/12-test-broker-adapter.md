@@ -10,12 +10,9 @@ KIS 실전 API 없이 시스템 전체 흐름을 검증할 수 있는 테스트 
 
 `exchange`, `currency`는 config에서 수신하며, 다양한 시장 환경을 시뮬레이션할 수 있다.
 
-```python
-class TestBrokerAdapter(BrokerAdapter):
-    broker_id = "test"
-    broker_name = "테스트 브로커"
-    broker_short_name = "TEST"
-```
+정의: `ante.broker.test.TestBrokerAdapter` (코드가 정본이다).
+
+식별 값: `broker_id` = `"test"`, `broker_name` = `"테스트 브로커"`, `broker_short_name` = `"TEST"`.
 
 ### MockBrokerAdapter와의 차이
 

@@ -18,9 +18,7 @@ Audit 모듈은 **멤버(사용자/에이전트) 액션의 감사 로그를 기�
 
 ### 생성자
 
-```python
-AuditLogger(db: Database)
-```
+정의: `ante.audit.logger.AuditLogger` (코드가 정본이다).
 
 ### 퍼블릭 메서드
 
@@ -178,15 +176,6 @@ retention_days = 90    # 기본 90일. 0이면 무기한 보존
 
 `AuditLogger.cleanup(retention_days)` 메서드를 추가하고, `main.py`에서 하루 1회 주기적 태스크로 실행한다.
 
-```python
-# main.py
-async def _audit_cleanup_loop(audit_logger: AuditLogger, retention_days: int = 90):
-    while True:
-        await asyncio.sleep(86400)  # 24시간
-        if retention_days > 0:
-            deleted = await audit_logger.cleanup(retention_days)
-            if deleted:
-                logger.info("감사 로그 정리: %d건 삭제 (보존 %d일)", deleted, retention_days)
-```
+정의: `ante.main._audit_cleanup_loop` (코드가 정본이다).
 
 중요 이벤트(킬 스위치, 결재 등)는 감사 로그와 별개로 각 도메인의 소유 저장소에도 남을 수 있다. 결재 상태 전이는 Approval history가 추적하고, 알림 발송 이력은 별도 `notification_history` 테이블을 두지 않고 텔레그램 채팅방 자체를 운영 이력으로 본다.

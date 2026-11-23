@@ -8,14 +8,11 @@
 
 `broker_type` 문자열을 어댑터 클래스로 매핑하는 딕셔너리.
 
-```python
-BROKER_REGISTRY: dict[str, type[BrokerAdapter]] = {
-    "test": TestBrokerAdapter,
-    "kis-domestic": KISDomesticAdapter,
-    "mock": MockBrokerAdapter,
-    # "kis-overseas"는 1.1에서 등록. 현재 미등록.
-}
-```
+정의: `ante.broker.registry.BROKER_REGISTRY` (코드가 정본이다).
+
+- `BROKER_REGISTRY`: "kis-overseas"는 1.1에서 등록. 현재 미등록.
+
+키와 값: `test` → `TestBrokerAdapter`, `kis-domestic` → `KISDomesticAdapter`, `mock` → `MockBrokerAdapter`.
 
 미등록 `broker_type` 요청 시 `InvalidBrokerTypeError`를 발생시킨다.
 

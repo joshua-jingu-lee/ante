@@ -22,17 +22,12 @@
 
 `_run_loop()`의 매 실행 사이클(on_step) 완료 시 발행한다. EventHistoryStore가 `event_log` 테이블에 자동 영속화하므로, 봇 실행 로그의 데이터 소스로 활용된다.
 
-```python
-@dataclass(frozen=True)
-class BotStepCompletedEvent(Event):
-    """Bot → EventBus: on_step() 1회 실행 완료."""
-    account_id: str = ""
-    bot_id: str = ""
-    result: str = ""          # "success" | "timeout" | "signal_overflow" | "error"
-    message: str = ""         # 실행 내역 설명
-    signal_count: int = 0     # 발생한 시그널 수
-    duration_ms: int = 0      # on_step() 실행 시간 (밀리초)
-```
+정의: `ante.eventbus.events.BotStepCompletedEvent` (코드가 정본이다).
+
+- `result`: "success" | "timeout" | "signal_overflow" | "error"
+- `message`: 실행 내역 설명
+- `signal_count`: 발생한 시그널 수
+- `duration_ms`: on_step() 실행 시간 (밀리초)
 
 **발행 시나리오**:
 
