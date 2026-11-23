@@ -76,7 +76,8 @@ def _resolve_secret_non_interactive(
         value = os.environ.get(env_name)
         if value is None or value.strip() == "":
             raise MemberPasswordEnvNotSetError(
-                f"환경변수 {env_name}이(가) 설정되어 있지 않거나 공란입니다."
+                f"{env_option_label}가 가리키는 환경변수가 "
+                "설정되어 있지 않거나 공란입니다."
                 f" {env_option_label}는 비밀값이 든 환경변수의 *이름*만 받습니다."
             )
         return value.strip()
@@ -87,12 +88,12 @@ def _resolve_secret_non_interactive(
         raw = path.read_text(encoding="utf-8")
     except OSError as e:
         raise MemberPasswordFileNotFoundError(
-            f"{file_option_label} 파일을 읽을 수 없습니다: {file_path} ({e})"
+            f"{file_option_label} 파일을 읽을 수 없습니다."
         ) from e
     value = raw.strip()
     if value == "":
         raise MemberPasswordFileNotFoundError(
-            f"{file_option_label} 파일이 비어 있습니다: {file_path}"
+            f"{file_option_label} 파일이 비어 있습니다."
         )
     return value
 
@@ -358,6 +359,13 @@ def member_list_invalid_roles(
     )
 
 
+def _parse_scope_csv(scopes: str) -> list[str]:
+    """정확히 빈 문자열만 빈 목록으로, 그 밖의 빈 조각은 ``""`` 원소로 남긴다."""
+    if scopes == "":
+        return []
+    return [s.strip() for s in scopes.split(",")]
+
+
 @member.command("register")
 @click.option("--id", "member_id", required=True, help="멤버 ID")
 @click.option(
@@ -384,7 +392,7 @@ def member_register(
 ) -> CommandResult:
     """멤버 등록 (토큰 발급)."""
     actor = get_member_id(ctx)
-    scope_list = [s.strip() for s in scopes.split(",") if s.strip()] if scopes else []
+    scope_list = _parse_scope_csv(scopes)
 
     async def _run_register() -> tuple[dict[str, Any], str]:
         from ante.cli.cold_path import is_active_runtime
@@ -495,7 +503,7 @@ def member_update_scopes(
 ) -> CommandResult:
     """멤버 권한 범위 변경."""
     actor = get_member_id(ctx)
-    scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
+    scope_list = _parse_scope_csv(scopes)
 
     async def _run_update_scopes() -> dict[str, Any]:
         from ante.cli.cold_path import is_active_runtime

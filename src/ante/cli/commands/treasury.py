@@ -7,8 +7,8 @@ import logging
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import UTC, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from datetime import UTC, date, timedelta, timezone
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -38,6 +38,13 @@ if TYPE_CHECKING:
     from ante.treasury.treasury import Treasury
 
 logger = logging.getLogger(__name__)
+
+_KST = timezone(timedelta(hours=9))
+
+
+def _today_kst() -> date:
+    """스냅샷 키와 같은 기준(KST)의 오늘 날짜."""
+    return clock.now(_KST).date()
 
 
 @click.group()
@@ -428,8 +435,6 @@ def snapshot(
     account_id: str,
 ) -> CommandResult:
     """일별 자산 스냅샷 조회."""
-    from datetime import UTC
-
     fmt = get_formatter(ctx)
 
     reject_invalid_account_id(account_id, fmt, context="cli.treasury")
@@ -452,18 +457,17 @@ def snapshot(
             if date_str:
                 return await t.get_daily_snapshot(date_str)
             if from_date or to_date:
-                today = clock.now(UTC).strftime("%Y-%m-%d")
                 start = from_date or "2000-01-01"
-                end = to_date or today
+                end = to_date or _today_kst().isoformat()
                 return await t.get_snapshots(start, end)
-            today = clock.now(UTC).strftime("%Y-%m-%d")
-            return await t.get_daily_snapshot(today)
+            return await t.get_latest_snapshot()
 
     result = _run(_run_snapshot())
 
     if result is None:
-        target = date_str or clock.now(UTC).strftime("%Y-%m-%d")
-        raise SnapshotNotFoundError(f"{target} 날짜의 스냅샷이 없습니다.")
+        if date_str:
+            raise SnapshotNotFoundError(f"{date_str} 날짜의 스냅샷이 없습니다.")
+        raise SnapshotNotFoundError("저장된 스냅샷이 없습니다.")
 
     if isinstance(result, list):
         return CommandResult(data=result, text=tuple(_snapshot_list_lines(result)))
@@ -473,32 +477,6 @@ def snapshot(
 @treasury.group("portfolio")
 def portfolio() -> None:
     """포트폴리오 가치와 추이 조회."""
-
-
-def _portfolio_value_from_snapshot_or_summary(treasury_obj: Treasury) -> dict[str, Any]:
-    async def _inner() -> dict[str, Any]:
-        snapshot = await treasury_obj.get_latest_snapshot()
-        if snapshot is not None:
-            return {
-                "account_id": treasury_obj.account_id,
-                "total_value": snapshot["total_asset"],
-                "daily_pnl": snapshot["daily_pnl"],
-                "daily_return": snapshot["daily_return"],
-                "unrealized_pnl": snapshot["unrealized_pnl"],
-                "snapshot_date": snapshot["snapshot_date"],
-                "updated_at": snapshot["created_at"],
-            }
-        summary = treasury_obj.get_summary()
-        return {
-            "account_id": treasury_obj.account_id,
-            "total_value": summary.get("total_evaluation", 0.0),
-            "daily_pnl": 0.0,
-            "daily_return": 0.0,
-            "unrealized_pnl": 0.0,
-            "updated_at": clock.now(UTC).isoformat(),
-        }
-
-    return cast("dict[str, Any]", _run(_inner()))
 
 
 @portfolio.command("value")
@@ -598,8 +576,9 @@ def portfolio_history(
         )
     reject_inverted_date_range(from_date, to_date, fmt)
 
-    end_date = to_date or clock.now(UTC).strftime("%Y-%m-%d")
-    start_date = from_date or (clock.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d")
+    today = _today_kst()
+    end_date = to_date or today.isoformat()
+    start_date = from_date or (today - timedelta(days=30)).isoformat()
 
     async def _run_history() -> dict[str, Any]:
         async def _collect_history(treasuries: list[Treasury]) -> dict[str, Any]:
