@@ -7,10 +7,10 @@
 
 본 파일은 in-process mock 을 **IPC-layer mock** 으로 마이그레이트한다:
 ``asyncio.open_unix_connection`` 을 fake reader/writer 로 교체하고, 데몬 Phase-B
-응답 프레임을 직접 주입해 #1705 의 11 관측 출력(4 validation JSON + 4 text-no-
-``Error:`` prefix + 2 informational + auth_required)을 **byte-identical** 로
-회귀 lock 한다. 추가로 신규 transport terminal(IPC_SERVER_NOT_RUNNING /
-IPC_TIMEOUT)을 JSON/text 양 모드에서 lock 한다.
+응답 프레임을 직접 주입해 #1705 의 11 관측 출력(4 validation JSON + 4 text
+``Error: <code>:`` 접두(#2762) + 2 informational + auth_required)을
+**byte-identical** 로 회귀 lock 한다. 추가로 신규 transport terminal
+(IPC_SERVER_NOT_RUNNING / IPC_TIMEOUT)을 JSON/text 양 모드에서 lock 한다.
 
 ``runner`` 인증 fixture 는 #1701 ``test_cli_format_option.py`` 패턴을 미러해
 ``ante.cli.main.authenticate_member`` 를 monkeypatch 한다.
@@ -303,15 +303,13 @@ class TestSignalConnectJsonEnvelope1705:
 
 
 # ──────────────────────────────────────────────────────────────
-# B. 4 validation × text mode (default — no Error: prefix)
+# B. 4 validation × text mode (default — Error: <code>: 접두, #2762)
 # ──────────────────────────────────────────────────────────────
 
 
 class TestSignalConnectTextMode1705:
-    """default text 모드: stderr raw text + stdout empty + exit 1.
-
-    ``Error: `` prefix 가 붙지 않아야 하며, ``_err()`` raw stderr + ``\\n``
-    동작을 회귀 lock 한다.
+    """default text 모드: stderr ``Error: <code>: <message>`` 한 줄 + stdout empty
+    + exit 1 (#2762 — 진입점 훅의 text 오류 줄).
     """
 
     def test_invalid_key_text(self, runner: CliRunner) -> None:
@@ -321,7 +319,7 @@ class TestSignalConnectTextMode1705:
             result = runner.invoke(cli, ["signal", "connect", "--key", "sk_invalid"])
 
         assert result.exit_code == 1, (result.stdout, result.stderr)
-        assert result.stderr == "Invalid signal key\n"
+        assert result.stderr == "Error: INVALID_SIGNAL_KEY: Invalid signal key\n"
         assert result.stdout == ""
 
     def test_bot_not_found_text(self, runner: CliRunner) -> None:
@@ -333,7 +331,7 @@ class TestSignalConnectTextMode1705:
             result = runner.invoke(cli, ["signal", "connect", "--key", "sk_ok"])
 
         assert result.exit_code == 1, (result.stdout, result.stderr)
-        assert result.stderr == "Bot not found: bot-missing\n"
+        assert result.stderr == "Error: BOT_NOT_FOUND: Bot not found: bot-missing\n"
         assert result.stdout == ""
 
     def test_bot_not_running_text(self, runner: CliRunner) -> None:
@@ -348,7 +346,9 @@ class TestSignalConnectTextMode1705:
             result = runner.invoke(cli, ["signal", "connect", "--key", "sk_ok"])
 
         assert result.exit_code == 1, (result.stdout, result.stderr)
-        assert result.stderr == "Bot is not running: bot-1705 (status: stopped)\n"
+        assert result.stderr == (
+            "Error: BOT_NOT_RUNNING: Bot is not running: bot-1705 (status: stopped)\n"
+        )
         assert result.stdout == ""
 
     def test_bot_not_accepting_signals_text(self, runner: CliRunner) -> None:
@@ -363,7 +363,10 @@ class TestSignalConnectTextMode1705:
             result = runner.invoke(cli, ["signal", "connect", "--key", "sk_ok"])
 
         assert result.exit_code == 1, (result.stdout, result.stderr)
-        assert result.stderr == "Bot bot-1705 does not accept external signals\n"
+        assert result.stderr == (
+            "Error: BOT_NOT_ACCEPTING_SIGNALS: "
+            "Bot bot-1705 does not accept external signals\n"
+        )
         assert result.stdout == ""
 
 
@@ -499,6 +502,7 @@ class TestSignalConnectAuthFail1705:
 
 
 _SERVER_DOWN_MSG = "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."
+_SERVER_DOWN_LINE = f"Error: IPC_SERVER_NOT_RUNNING: {_SERVER_DOWN_MSG}\n"
 
 
 class TestSignalConnectIpcTerminals:
@@ -533,7 +537,7 @@ class TestSignalConnectIpcTerminals:
             result = runner.invoke(cli, ["signal", "connect", "--key", "sk_ok"])
 
         assert result.exit_code == 1, (result.stdout, result.stderr)
-        assert result.stderr == _SERVER_DOWN_MSG + "\n"
+        assert result.stderr == _SERVER_DOWN_LINE
         assert result.stdout == ""
 
     def test_server_not_running_file_not_found_json(self, runner: CliRunner) -> None:
@@ -589,7 +593,26 @@ class TestSignalConnectIpcTerminals:
                 result = runner.invoke(cli, ["signal", "connect", "--key", "sk_ok"])
 
         assert result.exit_code == 1, (result.stdout, result.stderr)
-        assert result.stderr == "서버 응답 시간 초과\n"
+        assert result.stderr == "Error: IPC_TIMEOUT: 서버 응답 시간 초과\n"
+        assert result.stdout == ""
+
+    def test_server_missing_socket_precheck_text(self, runner: CliRunner) -> None:
+        with (
+            patch(_PATH_EXISTS_TARGET, return_value=False),
+            patch(_SOCKET_TARGET, return_value="/tmp/test-ante.sock"),
+        ):
+            result = runner.invoke(cli, ["signal", "connect", "--key", "sk_ok"])
+
+        assert result.exit_code == 1, (result.stdout, result.stderr)
+        assert result.stderr == _SERVER_DOWN_LINE
+        assert result.stdout == ""
+
+    def test_handshake_incomplete_read_text(self, runner: CliRunner) -> None:
+        with _patch_ipc(response_frames=[]):
+            result = runner.invoke(cli, ["signal", "connect", "--key", "sk_ok"])
+
+        assert result.exit_code == 1, (result.stdout, result.stderr)
+        assert result.stderr == _SERVER_DOWN_LINE
         assert result.stdout == ""
 
 
@@ -788,3 +811,70 @@ def test_handshake_frame_args_pass_the_request_model(runner: CliRunner) -> None:
     request = spec.request_model.model_validate(frame["args"])
     assert request.model_dump(mode="json") == {"key": "**********"}
     assert request.model_dump()["key"].get_secret_value() == "sig-key-1"
+
+
+# ──────────────────────────────────────────────────────────────
+# G. 연결 실패 다섯 자리의 JSON stdout 바이트 (#2762)
+# ──────────────────────────────────────────────────────────────
+
+
+def _json_line(code: str, message: str) -> str:
+    return (
+        '{"status": "error", "code": "'
+        + code
+        + '", "message": '
+        + json.dumps(message)
+        + "}\n"
+    )
+
+
+@contextmanager
+def _missing_socket() -> Iterator[None]:
+    with (
+        patch(_PATH_EXISTS_TARGET, return_value=False),
+        patch(_SOCKET_TARGET, return_value="/tmp/test-ante.sock"),
+    ):
+        yield
+
+
+@contextmanager
+def _timeout_ipc() -> Iterator[None]:
+    with _patch_ipc(handshake_timeout=True):
+        with patch("asyncio.wait_for", side_effect=_immediate_timeout):
+            yield
+
+
+_FIVE_SITES = {
+    "missing_socket": (_missing_socket, "IPC_SERVER_NOT_RUNNING", _SERVER_DOWN_MSG),
+    "connection_refused": (
+        lambda: _patch_ipc(connect_exc=ConnectionRefusedError()),
+        "IPC_SERVER_NOT_RUNNING",
+        _SERVER_DOWN_MSG,
+    ),
+    "timeout": (_timeout_ipc, "IPC_TIMEOUT", "서버 응답 시간 초과"),
+    "incomplete_read": (
+        lambda: _patch_ipc(response_frames=[]),
+        "IPC_SERVER_NOT_RUNNING",
+        _SERVER_DOWN_MSG,
+    ),
+    "daemon_error": (
+        lambda: _patch_ipc(
+            response_frames=[_error_frame("INVALID_SIGNAL_KEY", "Invalid signal key")]
+        ),
+        "INVALID_SIGNAL_KEY",
+        "Invalid signal key",
+    ),
+}
+
+
+@pytest.mark.parametrize("site", sorted(_FIVE_SITES))
+def test_connect_failure_json_bytes(runner: CliRunner, site: str) -> None:
+    context, code, message = _FIVE_SITES[site]
+    with context():
+        result = runner.invoke(
+            cli, ["signal", "connect", "--key", "sk_ok", "--format", "json"]
+        )
+
+    assert result.exit_code == 1, (result.stdout, result.stderr)
+    assert result.stdout == _json_line(code, message)
+    assert result.stderr == ""

@@ -7,14 +7,18 @@ import contextlib
 import json
 import sys
 from pathlib import Path
-from typing import NoReturn
 from uuid import uuid4
 
 import click
 
 from ante.cli.commands.ipc_helpers import get_socket_path
-from ante.cli.formatter import OutputFormatter, format_option
+from ante.cli.formatter import format_option
 from ante.cli.middleware import get_member_id, require_auth
+from ante.contracts.ipc_client_errors import (
+    IPCClientTimeoutError,
+    IPCRemoteError,
+    IPCServerNotRunningError,
+)
 from ante.ipc import protocol
 
 _SERVER_DOWN_MSG = "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."
@@ -37,19 +41,18 @@ def signal_connect(ctx: click.Context, key: str) -> None:
 
 async def _run_connect(ctx: click.Context, key: str) -> None:
     """시그널 채널을 데몬으로 위임하는 thin IPC relay."""
-    from ante.cli.main import get_config_dir, get_formatter
+    from ante.cli.main import get_config_dir
 
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
     socket_path = get_socket_path(get_config_dir(ctx))
 
     if not Path(socket_path).exists():
-        _fail(fmt, _SERVER_DOWN_MSG, "IPC_SERVER_NOT_RUNNING")
+        raise IPCServerNotRunningError(_SERVER_DOWN_MSG)
 
     try:
         reader, writer = await asyncio.open_unix_connection(socket_path)
     except (ConnectionRefusedError, OSError):
-        _fail(fmt, _SERVER_DOWN_MSG, "IPC_SERVER_NOT_RUNNING")
+        raise IPCServerNotRunningError(_SERVER_DOWN_MSG)
 
     try:
         req = {
@@ -64,13 +67,13 @@ async def _run_connect(ctx: click.Context, key: str) -> None:
         try:
             resp = await asyncio.wait_for(protocol.decode(reader), timeout=30.0)
         except TimeoutError:
-            _fail(fmt, "서버 응답 시간 초과", "IPC_TIMEOUT")
+            raise IPCClientTimeoutError("서버 응답 시간 초과")
         except asyncio.IncompleteReadError:
-            _fail(fmt, _SERVER_DOWN_MSG, "IPC_SERVER_NOT_RUNNING")
+            raise IPCServerNotRunningError(_SERVER_DOWN_MSG)
 
         if resp.get("status") == "error":
             err = resp["error"]
-            _fail(fmt, err["message"], err["code"])
+            raise IPCRemoteError(err["code"], err["message"])
 
         bot_id = resp["result"]["bot_id"]
         _err(f"Connected to bot {bot_id}")
@@ -149,15 +152,6 @@ async def _pump_out(reader: asyncio.StreamReader) -> None:
         if frame.get("type") == "closed":
             _err(f"channel closed: {frame.get('reason', '')}")
             return
-
-
-def _fail(fmt: OutputFormatter, msg: str, code: str) -> NoReturn:
-    """validation/transport 오류 종료 (단일 chokepoint)."""
-    if fmt.is_json:
-        fmt.error(msg, code=code)
-    else:
-        _err(msg)
-    raise SystemExit(1)
 
 
 def _err(msg: str) -> None:

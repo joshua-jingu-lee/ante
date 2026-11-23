@@ -478,7 +478,7 @@ def test_signal_connect_server_down_handshake_passthrough(tmp_path: Path) -> Non
         else:
             assert result.exit_code == 1
             assert result.stdout == ""
-            assert result.stderr == _SERVER_DOWN + "\n"
+            assert result.stderr == f"Error: IPC_SERVER_NOT_RUNNING: {_SERVER_DOWN}\n"
 
 
 # ---------------------------------------------------------------- system
