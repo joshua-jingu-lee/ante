@@ -266,7 +266,7 @@ def test_clear_halt_cli_success_output(argv: list[str], output: str) -> None:
     ("argv", "args"),
     [
         pytest.param(["--reason", "r"], {"reason": "r"}, id="given"),
-        pytest.param([], {"reason": ""}, id="omitted"),
+        pytest.param([], {}, id="omitted"),
     ],
 )
 def test_clear_halt_cli_sends_reason(argv: list[str], args: dict[str, str]) -> None:
