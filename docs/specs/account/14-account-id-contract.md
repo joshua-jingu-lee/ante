@@ -223,7 +223,7 @@ invalid ``account_id`` 에 ``VALIDATION_ERROR`` 재사용이 불가능하다는
 | **B** | treasury·rule local construction lifecycle ( ``_create_treasury`` / ``_create_rule_engine`` 경유) | #1635 |
 | **C** | broker IPC envelope ( ``broker.status/balance/positions/reconcile`` ) | #1636 |
 | **D** | account-lifecycle / cold-path / AccountService mutation — #1634/35/36 범위 아님 | #1655 · #1724 |
-| **E** | non-broker mutating IPC — ``treasury.allocate`` / ``treasury.deallocate`` / ``bot.create`` **만**. read 표면( ``treasury snapshot`` 은 ``_create_treasury`` =B, ``strategy performance`` 는 read-family follow-up )은 E 아님 — #1634/35/36 범위 아님 | IPC 요청 모델의 계좌 ID 필드 (#2683) |
+| **E** | non-broker mutating IPC — ``treasury.allocate`` / ``treasury.deallocate`` / ``bot.create`` **만**. read 표면( ``treasury snapshot`` 은 ``_create_treasury`` =B, ``strategy performance`` 는 read-family(#1657) )은 E 아님 — #1634/35/36 범위 아님 | IPC 요청 모델의 계좌 ID 필드 (#2683) |
 
 **일반 규칙(구조적 폐쇄)**: enumerate된 **모든** Click ``account_id``
 command 표면은 본 표에 **명시 row 1개씩** 필수다(rule-only / implicit
