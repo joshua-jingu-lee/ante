@@ -891,6 +891,214 @@ class TestStrategyContextFactory:
             factory.create(config)
 
 
+# ── #2816: 가상 컨텍스트가 봇 예산·포지션 표를 읽는다 ─────────
+
+
+_LEDGER_ACCT = "acct1"
+_LEDGER_BOT = "virtual1"
+
+
+class _DictTreasuryManager:
+    """``TreasuryManager.get`` 만 모사 — 없는 계좌는 KeyError."""
+
+    def __init__(self, treasuries: dict[str, Treasury]) -> None:
+        self._treasuries = treasuries
+
+    def get(self, account_id: str) -> Treasury:
+        return self._treasuries[account_id]
+
+
+class _Ledgers:
+    def __init__(self, db, eventbus) -> None:
+        from ante.account.models import TradingMode
+        from ante.trade.fill_applier import FillApplier
+        from ante.trade.fill_outbox import FillOutbox
+        from ante.trade.order_tracker import OrderTracker
+        from ante.trade.recorder import TradeRecorder
+
+        self.db = db
+        self.bus = eventbus
+        registry = ready_registry(
+            _LEDGER_ACCT, broker_type="test", trading_mode=TradingMode.VIRTUAL
+        )
+        self.treasury = Treasury(
+            db,
+            eventbus,
+            account_id=_LEDGER_ACCT,
+            runtime_readiness=registry,
+            broker_type="test",
+            trading_mode=TradingMode.VIRTUAL,
+        )
+        self.position_history = PositionHistory(db=db)
+        self.recorder = TradeRecorder(db, self.position_history)
+        self.tracker = OrderTracker(db)
+        self.outbox = FillOutbox(db)
+        self.applier = FillApplier(
+            db=db,
+            order_tracker=self.tracker,
+            position_history=self.position_history,
+            eventbus=eventbus,
+            outbox=self.outbox,
+        )
+        self.executor = _virtual_executor(
+            eventbus=eventbus,
+            account_id=_LEDGER_ACCT,
+            runtime_readiness=registry,
+            fill_applier=self.applier,
+        )
+        self.manager = _DictTreasuryManager({_LEDGER_ACCT: self.treasury})
+
+    async def start(self) -> None:
+        await self.position_history.initialize()
+        await self.recorder.initialize()
+        await self.tracker.initialize()
+        await self.outbox.initialize()
+        await self.treasury.initialize()
+        await self.treasury.set_account_balance(10_000_000.0)
+        await self.treasury.allocate(_LEDGER_BOT, 1_000_000.0)
+        self.executor.subscribe()
+
+    def factory(self, **overrides) -> StrategyContextFactory:
+        kwargs = {
+            "data_provider": FakeDataProvider(),
+            "virtual_executor": self.executor,
+            "treasury_manager": self.manager,
+            "position_history": self.position_history,
+        }
+        kwargs.update(overrides)
+        return StrategyContextFactory(**kwargs)
+
+    async def hold(self, account_id: str, symbol: str, quantity: float) -> None:
+        from ante.trade.models import TradeRecord, TradeStatus
+
+        await self.position_history.on_trade(
+            TradeRecord(
+                trade_id=f"t-{account_id}-{symbol}",
+                bot_id=_LEDGER_BOT,
+                strategy_id="s1",
+                symbol=symbol,
+                side="buy",
+                quantity=quantity,
+                price=50000.0,
+                status=TradeStatus.FILLED,
+                order_type="limit",
+                account_id=account_id,
+            )
+        )
+
+
+def _ledger_config(account_id: str = _LEDGER_ACCT) -> BotConfig:
+    return BotConfig(bot_id=_LEDGER_BOT, strategy_id="s1", account_id=account_id)
+
+
+def _validated(order_id: str, *, bot_id: str = _LEDGER_BOT, side: str = "buy"):
+    from ante.eventbus.events import OrderValidatedEvent
+
+    return OrderValidatedEvent(
+        account_id=_LEDGER_ACCT,
+        order_id=order_id,
+        bot_id=bot_id,
+        strategy_id="s1",
+        symbol="005930",
+        side=side,
+        quantity=10.0,
+        price=50000.0,
+        order_type="limit",
+        exchange="KRX",
+    )
+
+
+@pytest.fixture
+async def ledgers(db, eventbus) -> _Ledgers:
+    stack = _Ledgers(db, eventbus)
+    await stack.start()
+    return stack
+
+
+class TestVirtualContextReadsLedgers:
+    async def test_budgetless_virtual_buy_is_rejected_by_treasury(self, ledgers):
+        """예산 없는 가상 봇의 매수는 자금 쪽 승인 단계에서 거부된다."""
+        from ante.eventbus.events import OrderRejectedEvent
+
+        ledgers.factory().create(
+            BotConfig(bot_id="nobudget", strategy_id="s1", account_id=_LEDGER_ACCT)
+        )
+        seen: list = []
+        ledgers.bus.subscribe(OrderRejectedEvent, seen.append)
+        ledgers.bus.subscribe(OrderFilledEvent, seen.append)
+
+        await ledgers.bus.publish(_validated("ord-nb", bot_id="nobudget"))
+
+        assert [type(e) for e in seen] == [OrderRejectedEvent]
+        assert seen[0].reason.startswith("insufficient_budget")
+        assert (
+            ledgers.position_history.get_positions_sync(
+                "nobudget", account_id=_LEDGER_ACCT
+            )
+            == []
+        )
+
+    async def test_positions_come_from_position_table(self, ledgers):
+        """ⓐ 포지션 표에 보유가 있으면 조립한 컨텍스트가 그 보유를 본다."""
+        await ledgers.hold(_LEDGER_ACCT, "005930", 10.0)
+
+        ctx = ledgers.factory().create(_ledger_config())
+
+        assert ctx.get_positions() == {
+            "005930": {
+                "symbol": "005930",
+                "quantity": 10.0,
+                "avg_entry_price": 50000.0,
+                "realized_pnl": 0.0,
+            }
+        }
+
+    async def test_balance_comes_from_settled_budget(self, ledgers):
+        """ⓑ 체결로 정산된 봇 예산을 재조립한 컨텍스트도 그대로 본다."""
+        ctx = ledgers.factory().create(_ledger_config())
+        filled: list = []
+        ledgers.bus.subscribe(OrderFilledEvent, filled.append, priority=-1000)
+
+        await ledgers.bus.publish(_validated("ord-1"))
+
+        assert len(filled) == 1
+        budget = ledgers.treasury.get_budget(_LEDGER_BOT)
+        assert budget is not None
+        spent = 500_000.0 + filled[0].commission
+        assert budget.available == pytest.approx(1_000_000.0 - spent)
+        expected = {
+            "allocated": budget.allocated,
+            "available": budget.available,
+            "reserved": budget.reserved,
+        }
+        rebuilt = ledgers.factory().create(_ledger_config())
+        for view in (ctx, rebuilt):
+            assert view.get_balance() == expected
+            assert view.get_positions()["005930"]["quantity"] == 10.0
+
+    async def test_allocated_follows_budget_change(self, ledgers):
+        """ⓒ 컨텍스트를 만든 뒤의 예산 변경이 바로 보인다."""
+        ctx = ledgers.factory().create(_ledger_config())
+        assert ctx.get_balance()["allocated"] == 1_000_000.0
+
+        await ledgers.treasury.update_budget(_LEDGER_BOT, 2_000_000.0)
+
+        assert ctx.get_balance() == {
+            "allocated": 2_000_000.0,
+            "available": 2_000_000.0,
+            "reserved": 0.0,
+        }
+
+    async def test_other_account_holdings_are_hidden(self, ledgers):
+        """ⓓ 다른 계좌의 같은 bot_id 보유는 보이지 않는다."""
+        await ledgers.hold(_LEDGER_ACCT, "005930", 10.0)
+        await ledgers.hold("acct2", "000660", 5.0)
+
+        ctx = ledgers.factory().create(_ledger_config())
+
+        assert set(ctx.get_positions()) == {"005930"}
+
+
 # ── US-5: BotManager + Factory 통합 ─────────────
 
 
