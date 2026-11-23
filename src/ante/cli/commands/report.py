@@ -153,11 +153,12 @@ def submit(
 
     try:
         result = asyncio.run(_submit())
-        return CommandResult(
-            data=result, message=f"Report submitted: {result['report_id']}"
-        )
     except Exception as e:
         raise ReportError(str(e)) from e
+
+    return CommandResult(
+        data=result, message=f"Report submitted: {result['report_id']}"
+    )
 
 
 @report.command("list")
