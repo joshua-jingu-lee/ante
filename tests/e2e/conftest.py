@@ -22,23 +22,32 @@ def daemon(request: pytest.FixtureRequest) -> Iterator[harness.DaemonHarness]:
     """
     started = time.monotonic()
     env = harness.DaemonHarness.create()
+    cleanup_failed = False
     try:
         yield env
     finally:
         try:
             env.cleanup()
+        except BaseException:
+            cleanup_failed = True
+            raise
         finally:
             harness.save_record(
                 env,
                 request.node.nodeid,
-                _scenario_outcome(request.node.stash.get(_PHASES, {})),
+                _scenario_outcome(
+                    request.node.stash.get(_PHASES, {}), cleanup_failed=cleanup_failed
+                ),
                 time.monotonic() - started,
             )
 
 
-def _scenario_outcome(phases: dict[str, str]) -> str:
-    """설치·본문 단계의 리포트로 시나리오의 결과를 정한다(정리 단계는 아직 없다)."""
-    if "failed" in phases.values():
+def _scenario_outcome(phases: dict[str, str], *, cleanup_failed: bool = False) -> str:
+    """설치·본문 단계의 리포트와 ``daemon`` 정리의 성패로 시나리오의 결과를 정한다.
+
+    teardown 리포트는 정리 뒤에 만들어지므로 정리 실패는 ``cleanup_failed``로 받는다.
+    """
+    if cleanup_failed or "failed" in phases.values():
         return "failed"
     if phases.get("call") == "passed":
         return "passed"
