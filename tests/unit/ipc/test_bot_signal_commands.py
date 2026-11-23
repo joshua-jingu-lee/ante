@@ -338,6 +338,17 @@ async def test_update_passes_an_explicit_null_field() -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_passes_a_null_budget_to_the_service() -> None:
+    harness = _Harness()
+    response = await harness.send(
+        "bot.update", {"bot_id": "b-7", "updates": {"budget": None}}
+    )
+    assert response == _ok({"bot": BOT_INFO})
+    harness.bot_manager.update_bot.assert_awaited_once_with("b-7", budget=None)
+    harness.assert_audited("bot.update", "fields=['budget']")
+
+
+@pytest.mark.asyncio
 async def test_update_without_updates_calls_the_service_with_no_field() -> None:
     harness = _Harness()
     response = await harness.send("bot.update", {"bot_id": "b-7"})
@@ -554,6 +565,15 @@ def _rejected(command: str, loc: str, kind: str) -> dict:
             "updates.budget",
             "float_type",
         ),
+        *[
+            (
+                "bot.update",
+                {"bot_id": "b-7", "updates": {"budget": budget}},
+                "updates.budget",
+                "greater_than",
+            )
+            for budget in (0, -1, -0.0)
+        ],
         (
             "bot.update",
             {"bot_id": "b-7", "updates": {"auto_restart": "false"}},

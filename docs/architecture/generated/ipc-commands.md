@@ -62,4 +62,4 @@
 
 | 모델 | 요청 필드 |
 |---|---|
-| `BotUpdateFields` | `name: str \| None = null`<br>`strategy_id: str \| None = null`<br>`interval_seconds: int \| None = null`<br>`budget: float \| None = null`<br>`auto_restart: bool \| None = null`<br>`max_restart_attempts: int \| None = null`<br>`restart_cooldown_seconds: int \| None = null`<br>`step_timeout_seconds: int \| None = null`<br>`max_signals_per_step: int \| None = null`<br>`account_id: str \| None = null` |
+| `BotUpdateFields` | `name: str \| None = null`<br>`strategy_id: str \| None = null`<br>`interval_seconds: int \| None = null`<br>`budget: float \| None = null` (`> 0`)<br>`auto_restart: bool \| None = null`<br>`max_restart_attempts: int \| None = null`<br>`restart_cooldown_seconds: int \| None = null`<br>`step_timeout_seconds: int \| None = null`<br>`max_signals_per_step: int \| None = null`<br>`account_id: str \| None = null` |

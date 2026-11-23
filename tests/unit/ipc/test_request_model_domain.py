@@ -194,9 +194,23 @@ def _validated(info: FieldInfo) -> ValidatedType | None:
     return entry
 
 
+NUMERIC_CONSTRAINTS = (
+    annotated_types.Ge,
+    annotated_types.Gt,
+    annotated_types.Le,
+    annotated_types.Lt,
+)
+
+
+def _numeric_nullable(info: FieldInfo) -> bool:
+    annotation = _inner(info.annotation)
+    numeric = all(isinstance(m, NUMERIC_CONSTRAINTS) for m in info.metadata)
+    return numeric and (annotation is int or annotation is float)
+
+
 def _kind(info: FieldInfo) -> str:
     annotation = _inner(info.annotation)
-    if _nullable(info) and info.metadata:
+    if _nullable(info) and info.metadata and not _numeric_nullable(info):
         raise UnsupportedFieldError(f"constrained nullable field: {info!r}")
     if _validated(info) is not None:
         return "validated"
@@ -227,22 +241,22 @@ def _kind(info: FieldInfo) -> str:
 
 
 CONSTRAINT_CLASSES = (
-    ("ge", annotated_types.Ge, "int"),
-    ("gt", annotated_types.Gt, "int"),
-    ("le", annotated_types.Le, "int"),
-    ("lt", annotated_types.Lt, "int"),
-    ("min_length", annotated_types.MinLen, "str"),
-    ("max_length", annotated_types.MaxLen, "str"),
+    ("ge", annotated_types.Ge, ("int", "float")),
+    ("gt", annotated_types.Gt, ("int", "float")),
+    ("le", annotated_types.Le, ("int", "float")),
+    ("lt", annotated_types.Lt, ("int", "float")),
+    ("min_length", annotated_types.MinLen, ("str",)),
+    ("max_length", annotated_types.MaxLen, ("str",)),
 )
 
 
-def _constraints(info: FieldInfo, kind: str) -> dict[str, int]:
-    found: dict[str, int] = {}
+def _constraints(info: FieldInfo, kind: str) -> dict[str, int | float]:
+    found: dict[str, int | float] = {}
     if kind == "validated":
         return found
     for item in info.metadata:
-        for name, cls, owner in CONSTRAINT_CLASSES:
-            if isinstance(item, cls) and owner == kind:
+        for name, cls, owners in CONSTRAINT_CLASSES:
+            if isinstance(item, cls) and kind in owners:
                 found[name] = getattr(item, name)
                 break
         else:
@@ -254,7 +268,7 @@ def _has_default(info: FieldInfo) -> bool:
     return not info.is_required()
 
 
-def _int_base(info: FieldInfo, limits: dict[str, int]) -> int:
+def _int_base(info: FieldInfo, limits: dict[str, int | float]) -> int | float:
     low = limits.get("ge", limits["gt"] + 1 if "gt" in limits else None)
     high = limits.get("le", limits["lt"] - 1 if "lt" in limits else None)
     start = low if low is not None else (high if high is not None else 1)
@@ -265,8 +279,28 @@ def _int_base(info: FieldInfo, limits: dict[str, int]) -> int:
     raise UnsupportedFieldError(f"no base value inside {limits!r}")
 
 
-def _str_base(info: FieldInfo, limits: dict[str, int]) -> str:
-    length = max(limits.get("min_length", 1), 1)
+def _within(value: float, limits: dict[str, int | float]) -> bool:
+    checks = {
+        "ge": lambda b: value >= b,
+        "gt": lambda b: value > b,
+        "le": lambda b: value <= b,
+        "lt": lambda b: value < b,
+    }
+    return all(checks[name](bound) for name, bound in limits.items())
+
+
+def _float_base(info: FieldInfo, limits: dict[str, int | float]) -> float:
+    anchors = [limits[name] for name in ("ge", "gt", "le", "lt") if name in limits]
+    candidates = [1.5, 2.5, *(a + d for a in anchors for d in (0, 0.5, -0.5))]
+    for value in candidates:
+        default = _has_default(info) and info.default == value
+        if _within(value, limits) and not default:
+            return float(value)
+    raise UnsupportedFieldError(f"no base value inside {limits!r}")
+
+
+def _str_base(info: FieldInfo, limits: dict[str, int | float]) -> str:
+    length = int(max(limits.get("min_length", 1), 1))
     if "max_length" in limits and length > limits["max_length"]:
         raise UnsupportedFieldError(f"no base value inside {limits!r}")
     value = "v" * length
@@ -284,7 +318,7 @@ def _base_value(info: FieldInfo) -> Any:
     if kind == "str":
         return _str_base(info, limits)
     if kind == "float":
-        return 2.5 if default == 1.5 else 1.5
+        return _float_base(info, limits)
     if kind == "bool":
         return default is not True
     if kind == "secret":
@@ -505,6 +539,10 @@ class _TableRequest(IPCRequest):
     day: IsoDate
     since: IsoDate | None = None
     inner: _TableInner
+    price: float | None = Field(default=None, gt=0)
+    weight: float = Field(default=0.5, ge=0.25, lt=2)
+    small: float = Field(default=-2.5, gt=-3, lt=-1)
+    retries: int | None = Field(default=None, ge=1, le=3)
 
 
 class _PlainModel(BaseModel):
@@ -843,6 +881,38 @@ def test_generator_table_for_each_field_kind() -> None:
             for k in ("int", "float", "bool", "array", "object")
         ),
         ("inner.zz_extra", "extra", "extra_forbidden"),
+        *(
+            ("price", f"wrong:{k}", "float_type")
+            for k in ("string", "bool", "array", "object")
+        ),
+        ("price", "gt", "greater_than"),
+        ("price", "nan", "finite_number"),
+        ("price", "inf", "finite_number"),
+        ("price", "-inf", "finite_number"),
+        *(
+            ("weight", f"wrong:{k}", "float_type")
+            for k in ("string", "bool", "null", "array", "object")
+        ),
+        ("weight", "ge", "greater_than_equal"),
+        ("weight", "lt", "less_than"),
+        ("weight", "nan", "finite_number"),
+        ("weight", "inf", "finite_number"),
+        ("weight", "-inf", "finite_number"),
+        *(
+            ("small", f"wrong:{k}", "float_type")
+            for k in ("string", "bool", "null", "array", "object")
+        ),
+        ("small", "gt", "greater_than"),
+        ("small", "lt", "less_than"),
+        ("small", "nan", "finite_number"),
+        ("small", "inf", "finite_number"),
+        ("small", "-inf", "finite_number"),
+        *(
+            ("retries", f"wrong:{k}", "int_type")
+            for k in ("string", "float", "bool", "array", "object")
+        ),
+        ("retries", "ge", "greater_than_equal"),
+        ("retries", "le", "less_than_equal"),
         ("zz_extra", "extra", "extra_forbidden"),
         ("args", "not_object:string", "model_type"),
         ("args", "not_object:int", "model_type"),
@@ -867,6 +937,10 @@ def test_generator_table_for_each_field_kind() -> None:
         "day": "2026-01-02",
         "since": "2026-01-02",
         "inner": {"size": 1, "tag": "v"},
+        "price": 1.5,
+        "weight": 1.5,
+        "small": -1.5,
+        "retries": 1,
     }
     assert [(i.loc, i.kind, i.value) for i in inside_values(_TableRequest)] == [
         ("level", "ge", 1),
@@ -886,6 +960,15 @@ def test_generator_table_for_each_field_kind() -> None:
         ("since", "null", None),
         ("inner.size", "ge", 1),
         ("inner.tag", "null", None),
+        ("price", "gt", 1),
+        ("price", "null", None),
+        ("weight", "ge", 0.25),
+        ("weight", "lt", 1),
+        ("small", "gt", -2),
+        ("small", "lt", -2),
+        ("retries", "ge", 1),
+        ("retries", "le", 3),
+        ("retries", "null", None),
     ]
 
 
@@ -919,6 +1002,18 @@ def test_generator_rejects_fields_it_cannot_bound() -> None:
 
     class _BoundedNullable(IPCRequest):
         name: str | None = Field(default=None, min_length=1)
+
+    class _NullableNumericMix(IPCRequest):
+        value: float | None = Field(default=None, gt=0, multiple_of=0.5)
+
+    class _NullableBoundedText(IPCRequest):
+        name: str | None = Field(default=None, gt="a")
+
+    class _FloatMultipleOf(IPCRequest):
+        value: float = Field(default=1.0, multiple_of=0.5)
+
+    class _NoFloatInside(IPCRequest):
+        value: float = Field(gt=0, lt=0.1)
 
     class _NullableUnlisted(IPCRequest):
         name: Annotated[str, AfterValidator(lambda v: v)] | None = None
@@ -959,6 +1054,10 @@ def test_generator_rejects_fields_it_cannot_bound() -> None:
         _BareMapping,
         _Union,
         _BoundedNullable,
+        _NullableNumericMix,
+        _NullableBoundedText,
+        _FloatMultipleOf,
+        _NoFloatInside,
         _NullableUnlisted,
         _NullableBoundedAccount,
         _PlainNested,
