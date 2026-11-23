@@ -47,7 +47,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ANTE_CLI_PREFIX = ("-m", "ante", "--format", "json")
 RESPONSE_STATUS = re.compile(r"[a-z_]{1,32}")
 RESPONSE_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
-ABSOLUTE_INSIDE = re.compile(r"(?:^|[\s=:,;])/")
+SAFE_SEGMENT = re.compile(r"[\w.-]+")
+ROOT_MARK = "<root>"
+REDACTED = "<redacted>"
+SECRET_KEYS = frozenset({"token", "api_key", "secret", "password"})
 
 
 class HarnessError(AssertionError):
@@ -113,7 +116,7 @@ def run_json_command(
             timeout=timeout,
             check=False,
         )
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, OSError):
         if recorder is not None:
             elapsed = time.monotonic() - started
             recorder.record_cli(argv, None, None, elapsed, expect_failure)
@@ -126,7 +129,9 @@ def run_json_command(
         parsed = False
     if recorder is not None:
         elapsed = time.monotonic() - started
-        recorder.record_cli(argv, proc.returncode, payload, elapsed, expect_failure)
+        recorder.record_cli(
+            argv, proc.returncode, payload, elapsed, expect_failure, parsed=parsed
+        )
     result = CliResult(tuple(argv), proc.returncode, payload, proc.stdout, proc.stderr)
     if expect_failure:
         if not result.failed:
@@ -156,6 +161,74 @@ def _response_field(payload: Any, key: str, pattern: re.Pattern[str]) -> str | N
     return None
 
 
+def _has_separator(value: str) -> bool:
+    return "/" in value or "\\" in value
+
+
+def _is_allowed_path(value: str) -> bool:
+    """구분자가 없거나, ``<root>/…``이거나, 저장소 안에 실제로 있는 상대 경로."""
+    if not _has_separator(value):
+        return True
+    if "\\" in value:
+        return False
+    first, *rest = value.split("/")
+    if not all(SAFE_SEGMENT.fullmatch(p) and p not in {".", ".."} for p in rest):
+        return False
+    if first == ROOT_MARK:
+        return True
+    if not SAFE_SEGMENT.fullmatch(first) or first in {".", ".."}:
+        return False
+    try:
+        return (REPO_ROOT / value).exists()
+    except OSError:
+        return False
+
+
+def is_allowed_string(value: str) -> bool:
+    """기록에 실릴 수 있는 문자열인가. 치환기와 마지막 방어선이 함께 쓰는 술어다.
+
+    허용 모양: 허용 경로 하나, ``key=허용 경로``(key에 구분자 없음),
+    ``허용 경로::이름``(이름에 구분자 없음 — nodeid).
+    """
+    if _is_allowed_path(value):
+        return True
+    key, sep, rest = value.partition("=")
+    if sep and not _has_separator(key) and _is_allowed_path(rest):
+        return True
+    path, sep, name = value.partition("::")
+    return bool(sep) and _is_allowed_path(path) and not _has_separator(name)
+
+
+def sanitize_nodeid(nodeid: str) -> str:
+    """파일 부분은 허용 경로여야 하고, 이름에 구분자가 있으면 대괄호 부분을 가린다."""
+    path, sep, name = nodeid.partition("::")
+    if not _is_allowed_path(path):
+        path = REDACTED
+    if _has_separator(name):
+        name = re.sub(r"\[.*\]", f"[{REDACTED}]", name, flags=re.DOTALL)
+        if _has_separator(name):
+            name = REDACTED
+    return path + sep + name
+
+
+def disallowed_strings(record: Any) -> list[str]:
+    """기록 안의 모든 문자열(키 포함) 가운데 허용 모양이 아닌 것."""
+    return [s for s in _all_strings(record) if not is_allowed_string(s)]
+
+
+def _collect_secrets(payload: Any, found: set[str]) -> None:
+    if isinstance(payload, dict):
+        for key, item in payload.items():
+            name = str(key).lower()
+            secret = name in SECRET_KEYS or name.endswith("_token")
+            if secret and isinstance(item, str) and item:
+                found.add(item)
+            _collect_secrets(item, found)
+    elif isinstance(payload, list):
+        for item in payload:
+            _collect_secrets(item, found)
+
+
 class RunRecorder:
     """시나리오 하나의 실행 기록. 출력 원문·로그·예외 텍스트는 받지 않는다."""
 
@@ -163,22 +236,17 @@ class RunRecorder:
         self.record_dir = record_dir
         self.steps: list[dict[str, Any]] = []
         self.net_attempts: int | None = None
+        self.secrets: set[str] = set()
         roots = {str(root), str(root.resolve())}
         self._roots = sorted(roots, key=len, reverse=True)
         self._repo = str(REPO_ROOT)
 
     def sanitize(self, value: str) -> str:
-        """임시 루트는 ``<root>``, 저장소 안은 상대 경로, 남은 절대 경로는 ``<path>``.
-
-        루트를 바꾼 뒤에도 문자열의 처음이나 구분자 뒤에 ``/``가 남으면 통째로
-        ``<path>``다(``--x=/a``도 막는다).
-        """
+        """임시 루트는 ``<root>``, 저장소 접두는 지운다. 허용 모양이 아니면 가린다."""
         for root in self._roots:
-            value = value.replace(root, "<root>")
+            value = value.replace(root, ROOT_MARK)
         value = value.replace(self._repo + "/", "")
-        if value == self._repo or ABSOLUTE_INSIDE.search(value):
-            return "<path>"
-        return value
+        return value if is_allowed_string(value) else REDACTED
 
     def command_args(self, argv: Sequence[str]) -> list[str]:
         """인터프리터와 ``-m ante --format json`` 접두를 뺀 명령의 인자."""
@@ -194,8 +262,12 @@ class RunRecorder:
         payload: Any,
         seconds: float,
         expect_failure: bool,
+        *,
+        parsed: bool = True,
     ) -> None:
-        failed = returncode is None or is_failure(returncode, payload)
+        """하네스의 판정과 같게: 종료 코드 없음·JSON 아님·실패 응답은 ``failed``."""
+        _collect_secrets(payload, self.secrets)
+        failed = returncode is None or not parsed or is_failure(returncode, payload)
         self.steps.append(
             {
                 "kind": "cli",
@@ -217,8 +289,8 @@ class RunRecorder:
         return step
 
     def build(self, nodeid: str, outcome: str, seconds: float) -> dict[str, Any]:
-        """연속으로 같은 (인자, 종료 코드, status, code) 호출은 한 행으로 접는다."""
-        fold_key = ("args", "returncode", "status", "code")
+        """연속으로 같은 (인자, 종료 코드, status, code, 실패 기대) 호출은 한 행으로."""
+        fold_key = ("args", "returncode", "status", "code", "expect_failure")
         folded: list[dict[str, Any]] = []
         for step in self.steps:
             last = folded[-1] if folded else None
@@ -238,7 +310,7 @@ class RunRecorder:
                     step[key] = round(step[key], 3)
         return {
             "version": RECORD_VERSION,
-            "nodeid": self.sanitize(nodeid),
+            "nodeid": sanitize_nodeid(nodeid),
             "outcome": outcome,
             "seconds": round(seconds, 3),
             "net_attempts": self.net_attempts,
@@ -272,22 +344,24 @@ def save_record(env: DaemonHarness, nodeid: str, outcome: str, seconds: float) -
     recorder = env.recorder
     if recorder is None:
         return
+    safe_nodeid = sanitize_nodeid(nodeid)
     try:
         record = recorder.build(nodeid, outcome, seconds)
         text = json.dumps(record, ensure_ascii=False, indent=2) + "\n"
-        if env.token and env.token in text:
+        secrets = recorder.secrets | ({env.token} if env.token else set())
+        if any(secret in text for secret in secrets):
             reason = "토큰 값이 들어 있어 버렸다"
-        elif any(s.startswith("/") for s in _all_strings(record)):
-            reason = "절대 경로가 남아 버렸다"
+        elif disallowed_strings(record):
+            reason = "허용 모양이 아닌 경로 문자열이 있어 버렸다"
         else:
             recorder.record_dir.mkdir(parents=True, exist_ok=True)
-            (recorder.record_dir / record_file_name(nodeid)).write_text(
+            (recorder.record_dir / record_file_name(safe_nodeid)).write_text(
                 text, encoding="utf-8"
             )
             return
     except Exception as exc:
         reason = f"쓰지 못했다({type(exc).__name__})"
-    warnings.warn(RecordWarning(f"e2e 기록: {reason}: {nodeid}"), stacklevel=2)
+    warnings.warn(RecordWarning(f"e2e 기록: {reason}: {safe_nodeid}"), stacklevel=2)
 
 
 @contextmanager

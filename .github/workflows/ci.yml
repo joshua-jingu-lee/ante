@@ -169,6 +169,7 @@ jobs:
 
       - name: Summarize e2e records
         if: ${{ !cancelled() }}
+        continue-on-error: true
         run: >-
           python scripts/render_e2e_records.py "$RUNNER_TEMP/e2e-records"
           >> "$GITHUB_STEP_SUMMARY"

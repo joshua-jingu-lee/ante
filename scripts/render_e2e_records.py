@@ -20,12 +20,19 @@ from typing import Any
 RECORD_VERSION = 1
 TITLE = "## e2e 시나리오 실행 기록"
 OUTCOME_LABELS = {"passed": "통과", "failed": "실패", "skipped": "건너뜀"}
+MARKDOWN_ESCAPES = str.maketrans(
+    {"|": "&#124;", "*": "&#42;", "_": "&#95;", "`": "&#96;", "~": "&#126;"}
+)
+NET_NOTE = (
+    "막힌 접속 시도는 netguard가 막은 시도 전부다"
+    " — 데몬 시작마다 업데이트 확인 한 번이 포함된다."
+)
 
 
 def _text(value: Any) -> str:
-    """표의 칸에 넣을 수 있게 HTML로 이스케이프하고 ``|``·줄바꿈을 막는다."""
-    escaped = html.escape(str(value), quote=False)
-    return escaped.replace("|", "&#124;").replace("\n", " ")
+    """표의 칸에 넣을 수 있게 HTML로 이스케이프하고 ``|``·강조 문자·줄바꿈을 막는다."""
+    escaped = html.escape(str(value), quote=False).replace("\n", " ")
+    return escaped.translate(MARKDOWN_ESCAPES)
 
 
 def _number(value: Any) -> str:
@@ -78,7 +85,7 @@ def load_records(record_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
 
 def _summary_rows(records: list[dict[str, Any]]) -> list[str]:
     lines = [
-        "| 시나리오 | 결과 | 시간(초) | CLI 호출 | 실패한 호출 | 외부 접속 시도 |",
+        "| 시나리오 | 결과 | 시간(초) | CLI 호출 | 실패한 호출 | 막힌 접속 시도 |",
         "|---|---|---|---|---|---|",
     ]
     for record in records:
@@ -142,7 +149,13 @@ def render(record_dir: Path) -> str:
         lines.append("기록이 없다(기록 디렉터리가 비어 있다).")
     else:
         lines += _summary_rows(records)
-        lines += ["", "시나리오별 호출(연속으로 같은 호출은 ×N 한 행):", ""]
+        lines += [
+            "",
+            NET_NOTE,
+            "",
+            "시나리오별 호출(연속으로 같은 호출은 ×N 한 행):",
+            "",
+        ]
         for record in records:
             lines += _detail_block(record)
     if broken:

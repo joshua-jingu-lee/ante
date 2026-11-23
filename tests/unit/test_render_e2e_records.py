@@ -99,9 +99,10 @@ def test_summary_and_details(tmp_path: Path) -> None:
     )
     _write(tmp_path, "a.json", _record("tests/e2e/test_a.py::test_ok", "passed", []))
     out = render_mod.render(tmp_path)
-    lines = out.splitlines()
+    assert render_mod.NET_NOTE in out
+    lines = out.replace("&#95;", "_").splitlines()
     header = lines.index(
-        "| 시나리오 | 결과 | 시간(초) | CLI 호출 | 실패한 호출 | 외부 접속 시도 |"
+        "| 시나리오 | 결과 | 시간(초) | CLI 호출 | 실패한 호출 | 막힌 접속 시도 |"
     )
     assert lines[header + 2] == (
         "| <code>tests/e2e/test_a.py::test_ok</code> | 통과 | 12.50 | 0 | 0 | 1 |"
@@ -126,6 +127,21 @@ def test_table_cells_are_escaped(tmp_path: Path) -> None:
     out = render_mod.render(tmp_path)
     assert "<code>--name 'a&#124;b &lt;i&gt;'</code>" in out
     assert "<i>" not in out
+
+
+def test_markdown_emphasis_is_escaped(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "a.json",
+        _record("tests/e2e/t.py::t_*x*", "passed", [_cli(["**b**", "`c`", "~~d~~"])]),
+    )
+    out = render_mod.render(tmp_path)
+    body = out.replace(render_mod.NET_NOTE, "")
+    for char in "*`~":
+        assert char not in body
+    assert "t&#95;&#42;x&#42;" in out
+    assert "&#42;&#42;b&#42;&#42;" in out
+    assert "&#96;c&#96;" in out
 
 
 def test_missing_directory_exits_zero(tmp_path: Path) -> None:
