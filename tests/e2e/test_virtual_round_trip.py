@@ -25,6 +25,11 @@ COMMISSION_RATE = 0.00015
 SELL_TAX_RATE = 0.0023
 EXPECTED_SPENT = 70000 + 70000 * COMMISSION_RATE
 EXPECTED_RETURNED = 71000 - 71000 * (COMMISSION_RATE + SELL_TAX_RATE)
+EXPECTED_TRADES = {
+    ("buy", "000001", 1.0, 70000.0),
+    ("sell", "000001", 1.0, 71000.0),
+}
+EXPECTED_REALIZED = 1000 - 71000 * (COMMISSION_RATE + SELL_TAX_RATE)
 UPDATE_CHECKER_MODULE = "ante.update.checker"
 
 
@@ -122,6 +127,21 @@ def test_virtual_round_trip(daemon: DaemonHarness) -> None:
     (budget,) = [b for b in budgets["data"]["budgets"] if b["bot_id"] == BOT_ID]
     assert budget["spent"] == pytest.approx(EXPECTED_SPENT, abs=1e-6)
     assert budget["returned"] == pytest.approx(EXPECTED_RETURNED, abs=1e-6)
+
+    trades = daemon.cli("trade", "list", "--bot", BOT_ID)["data"]["trades"]
+    recorded = {(t["side"], t["symbol"], t["quantity"], t["price"]) for t in trades}
+    assert recorded == EXPECTED_TRADES, trades
+    assert {t["status"] for t in trades} == {"filled"}
+
+    summaries = daemon.cli("report", "performance", "--bot-id", BOT_ID)["data"][
+        "summaries"
+    ]
+    assert len(summaries) == 1, summaries
+    assert summaries[0]["trade_count"] == 1
+    assert summaries[0]["realized_pnl"] == pytest.approx(EXPECTED_REALIZED, abs=1e-6)
+
+    positions = daemon.cli("bot", "positions", BOT_ID)["data"]
+    assert positions["positions"] == [], positions
 
     stopped = daemon.cli("bot", "stop", BOT_ID)
     assert stopped["data"]["bot"]["status"] == "stopped", stopped

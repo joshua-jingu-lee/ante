@@ -145,7 +145,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 | 주문 처리 | OrderRequestEvent → RuleEngine → BrokerAdapter → 실제 주문 | OrderRequestEvent → RuleEngine → VirtualExecutor → 가상 체결 |
 | 데이터 | 실시간 시세 (API Gateway 경유) | 실시간 시세 (동일) |
 | 자금 | Treasury에서 할당받은 실제 자금 | Account 레벨에서 설정된 가상 자금 |
-| 체결 | BrokerAdapter가 실제 체결 후 OrderFilledEvent 발행 | VirtualExecutor가 즉시 가상 체결 후 OrderFilledEvent 발행 |
+| 체결 | BrokerAdapter가 실제 체결 후 OrderFilledEvent 발행 | VirtualExecutor가 즉시 가상 체결 → FillApplier direct 적용 후 OrderFilledEvent 발행 |
 | 브로커 접근 | `AccountService.get_broker(account_id)` | — (VirtualExecutor 사용) |
 | 예산 접근 | `TreasuryManager.get(account_id)` | 가상 자금 관리 |
 
