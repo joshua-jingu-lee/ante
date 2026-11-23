@@ -3,8 +3,7 @@
   "docstring_history": {},
   "docstring_excess": {
     "src/ante/ipc/registry.py": 15,
-    "src/ante/main.py": 130,
-    "src/ante/trade/fill_applier.py": 17
+    "src/ante/main.py": 130
   },
-  "docstring_lines": 6107
+  "docstring_lines": 6090
 }
