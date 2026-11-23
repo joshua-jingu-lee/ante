@@ -825,6 +825,35 @@ class TestIpcSendTypedExceptions:
             "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요.",
         )
 
+    def test_connect_permission_error_is_not_server_down(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import errno
+
+        from ante.cli.commands import ipc_helpers
+
+        sock = tmp_path / "t.sock"
+        sock.touch()
+        denied = PermissionError(errno.EACCES, "권한 거부")
+
+        async def _open(path: str) -> tuple[object, object]:
+            raise denied
+
+        monkeypatch.setattr(
+            ipc_helpers, "get_socket_path", lambda config_dir=None: str(sock)
+        )
+        monkeypatch.setattr("ante.ipc.client.asyncio.open_unix_connection", _open)
+        fallback = MagicMock(side_effect=AssertionError("fallback"))
+        monkeypatch.setattr("ante.cli.commands.bot._create_services", fallback)
+
+        result = _invoke(
+            ["--config-dir", str(tmp_path), "--format", "json", "bot", "list"]
+        )
+
+        fallback.assert_not_called()
+
+        _assert_json_exit(result, "EXECUTION_ERROR", "[Errno 13] 권한 거부")
+
     def test_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ante.ipc.exceptions import IPCTimeoutError
 

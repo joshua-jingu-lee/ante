@@ -51,7 +51,7 @@ async def _run_connect(ctx: click.Context, key: str) -> None:
 
     try:
         reader, writer = await asyncio.open_unix_connection(socket_path)
-    except (ConnectionRefusedError, OSError):
+    except (FileNotFoundError, ConnectionRefusedError):
         raise IPCServerNotRunningError(_SERVER_DOWN_MSG)
 
     try:

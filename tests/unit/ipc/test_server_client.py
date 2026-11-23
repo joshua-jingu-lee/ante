@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import tempfile
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -12,7 +14,7 @@ import pytest
 
 from ante.core.registry import ServiceRegistry
 from ante.ipc.client import IPCClient
-from ante.ipc.exceptions import ServerNotRunningError
+from ante.ipc.exceptions import IPCTimeoutError, ServerNotRunningError
 from ante.ipc.registry import CommandRegistry
 from ante.ipc.requests import IPCRequest
 from ante.ipc.server import IPCServer, IPCServerState
@@ -173,6 +175,73 @@ async def test_server_not_running() -> None:
         client = IPCClient(sock, timeout=2.0)
         with pytest.raises(ServerNotRunningError):
             await client.send("test.command")
+
+
+async def _never_connects(path: str) -> tuple[object, object]:
+    await asyncio.Event().wait()
+    raise AssertionError("unreachable")
+
+
+def _raises(exc: BaseException) -> Callable[[str], Awaitable[tuple[object, object]]]:
+    async def _connect(path: str) -> tuple[object, object]:
+        raise exc
+
+    return _connect
+
+
+_PASSED_THROUGH = [
+    pytest.param(PermissionError(errno.EACCES, "권한 거부"), id="eacces"),
+    pytest.param(BlockingIOError(errno.EAGAIN, "다시 시도"), id="eagain"),
+    pytest.param(OSError(errno.EIO, "입출력 오류"), id="eio"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exc",
+    [
+        pytest.param(FileNotFoundError(errno.ENOENT, "소켓 없음"), id="enoent"),
+        pytest.param(ConnectionRefusedError(errno.ECONNREFUSED, "거부"), id="refused"),
+    ],
+)
+async def test_connect_down_is_server_not_running(
+    exc: BaseException, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sock = tmp_path / "t.sock"
+    sock.touch()
+    monkeypatch.setattr("ante.ipc.client.asyncio.open_unix_connection", _raises(exc))
+
+    with pytest.raises(ServerNotRunningError) as info:
+        await IPCClient(str(sock), timeout=1.0).send("x")
+
+    assert info.value.__cause__ is exc
+
+
+@pytest.mark.asyncio
+async def test_connect_timeout_is_ipc_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sock = tmp_path / "t.sock"
+    sock.touch()
+    monkeypatch.setattr("ante.ipc.client.asyncio.open_unix_connection", _never_connects)
+
+    with pytest.raises(IPCTimeoutError):
+        await IPCClient(str(sock), timeout=0.05).send("x")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exc", _PASSED_THROUGH)
+async def test_other_connect_errors_are_raised_unwrapped(
+    exc: BaseException, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sock = tmp_path / "t.sock"
+    sock.touch()
+    monkeypatch.setattr("ante.ipc.client.asyncio.open_unix_connection", _raises(exc))
+
+    with pytest.raises(OSError) as info:
+        await IPCClient(str(sock), timeout=1.0).send("x")
+
+    assert info.value is exc
 
 
 @pytest.mark.asyncio

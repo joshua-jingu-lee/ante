@@ -40,6 +40,7 @@ class IPCClient:
 
         Raises:
             ServerNotRunningError: 소켓 파일이 없거나 연결 거부
+            IPCTimeoutError: 연결 또는 응답 타임아웃
         """
         path = Path(self._socket_path)
         if not path.exists():
@@ -52,10 +53,10 @@ class IPCClient:
                 asyncio.open_unix_connection(self._socket_path),
                 timeout=self._timeout,
             )
-        except (ConnectionRefusedError, OSError) as e:
-            raise ServerNotRunningError(f"Ante 서버에 연결할 수 없습니다: {e}") from e
         except TimeoutError as e:
             raise IPCTimeoutError(f"서버 연결 타임아웃 ({self._timeout}초)") from e
+        except (FileNotFoundError, ConnectionRefusedError) as e:
+            raise ServerNotRunningError(f"Ante 서버에 연결할 수 없습니다: {e}") from e
 
         try:
             request = {
