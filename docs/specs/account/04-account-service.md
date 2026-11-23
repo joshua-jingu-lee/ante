@@ -87,7 +87,7 @@
 
 #### 안정 에러 코드 (#1144 S5)
 
-`AccountStructuralChangeRequiresStoppedServerError`는 클래스 레벨 속성 `code: str = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"`를 노출한다. IPC 서버는 모든 핸들러 예외에 대해 `getattr(e, "code", "EXECUTION_ERROR")`로 안정 코드를 우선 사용하며(없으면 기본 `EXECUTION_ERROR`), 기존 예외(`AccountAlreadySuspendedError` 등)는 `code` 속성이 없으므로 자동으로 `EXECUTION_ERROR`로 폴백되어 회귀가 발생하지 않는다.
+`AccountStructuralChangeRequiresStoppedServerError`는 클래스 레벨 속성 `code: str = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"`를 노출한다. IPC 서버(`_dispatch`)는 `ipc_error_payload` → `error_spec_for_exception`으로 코드를 정한다. 에러 레지스트리(`EXCEPTION_TO_SPEC`)를 MRO로 찾는 것이 먼저이고, 그다음이 SCREAMING_SNAKE 모양의 `code` 속성이며, 둘 다 없으면 `EXECUTION_ERROR`다(정본: `docs/specs/contracts/error-taxonomy.md`). 이 예외와 `AccountAlreadySuspendedError`는 레지스트리에 각자의 코드로 올라 있다.
 
 #### CLI / 다중 active runtime 정책
 
