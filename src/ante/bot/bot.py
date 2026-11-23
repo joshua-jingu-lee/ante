@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ante.bot.config import BOT_STATUS_TRANSITIONS, BotConfig, BotStatus
-from ante.bot.exceptions import BotStateConflict
+from ante.bot.exceptions import BotError, BotStateConflict
 from ante.core import clock
 from ante.eventbus.fill_dedup_guard import FillDedupGuard
 
@@ -55,6 +55,7 @@ class Bot:
         self.trading_mode = trading_mode
         self.currency = currency
         self._strategy_cls = strategy_cls
+        self._bound_strategy_id = config.strategy_id
         self._ctx = ctx
         self._eventbus = eventbus
         self._signal_lock = signal_lock or asyncio.Lock()
@@ -75,6 +76,12 @@ class Bot:
         """봇 시작. 전략 인스턴스화 + 실행 루프 Task 생성."""
         from ante.eventbus.events import BotStartedEvent
 
+        if self._bound_strategy_id != self.config.strategy_id:
+            raise BotError(
+                f"봇에 묶인 전략과 설정의 전략이 다릅니다: {self.bot_id} "
+                f"(묶인 전략: {self._bound_strategy_id}, "
+                f"설정: {self.config.strategy_id})"
+            )
         self.strategy = self._strategy_cls(ctx=self._ctx)
         self.strategy.on_start()
 
@@ -91,6 +98,17 @@ class Bot:
             BotStartedEvent(bot_id=self.bot_id, account_id=self.config.account_id)
         )
         logger.info("봇 시작: %s", self.bot_id)
+
+    def rebind_strategy(self, strategy_id: str, strategy_cls: type[Strategy]) -> None:
+        """전략 클래스와 묶인 전략 ID를 함께 바꾸고 전략 인스턴스를 비운다."""
+        if self.status in (BotStatus.RUNNING, BotStatus.STOPPING):
+            raise BotStateConflict(
+                f"실행 중인 봇의 전략은 바꿀 수 없습니다: {self.bot_id} "
+                f"(현재: {self.status.value})"
+            )
+        self._strategy_cls = strategy_cls
+        self._bound_strategy_id = strategy_id
+        self.strategy = None
 
     async def stop(self) -> None:
         """봇 중지. 실행 루프 취소 + 전략 정리."""

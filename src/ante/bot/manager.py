@@ -431,11 +431,13 @@ class BotManager:
             old_config = bot.config
             effective_account_id = updates.get("account_id", old_config.account_id)
             new_strategy_id = updates.get("strategy_id")
+            new_strategy_cls = None
             if (
                 new_strategy_id is not None
                 and new_strategy_id != old_config.strategy_id
             ):
-                await self._validate_strategy_change(
+                new_strategy_cls = await self._prepare_strategy(
+                    bot_id,
                     account_id=effective_account_id,
                     strategy_id=new_strategy_id,
                 )
@@ -454,11 +456,20 @@ class BotManager:
             }
             config_fields.update(updates)
             new_config = BotConfig(**config_fields)  # type: ignore[arg-type]
+            old_strategy_cls = bot._strategy_cls
+            if new_strategy_cls is not None:
+                bot.rebind_strategy(new_config.strategy_id, new_strategy_cls)
             bot.config = new_config
 
             committed_snapshot = dataclasses.replace(new_config)
 
-            await self._save_bot_config(new_config)
+            try:
+                await self._save_bot_config(new_config)
+            except (Exception, asyncio.CancelledError):
+                if new_strategy_cls is not None and bot.config is new_config:
+                    bot.config = old_config
+                    bot.rebind_strategy(old_config.strategy_id, old_strategy_cls)
+                raise
 
             if new_budget is not None:
                 try:
@@ -479,6 +490,10 @@ class BotManager:
                 except (Exception, asyncio.CancelledError):
                     if bot.config is new_config and bot.config == committed_snapshot:
                         bot.config = old_config
+                        if new_strategy_cls is not None:
+                            bot.rebind_strategy(
+                                old_config.strategy_id, old_strategy_cls
+                            )
                         if self._bots.get(bot_id) is bot:
                             try:
                                 await self._save_bot_config(old_config)
@@ -526,14 +541,16 @@ class BotManager:
         persist → new rule load → start) 는 그대로 보존한다.
         """
         bot = self._get_bot(bot_id)
+        strategy_cls = await self._prepare_strategy(
+            bot_id, account_id=bot.config.account_id, strategy_id=strategy_id
+        )
         was_running = bot.status == BotStatus.RUNNING
 
         if was_running:
             await bot.stop()
             self._remove_strategy_rules(bot.config.strategy_id)
 
-        bot.config.strategy_id = strategy_id
-        await self._save_bot_config(bot.config)
+        await self._rebind_and_save(bot, strategy_id, strategy_cls)
 
         if was_running:
             self._load_strategy_rules(strategy_id)
@@ -550,7 +567,7 @@ class BotManager:
         """중지 상태 봇의 전략 교체.
 
         running 상태이면 예외를 발생시킨다.
-        stopped/created/error 상태에서만 전략 ID를 교체한다.
+        stopped/created/error 상태에서만 전략 ID와 실행 코드를 교체한다.
         """
         bot = self._get_bot(bot_id)
         if bot.status == BotStatus.RUNNING:
@@ -559,8 +576,10 @@ class BotManager:
                 f"assign_strategy()를 사용하거나 먼저 봇을 중지하세요."
             )
 
-        bot.config.strategy_id = strategy_id
-        await self._save_bot_config(bot.config)
+        strategy_cls = await self._prepare_strategy(
+            bot_id, account_id=bot.config.account_id, strategy_id=strategy_id
+        )
+        await self._rebind_and_save(bot, strategy_id, strategy_cls)
 
         logger.info("전략 교체: bot=%s strategy=%s", bot_id, strategy_id)
 
@@ -806,10 +825,10 @@ class BotManager:
             raise BotNotFoundError(bot_id)
         return bot
 
-    async def _validate_strategy_change(
-        self, *, account_id: str, strategy_id: str
-    ) -> None:
-        """봇 전략 변경 시 전략 존재 + 계좌 exchange 호환을 검증한다."""
+    async def _prepare_strategy(
+        self, bot_id: str, *, account_id: str, strategy_id: str
+    ) -> type[Strategy]:
+        """전략을 조회·로드·거래소 검사한 뒤 스냅샷에서 로드한 클래스를 돌려준다."""
         from ante.strategy.registry import StrategyRegistry
 
         registry = StrategyRegistry(self._db)
@@ -820,27 +839,45 @@ class BotManager:
 
             raise StrategyNotFoundError(f"전략 미발견: {strategy_id}")
 
-        if self._account_service is None:
-            return
-
-        account = await self._account_service.get(account_id)
-
         from ante.strategy.loader import StrategyLoader
         from ante.strategy.validator import validate_exchange
 
-        strategy_cls = StrategyLoader.load(Path(record.filepath))
-        strategy_exchange = getattr(
-            getattr(strategy_cls, "meta", None), "exchange", "KRX"
-        )
-        strategy_name = getattr(
-            getattr(strategy_cls, "meta", None), "name", strategy_id
-        )
-        validate_exchange(
-            strategy_exchange=strategy_exchange,
-            account_exchange=account.exchange,
-            strategy_name=strategy_name,
-            account_name=account.name,
-        )
+        source_path = Path(record.filepath)
+        strategy_cls = StrategyLoader.load(source_path)
+
+        if self._account_service is not None:
+            account = await self._account_service.get(account_id)
+            strategy_exchange = getattr(
+                getattr(strategy_cls, "meta", None), "exchange", "KRX"
+            )
+            strategy_name = getattr(
+                getattr(strategy_cls, "meta", None), "name", strategy_id
+            )
+            validate_exchange(
+                strategy_exchange=strategy_exchange,
+                account_exchange=account.exchange,
+                strategy_name=strategy_name,
+                account_name=account.name,
+            )
+
+        if self._snapshot is None:
+            return strategy_cls
+        return StrategyLoader.load(self._snapshot.create(bot_id, source_path))
+
+    async def _rebind_and_save(
+        self, bot: Bot, strategy_id: str, strategy_cls: type[Strategy]
+    ) -> None:
+        """봇에 전략을 묶고 저장한다. 저장이 실패하면 옛 전략으로 되돌린다."""
+        old_strategy_id = bot.config.strategy_id
+        old_strategy_cls = bot._strategy_cls
+        bot.rebind_strategy(strategy_id, strategy_cls)
+        bot.config.strategy_id = strategy_id
+        try:
+            await self._save_bot_config(bot.config)
+        except (Exception, asyncio.CancelledError):
+            bot.rebind_strategy(old_strategy_id, old_strategy_cls)
+            bot.config.strategy_id = old_strategy_id
+            raise
 
     def _load_strategy_rules(self, strategy_id: str) -> None:
         """설정에서 전략별 룰을 RuleEngine에 로드."""

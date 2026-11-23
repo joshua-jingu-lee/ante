@@ -1922,6 +1922,30 @@ class _RecorderBase(Strategy):
         await asyncio.wait_for(until(), timeout=5.0)
 
 
+_GEN_PROBE_V2_SOURCE = """
+from ante.strategy import Signal, Strategy, StrategyMeta
+
+
+class GenProbeV2(Strategy):
+    meta = StrategyMeta(
+        name="gen_probe",
+        version="2.0.0",
+        description="test",
+        accepts_external_signals=True,
+    )
+    data_calls = []
+
+    async def on_step(self, context):
+        return []
+
+    async def on_data(self, data):
+        type(self).data_calls.append((self, data["signal_id"]))
+        return [
+            Signal(symbol="005930", side="buy", quantity=1.0, reason=data["signal_id"])
+        ]
+"""
+
+
 def _recorder(**attrs: object) -> type[_RecorderBase]:
     namespace: dict[str, object] = {
         "steps": [],
@@ -2045,17 +2069,29 @@ class TestBotSignalAcrossStopAndRestart:
         assert [e for e, _ in orders if e.reason == "sig-B"] == []
         assert any("bot1" in m and "signal_id=sig-B" in m for m in _rejections(caplog))
 
+    @pytest.fixture
+    async def gen_probe_v2(self, db, tmp_path):
+        """배정 대상으로 실제 등록한 전략의 id (#2838: 배정이 등록된 파일을 로드)."""
+        from ante.strategy.registry import StrategyRegistry
+
+        filepath = tmp_path / "gen_probe_v2.py"
+        filepath.write_text(_GEN_PROBE_V2_SOURCE, encoding="utf-8")
+        registry = StrategyRegistry(db)
+        await registry.initialize()
+        meta = StrategyMeta(name="gen_probe", version="2.0.0", description="test")
+        return (await registry.register(filepath, meta)).strategy_id
+
     @staticmethod
-    async def _stop_then_resume(manager: BotManager) -> None:
+    async def _stop_then_resume(manager: BotManager, target: str) -> None:
         await manager.stop_bot("bot1")
         await manager.resume_bot("bot1")
 
     @staticmethod
-    async def _assign_strategy(manager: BotManager) -> None:
-        await manager.assign_strategy("bot1", "gen_probe_v2")
+    async def _assign_strategy(manager: BotManager, target: str) -> None:
+        await manager.assign_strategy("bot1", target)
 
     @staticmethod
-    async def _stop_then_resume_twice(manager: BotManager) -> None:
+    async def _stop_then_resume_twice(manager: BotManager, target: str) -> None:
         for _ in range(2):
             await manager.stop_bot("bot1")
             await manager.resume_bot("bot1")
@@ -2065,7 +2101,7 @@ class TestBotSignalAcrossStopAndRestart:
         ["_stop_then_resume", "_assign_strategy", "_stop_then_resume_twice"],
     )
     async def test_waiting_signal_is_dropped_after_restart(
-        self, manager, eventbus, ctx, pending, caplog, restart
+        self, manager, eventbus, ctx, pending, caplog, restart, gen_probe_v2
     ):
         """다른 on_data 의 잠금을 기다리던 시그널은 재시작 뒤 새 전략에 닿지 않는다."""
         strategy_cls = _recorder(hold_data={"sig-A": asyncio.Event()})
@@ -2084,18 +2120,23 @@ class TestBotSignalAcrossStopAndRestart:
         pending.append(publisher_b)
         await probe.wait_entered(publisher_b)
 
-        await asyncio.wait_for(getattr(self, restart)(manager), timeout=5.0)
+        await asyncio.wait_for(
+            getattr(self, restart)(manager, gen_probe_v2), timeout=5.0
+        )
         assert bot.status == BotStatus.RUNNING
         second = bot.strategy
         assert second is not first
+        assert (type(second) is strategy_cls) == (restart != "_assign_strategy")
+        second_calls = [] if type(second) is strategy_cls else type(second).data_calls
 
         with caplog.at_level("WARNING", logger="ante.bot.bot"):
             strategy_cls.hold_data["sig-A"].set()
             await asyncio.wait_for(publisher_a, timeout=5.0)
             await asyncio.wait_for(publisher_b, timeout=5.0)
 
-        assert [s for s, _ in strategy_cls.data_calls if s is second] == []
-        assert [sid for _, sid in strategy_cls.data_calls if sid == "sig-B"] == []
+        calls = [*strategy_cls.data_calls, *second_calls]
+        assert [s for s, _ in calls if s is second] == []
+        assert [sid for _, sid in calls if sid == "sig-B"] == []
         assert [e for e, _ in orders if e.reason == "sig-B"] == []
         assert any("bot1" in m and "signal_id=sig-B" in m for m in _rejections(caplog))
         assert bot.status == BotStatus.RUNNING

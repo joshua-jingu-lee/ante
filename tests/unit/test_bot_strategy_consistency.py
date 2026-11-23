@@ -178,6 +178,14 @@ async def _register_strategy(db, source: str, name: str, version: str, tmp_path)
     return record.strategy_id
 
 
+@pytest.fixture
+async def s2(db, tmp_path):
+    """배정·교체 대상으로 실제 등록한 KRX 전략의 id (#2838: 준비 단계가 파일을 로드)."""
+    return await _register_strategy(
+        db, _KRX_STRATEGY_SOURCE, "krx_compat", "1.0.0", tmp_path
+    )
+
+
 async def _make_krx_account(account_service, account_id="acc-test"):
     account = Account(
         account_id=account_id,
@@ -468,31 +476,31 @@ class TestUpdateBotAccountIdImmutableVsStrategy:
 
 
 class TestAssignChangeConsistency:
-    async def test_assign_strategy_updates_both_stores(self, manager, ctx, db):
+    async def test_assign_strategy_updates_both_stores(self, manager, ctx, db, s2):
         """#2130 (d): assign_strategy → 컬럼+config_json 일관."""
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
-        await manager.assign_strategy("bot1", "s2")
+        await manager.assign_strategy("bot1", s2)
 
-        assert manager.get_bot("bot1").config.strategy_id == "s2"
+        assert manager.get_bot("bot1").config.strategy_id == s2
         col, cfg = await _row_strategy_ids(db, "bot1")
-        assert col == "s2"
-        assert cfg == "s2"
+        assert col == s2
+        assert cfg == s2
 
-    async def test_change_strategy_updates_both_stores(self, manager, ctx, db):
+    async def test_change_strategy_updates_both_stores(self, manager, ctx, db, s2):
         """#2130 (e): change_strategy → 컬럼+config_json 일관."""
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
-        await manager.change_strategy("bot1", "s2")
+        await manager.change_strategy("bot1", s2)
 
-        assert manager.get_bot("bot1").config.strategy_id == "s2"
+        assert manager.get_bot("bot1").config.strategy_id == s2
         col, cfg = await _row_strategy_ids(db, "bot1")
-        assert col == "s2"
-        assert cfg == "s2"
+        assert col == s2
+        assert cfg == s2
 
-    async def test_assign_running_bot_updates_both_stores(self, manager, ctx, db):
+    async def test_assign_running_bot_updates_both_stores(self, manager, ctx, db, s2):
         """running 봇 assign 후에도 컬럼+config_json 일관 + 재시작."""
         config = BotConfig(
             bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
@@ -500,13 +508,13 @@ class TestAssignChangeConsistency:
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
 
-        await manager.assign_strategy("bot1", "s2")
+        await manager.assign_strategy("bot1", s2)
 
         bot = manager.get_bot("bot1")
-        assert bot.config.strategy_id == "s2"
+        assert bot.config.strategy_id == s2
         assert bot.status == BotStatus.RUNNING
         col, cfg = await _row_strategy_ids(db, "bot1")
-        assert col == "s2" == cfg
+        assert col == s2 == cfg
 
 
 # ── (f) lifecycle 순서 보존 (stop→unload→persist→load→start) ──────
@@ -527,7 +535,7 @@ class _RuleEngineSpy:
 
 class TestLifecycleOrderPreserved:
     async def test_assign_running_preserves_stop_unload_persist_load_start_order(
-        self, eventbus, db, ctx
+        self, eventbus, db, ctx, s2
     ):
         """#2130 (f): running 봇 assign 순서 = stop→unload→persist→load→start.
 
@@ -544,7 +552,7 @@ class TestLifecycleOrderPreserved:
             rule_engine=spy,  # type: ignore[arg-type]
             strategy_rule_configs={
                 "s1": [{"type": "x"}],
-                "s2": [{"type": "y"}],
+                s2: [{"type": "y"}],
             },
         )
         await m.initialize()
@@ -581,15 +589,15 @@ class TestLifecycleOrderPreserved:
         bot.stop = spy_stop  # type: ignore[method-assign]
         bot.start = spy_start  # type: ignore[method-assign]
 
-        await m.assign_strategy("bot1", "s2")
+        await m.assign_strategy("bot1", s2)
 
         # 핵심 순서: stop → old rule unload(s1) → persist(s2) → new rule load(s2)
         # → start.
         assert events == [
             "stop",
             "unload_rules:s1",
-            "persist:s2",
-            "load_rules:s2",
+            f"persist:{s2}",
+            f"load_rules:{s2}",
             "start",
         ]
 
@@ -603,7 +611,7 @@ class TestLifecycleOrderPreserved:
             pass
 
     async def test_change_strategy_persists_after_runtime_update(
-        self, eventbus, db, ctx
+        self, eventbus, db, ctx, s2
     ):
         """change_strategy 는 runtime config 갱신 후 persist 한다 (stopped 봇).
 
@@ -626,9 +634,9 @@ class TestLifecycleOrderPreserved:
 
         m._save_bot_config = spy_save  # type: ignore[method-assign]
 
-        await m.change_strategy("bot1", "s2")
+        await m.change_strategy("bot1", s2)
 
-        assert events == ["persist:runtime=s2"]
+        assert events == [f"persist:runtime={s2}"]
 
         for b in list(m._bots.values()):
             if b._task and not b._task.done():
@@ -643,7 +651,7 @@ class TestLifecycleOrderPreserved:
 
 
 class TestReloadConsistency:
-    async def test_assign_then_reload_consistent(self, manager, eventbus, ctx, db):
+    async def test_assign_then_reload_consistent(self, manager, eventbus, ctx, db, s2):
         """#2130 (g): assign 후 새 매니저로 load_from_db → 컬럼 기반 복원이 일관.
 
         load_from_db 는 컬럼을 읽어 BotConfig 를 만든다. assign 으로 컬럼과
@@ -652,7 +660,7 @@ class TestReloadConsistency:
         """
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
-        await manager.assign_strategy("bot1", "s2")
+        await manager.assign_strategy("bot1", s2)
 
         manager2 = BotManager(eventbus=eventbus, db=db)
         await manager2.initialize()
@@ -660,9 +668,9 @@ class TestReloadConsistency:
         assert count == 1
 
         reloaded = manager2.get_bot("bot1")
-        assert reloaded.config.strategy_id == "s2"
+        assert reloaded.config.strategy_id == s2
         col, cfg = await _row_strategy_ids(db, "bot1")
-        assert reloaded.config.strategy_id == col == cfg == "s2"
+        assert reloaded.config.strategy_id == col == cfg == s2
 
     async def test_update_strategy_then_reload_consistent(
         self, manager_with_account, account_service, eventbus, ctx, db, tmp_path
@@ -731,7 +739,7 @@ class TestUpdateBotAccountConsistency:
         assert acc_col == "acc-test" == acc_cfg
 
     async def test_save_bot_config_upsert_preserves_account_id_on_internal_persist(
-        self, manager_with_account, account_service, eventbus, ctx, db
+        self, manager_with_account, account_service, eventbus, ctx, db, s2
     ):
         """(b) #2274 무회귀: ``_save_bot_config`` UPSERT(account_id=excluded) 가
         내부 persistence 경로(change_strategy)에서 account_id 컬럼↔config_json
@@ -748,7 +756,7 @@ class TestUpdateBotAccountConsistency:
         await manager_with_account.create_bot(config, SimpleStrategy, ctx)
 
         # 내부 persistence 경로(account_id 미변경)로 _save_bot_config 재호출.
-        await manager_with_account.change_strategy("bot1", "s2")
+        await manager_with_account.change_strategy("bot1", s2)
 
         acc_col, acc_cfg = await _row_account_ids(db, "bot1")
         assert acc_col == "acc-test" == acc_cfg
