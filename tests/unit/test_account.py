@@ -18,7 +18,7 @@ from ante.account.errors import (
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
 from ante.account.service import AccountService
-from ante.core.database import Database
+from ante.core.database import Database, OperationalError
 from ante.core.exchange import CANONICAL_EXCHANGES
 from ante.eventbus.bus import EventBus
 
@@ -471,6 +471,55 @@ async def test_delete_succeeds_when_no_active_bots(service, db):
 
     deleted = await service.get("main")
     assert deleted.status == AccountStatus.DELETED
+
+
+class _LockedBotsDB:
+    """``bots`` 조회에서만 ``database is locked``를 던지는 DB 래퍼."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def fetch_one(self, sql, params=()):
+        if "FROM bots" in sql:
+            raise OperationalError("database is locked")
+        return await self._inner.fetch_one(sql, params)
+
+
+@pytest.mark.asyncio
+async def test_delete_blocked_when_bots_lookup_fails(service, db):
+    """활성 봇 검사가 테이블 부재 밖의 오류로 실패하면 삭제하지 않는다 (#2629)."""
+    from ante.bot.manager import BOT_SCHEMA
+
+    await service.create(_make_account())
+    await db.execute_script(BOT_SCHEMA)
+    await db.execute(
+        """INSERT INTO bots
+           (bot_id, name, strategy_id, account_id, config_json, status)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("bot-1", "테스트봇", "strat", "main", "{}", "running"),
+    )
+    service._db = _LockedBotsDB(db)
+
+    with pytest.raises(OperationalError, match="database is locked"):
+        await service.delete("main", deleted_by="admin")
+
+    row = await db.fetch_one("SELECT status FROM accounts WHERE account_id = 'main'")
+    assert row["status"] == "active"
+    assert (await service.get("main")).status == AccountStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_delete_succeeds_when_bots_table_missing(service, db):
+    """``bots`` 테이블이 없으면(봇 없음) 삭제가 진행된다 (#2629)."""
+    await service.create(_make_account())
+
+    await service.delete("main", deleted_by="admin")
+
+    row = await db.fetch_one("SELECT status FROM accounts WHERE account_id = 'main'")
+    assert row["status"] == "deleted"
 
 
 @pytest.mark.asyncio
@@ -2119,9 +2168,38 @@ async def test_legacy_buffer_migration_backfills_only_test_broker(db, eventbus) 
     assert kis_acct.market_order_reserve_buffer_rate == Decimal("0.005")
 
 
+_LEGACY_BUFFER_ROWS = [
+    ("legacy-test", "TEST", "test"),
+    ("legacy-kis", "KRX", "kis-domestic"),
+    ("legacy-overseas", "NASDAQ", "kis-overseas"),
+    ("legacy-unknown", "KRX", "unknown-broker"),
+]
+
+
+class _AlterRecordingDatabase(Database):
+    """buffer 컬럼 ALTER 의 결과를 기록하는 Database."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(path)
+        self.alter_errors: list[BaseException] = []
+        self.other_script_errors: list[BaseException] = []
+
+    async def execute_script(self, sql: str) -> None:
+        try:
+            await super().execute_script(sql)
+        except Exception as exc:
+            if "ADD COLUMN market_order_reserve_buffer_rate" in sql:
+                self.alter_errors.append(exc)
+            else:
+                self.other_script_errors.append(exc)
+            raise
+
+
 @pytest.mark.asyncio
-async def test_row_without_buffer_column_falls_back_to_zero(tmp_path, eventbus) -> None:
-    """ALTER 가 실패해 컬럼이 없는 채로 로드되면 buffer 는 0 으로 대체된다."""
+async def test_row_without_buffer_column_falls_back_to_migration_value(
+    tmp_path, eventbus
+) -> None:
+    """ALTER 가 실패해 컬럼이 없으면 마이그레이션이 줬을 값(test 0, 그 밖 0.005)."""
     import sqlite3
 
     alter_attempts: list[str] = []
@@ -2137,7 +2215,8 @@ async def test_row_without_buffer_column_falls_back_to_zero(tmp_path, eventbus) 
     await database.connect()
     try:
         await _seed_legacy_accounts_without_buffer(
-            database, [("legacy-test", "TEST", "test")]
+            database,
+            [("legacy-test", "TEST", "test"), ("legacy-kis", "KRX", "kis-domestic")],
         )
 
         svc = AccountService(database, eventbus)
@@ -2145,7 +2224,86 @@ async def test_row_without_buffer_column_falls_back_to_zero(tmp_path, eventbus) 
 
         assert len(alter_attempts) == 1
         assert not await _buffer_column_present(database)
-        acct = await svc.get("legacy-test")
-        assert acct.market_order_reserve_buffer_rate == Decimal("0")
+        test_acct = await svc.get("legacy-test")
+        kis_acct = await svc.get("legacy-kis")
+        assert test_acct.market_order_reserve_buffer_rate == Decimal("0")
+        assert kis_acct.market_order_reserve_buffer_rate == Decimal("0.005")
     finally:
         await database.close()
+
+
+@pytest.mark.asyncio
+async def test_real_write_lock_fails_only_alter_and_loads_migration_value(
+    tmp_path, eventbus
+) -> None:
+    """다른 연결의 쓰기 잠금: CREATE 는 지나가고 ALTER 만 잠김으로 실패한다."""
+    import sqlite3
+
+    db_path = str(tmp_path / "locked.db")
+    database = _AlterRecordingDatabase(db_path)
+    await database.connect()
+    holder = sqlite3.connect(db_path, isolation_level=None)
+    try:
+        await _seed_legacy_accounts_without_buffer(
+            database,
+            [("legacy-test", "TEST", "test"), ("legacy-kis", "KRX", "kis-domestic")],
+        )
+        await database._get_writer().execute("PRAGMA busy_timeout=50")
+        holder.execute("BEGIN IMMEDIATE")
+
+        svc = AccountService(database, eventbus)
+        await svc.initialize()
+
+        holder.execute("ROLLBACK")
+        assert database.other_script_errors == []
+        assert len(database.alter_errors) == 1
+        assert "locked" in str(database.alter_errors[0])
+        assert not await _buffer_column_present(database)
+        test_acct = await svc.get("legacy-test")
+        kis_acct = await svc.get("legacy-kis")
+        assert test_acct.market_order_reserve_buffer_rate == Decimal("0")
+        assert kis_acct.market_order_reserve_buffer_rate == Decimal("0.005")
+    finally:
+        holder.close()
+        await database.close()
+
+
+async def _load_buffers(tmp_path, eventbus, name: str, *, lock: bool) -> dict:
+    import sqlite3
+
+    db_path = str(tmp_path / name)
+    database = _AlterRecordingDatabase(db_path)
+    await database.connect()
+    holder = sqlite3.connect(db_path, isolation_level=None)
+    try:
+        await _seed_legacy_accounts_without_buffer(database, _LEGACY_BUFFER_ROWS)
+        await database._get_writer().execute("PRAGMA busy_timeout=50")
+        if lock:
+            holder.execute("BEGIN IMMEDIATE")
+        svc = AccountService(database, eventbus)
+        await svc.initialize()
+        if lock:
+            holder.execute("ROLLBACK")
+        assert len(database.alter_errors) == (1 if lock else 0)
+        assert await _buffer_column_present(database) is (not lock)
+        return {
+            account_id: (await svc.get(account_id)).market_order_reserve_buffer_rate
+            for account_id, _, _ in _LEGACY_BUFFER_ROWS
+        }
+    finally:
+        holder.close()
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_alter_failure_fallback_equals_migrated_value_per_broker(
+    tmp_path, eventbus
+) -> None:
+    """잠금으로 ALTER 실패 시 로드값 == 실제 마이그레이션 뒤 로드값(브로커별)."""
+    failed = await _load_buffers(tmp_path, eventbus, "failed.db", lock=True)
+    migrated = await _load_buffers(tmp_path, eventbus, "migrated.db", lock=False)
+
+    for account_id, _, broker_type in _LEGACY_BUFFER_ROWS:
+        assert failed[account_id] == migrated[account_id], broker_type
+    assert migrated["legacy-test"] == Decimal("0")
+    assert migrated["legacy-kis"] == Decimal("0.005")

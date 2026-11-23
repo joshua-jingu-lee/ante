@@ -370,8 +370,8 @@ class IPCServer:
         }
 
     def _missing_required_service(self, spec_required: frozenset[str]) -> str | None:
-        """``required_services`` preflight — 부재한 첫 service 이름 반환."""
-        for service_name in spec_required:
+        """``required_services`` preflight — 부재한 service 중 이름순 첫 이름 반환."""
+        for service_name in sorted(spec_required):
             if getattr(self._service_registry, service_name, None) is None:
                 return service_name
         return None

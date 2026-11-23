@@ -1714,7 +1714,7 @@ async def _init_notification(s: Services) -> None:
 
     from ante.notification import TelegramCommandReceiver
 
-    chat_id_str = os.environ.get("TELEGRAM_CHAT_ID", "")
+    chat_id_str = telegram_chat_id
     chat_id: int | None = None
     if chat_id_str:
         try:
