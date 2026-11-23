@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from ante.account.scoping import require_account_id
 from ante.core import clock
+from ante.treasury.exceptions import DuplicateReservationError
 from ante.treasury.models import BotBudget
 
 if TYPE_CHECKING:
@@ -601,6 +602,8 @@ class Treasury:
         """주문 제출 시 자금 예약."""
         if amount <= 0:
             raise ValueError("amount must be positive")
+        if order_id in self._reservations:
+            raise DuplicateReservationError(order_id)
 
         budget = self._budgets.get(bot_id)
         if not budget or budget.available < amount:
@@ -694,6 +697,15 @@ class Treasury:
         else:
             self._reservations[order_id] = entry
 
+    def _log_duplicate_validated(self, order_id: str, bot_id: str) -> None:
+        """같은 id의 예약이 있는 검증 이벤트를 발행 없이 버리며 오류 로그를 남긴다."""
+        logger.error(
+            "같은 order_id의 예약이 이미 있어 검증 이벤트를 버린다: "
+            "order_id=%s, bot_id=%s",
+            order_id,
+            bot_id,
+        )
+
     def _is_my_event(self, event: object) -> bool:
         """이벤트가 이 Treasury의 계좌에 해당하는지 확인."""
         account_id: object = getattr(event, "account_id", None)
@@ -713,6 +725,10 @@ class Treasury:
             return
 
         if not self._is_my_event(event):
+            return
+
+        if event.order_id in self._reservations:
+            self._log_duplicate_validated(event.order_id, event.bot_id)
             return
 
         from ante.account.gate import (
@@ -938,6 +954,9 @@ class Treasury:
                     )
                 )
                 return
+            except DuplicateReservationError:
+                self._log_duplicate_validated(event.order_id, event.bot_id)
+                return
             except Exception as exc:
                 logger.exception(
                     "Treasury reserve_for_order 실패 (market buy): "
@@ -1033,6 +1052,9 @@ class Treasury:
                         exchange=event.exchange,
                     )
                 )
+                return
+            except DuplicateReservationError:
+                self._log_duplicate_validated(event.order_id, event.bot_id)
                 return
             except Exception as exc:
                 logger.exception(
