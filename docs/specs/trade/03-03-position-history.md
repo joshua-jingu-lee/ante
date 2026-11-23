@@ -11,6 +11,8 @@
 > `_db.execute`는 commit하지 않으므로 한 트랜잭션에 묶임). CAS advance + trade insert
 > 와 원자적으로 묶여 crash-safe exactly-once를 보장한다. 상세:
 > [03-08-fill-recovery.md](03-08-fill-recovery.md).
+> 인메모리 포지션 캐시는 커밋된 DB의 미러다 — fill 경로에서는 FillApplier 트랜잭션이
+> 예외 없이 COMMIT된 뒤에만 반영되고, 롤백되면 캐시는 바뀌지 않는다(#2819).
 
 #### PositionSnapshot 필드
 
@@ -37,6 +39,7 @@
 | `get_current` | `bot_id: str`, `symbol: str` | `dict` | 현재 포지션 조회. 없으면 빈 포지션 반환 |
 | `get_history` | `bot_id: str`, `symbol: str \| None` | `list[dict]` | 포지션 변동 이력 조회 |
 | `force_update` | `bot_id: str`, `symbol: str`, `quantity: float`, `avg_entry_price: float` | `None` | Reconciler 전용: 포지션을 브로커 기준 값으로 강제 덮어쓰기 |
+| `defer_cache` | — | 동기 컨텍스트 매니저 | 블록 안의 `on_trade` 캐시 반영을 미뤘다가 블록이 정상 종료하면 순서대로 적용하고 예외로 끝나면 버린다. 중첩 금지. FillApplier가 체결 트랜잭션을 감싸는 데 쓴다 |
 
 **근거**:
 - 체결 기록(TradeRecord)과 포지션 상태는 별도 관리 — 체결은 개별 이벤트, 포지션은 누적 상태

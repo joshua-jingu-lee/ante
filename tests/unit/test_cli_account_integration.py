@@ -355,8 +355,9 @@ class TestSystemHaltClearHalt:
     def test_system_halt_sends_ipc(self, runner):
         """system halt가 IPC system.halt 커맨드 전송."""
         mock_response = {
+            "id": "t",
             "status": "ok",
-            "data": {
+            "result": {
                 "status": "halted",
                 "accounts_changed": 2,
                 "changed_at": "2026-05-03T05:21:33+00:00",
@@ -384,8 +385,9 @@ class TestSystemHaltClearHalt:
     def test_system_clear_halt_sends_ipc(self, runner):
         """system clear-halt가 IPC system.clear_halt 커맨드 전송."""
         mock_response = {
+            "id": "t",
             "status": "ok",
-            "data": {
+            "result": {
                 "status": "halt_cleared",
                 "accounts_changed": 2,
                 "changed_at": "2026-05-03T05:21:33+00:00",

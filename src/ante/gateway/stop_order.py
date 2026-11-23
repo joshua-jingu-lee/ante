@@ -157,6 +157,7 @@ class StopOrderManager:
             )
 
         stop_order_id = f"stop-{uuid4().hex[:12]}"
+        now = clock.now(UTC)
 
         order = StopOrder(
             stop_order_id=stop_order_id,
@@ -172,11 +173,12 @@ class StopOrderManager:
             trading_session=trading_session,
             exchange=exchange,
             account_id=account_id,
+            registered_at=now,
         )
         self._orders[stop_order_id] = order
 
-        if self._is_in_session(order):
-            if self._session_epoch_key(order.trading_session) in (
+        if self._is_in_session(order, now):
+            if self._session_epoch_key(order.trading_session, now) in (
                 self._session_tick_marked
             ):
                 order.entered_session = True
@@ -256,20 +258,23 @@ class StopOrderManager:
         if not self._running:
             return
 
+        now = clock.now(UTC)
         if is_exchange_tick:
             for order in self.active_orders:
-                if self._is_in_session(order):
+                if self._is_in_session(order, now):
                     order.entered_session = True
             for session_type in SESSION_TYPES:
-                if self._is_session_type_active_now(session_type):
-                    self._session_tick_marked.add(self._session_epoch_key(session_type))
+                if self._is_session_type_active_now(session_type, now):
+                    self._session_tick_marked.add(
+                        self._session_epoch_key(session_type, now)
+                    )
 
         active_for_symbol = [
             o
             for o in self.active_orders
             if o.symbol == symbol
             and o.account_id == account_id
-            and self._is_in_session(o)
+            and self._is_in_session(o, now)
         ]
 
         for order in active_for_symbol:
@@ -287,13 +292,14 @@ class StopOrderManager:
         """
         from ante.broker.fill_scheduler import business_date_kst
 
-        today = business_date_kst()
+        now = clock.now(UTC)
+        today = business_date_kst(now)
         self._session_tick_marked = {
             key for key in self._session_tick_marked if key.split(":", 1)[0] == today
         }
 
         for order in self.active_orders:
-            if order.entered_session and not self._is_in_session(order):
+            if order.entered_session and not self._is_in_session(order, now):
                 await self._expire_order(order, "session_ended")
 
     def _should_trigger(self, order: StopOrder, price: float) -> bool:
@@ -303,19 +309,18 @@ class StopOrderManager:
         else:
             return price <= order.stop_price
 
-    def _is_in_session(self, order: StopOrder) -> bool:
-        """현재 시각이 주문의 거래 세션 시간 내인지 확인."""
-        return self._is_session_type_active_now(order.trading_session)
+    def _is_in_session(self, order: StopOrder, now: datetime) -> bool:
+        """주어진 시각이 주문의 거래 세션 시간 내인지 확인."""
+        return self._is_session_type_active_now(order.trading_session, now)
 
-    def _session_epoch_key(self, session_type: str) -> str:
+    def _session_epoch_key(self, session_type: str, now: datetime) -> str:
         """epoch 키 SSOT ``{KST 캘린더 날짜}:{세션종류}``(휴장일·주말도 roll 안 함)."""
         from ante.broker.fill_scheduler import business_date_kst
 
-        return f"{business_date_kst()}:{session_type}"
+        return f"{business_date_kst(now)}:{session_type}"
 
-    def _is_session_type_active_now(self, session_type: str) -> bool:
-        """현재 시각이 주어진 세션 종류의 윈도우 안인지(시각 기준)."""
-        now = clock.now(UTC)
+    def _is_session_type_active_now(self, session_type: str, now: datetime) -> bool:
+        """주어진 시각이 세션 종류의 윈도우 안인지(시각 기준)."""
         current_minutes = now.hour * 60 + now.minute
 
         if session_type == "extended":

@@ -825,7 +825,9 @@ class TestAccountLifecycleValidRegression:
     def test_valid_account_id_dispatches_ipc(
         self, runner, name, argv, ipc_cmd, success
     ) -> None:
-        client_send_mock = AsyncMock(return_value={"status": "ok", "data": {}})
+        client_send_mock = AsyncMock(
+            return_value={"id": "t", "status": "ok", "result": {}}
+        )
         mock_client = AsyncMock()
         mock_client.send = client_send_mock
         client_cls = MagicMock(return_value=mock_client)
