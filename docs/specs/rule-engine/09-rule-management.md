@@ -60,6 +60,10 @@ broker_type별 defaults와 stored overrides의 merge다.
 
 CLI `rule update`는 stored rules만 갱신한다. effective rules의 별도 노출은 본
 스펙의 후속 이슈에서 다룬다.
+`enabled`(CLI `--enabled/--disabled`, IPC `rule.update.enabled`)를 생략하거나
+`null`로 보내면 동적 설정(`accounts.{id}.rules`)에 저장된 같은 type의 항목의 값을
+유지하고, 그 항목이 없으면 `true`다(데몬 없이 직접 실행할 때 동적 설정이 비어 있으면
+정적 TOML seed에 있는 같은 type 항목의 값을 쓴다).
 
 ### Static TOML seed
 

@@ -254,7 +254,7 @@ class DailyReportScheduler:
             await asyncio.sleep(delay)
 
             try:
-                await self.run_once()
+                await self.run_once(target_date=target.date())
             except asyncio.CancelledError:
                 raise
             except Exception:

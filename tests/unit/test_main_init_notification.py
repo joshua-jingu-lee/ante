@@ -96,7 +96,7 @@ async def test_disabled_with_secrets_still_creates_service(
         telegram_enabled="false",
         secrets={"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "42"},
     )
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
 
     created_kwargs: list[dict[str, Any]] = []
 
@@ -205,8 +205,7 @@ async def test_enabled_with_secrets_initializes_service(
         secrets={"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "42"},
     )
 
-    # TELEGRAM_CHAT_ID 환경변수가 parse 될 수 있도록 설정 (receiver 활성화 경로).
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
 
     # NotificationService.subscribe 가 실제 EventBus 계약을 요구하므로,
     # 서비스 생성 후 subscribe 단계에서 실패해도 본 테스트의 목적(= 시크릿
@@ -267,3 +266,84 @@ async def test_enabled_with_secrets_initializes_service(
     assert captured_kwargs[0]["instrument_service"] is s.instrument_service, (
         "TelegramCommandReceiver에 s.instrument_service가 주입되어야 한다 (#2385)"
     )
+
+
+_FAKE_TOKEN = "fake-token"
+_FAKE_CHAT_ID = "42"
+
+
+def _real_config_services(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Services, list[dict[str, Any]]]:
+    """실제 ``Config.secret`` 경로를 쓰고 수신기·서비스는 스텁한다 (#2625)."""
+    import ante.notification as notification_mod
+    from ante.config import Config
+
+    class _StubNotificationService:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def subscribe(self) -> None:
+            pass
+
+    captured: list[dict[str, Any]] = []
+
+    class _StubReceiver:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            captured.append(kwargs)
+
+        def start(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        notification_mod, "NotificationService", _StubNotificationService
+    )
+    monkeypatch.setattr(notification_mod, "TelegramCommandReceiver", _StubReceiver)
+
+    s = Services()
+    s.config = Config(
+        static={},
+        secrets={
+            "TELEGRAM_BOT_TOKEN": _FAKE_TOKEN,
+            "TELEGRAM_CHAT_ID": _FAKE_CHAT_ID,
+        },
+    )
+    s.eventbus = _StubEventBus()  # type: ignore[assignment]
+    s.dynamic_config = _StubDynamicConfig(  # type: ignore[assignment]
+        {"notification.telegram_enabled": "true"}
+    )
+    return s, captured
+
+
+@pytest.mark.asyncio
+async def test_receiver_uses_chat_id_from_secrets_file_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2625: chat id가 secrets.env에만 있어도 수신기가 켜지고 발신과 같은 값을 쓴다."""
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    s, captured = _real_config_services(monkeypatch)
+
+    await _init_notification(s)
+
+    assert s.telegram_receiver is not None
+    assert len(captured) == 1
+    assert captured[0]["allowed_user_ids"] == [int(_FAKE_CHAT_ID)]
+    assert captured[0]["adapter"]._chat_id == _FAKE_CHAT_ID
+
+
+@pytest.mark.asyncio
+async def test_receiver_and_sender_share_env_chat_id_over_secrets_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2625: 환경변수와 secrets.env가 다르면 발신·수신 모두 환경변수 값을 쓴다."""
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "7")
+    s, captured = _real_config_services(monkeypatch)
+
+    await _init_notification(s)
+
+    assert s.telegram_receiver is not None
+    assert len(captured) == 1
+    assert captured[0]["allowed_user_ids"] == [7]
+    assert captured[0]["adapter"]._chat_id == "7"
