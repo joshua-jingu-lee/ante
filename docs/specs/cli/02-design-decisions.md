@@ -162,7 +162,8 @@ SSOT의 CLI success/error envelope을 적용하는 표면 메서드 시그니처
 | `success` | message: str, data: dict \| None = None | None | CLI success envelope `{status:"ok", message, data}` 출력 (SSOT: [envelopes.md](../contracts/envelopes.md#cli-success-envelope)) |
 
 CLI 계약(`src/ante/contracts/cli_registry.py`)이 있고 그 `kind`가 `stream`이 아니며 leaf 콜백이
-`CommandResult`(`data`·`message`·`text`)를 돌려주는 명령은 스스로 출력하지 않고, 진입점 훅(루트
+`CommandResult`(`data`·`message`·`text`)를 돌려주는 명령은 성공 출력을 스스로 내지 않고(`strategy submit`이
+text 모드에서 `stderr`로 내는 경고 줄은 예외), 진입점 훅(루트
 `AuthenticatedGroup.invoke`)이 한 번 직렬화한다. JSON 모드는 `success(message, data)`이고,
 text 모드는 `text`의 줄을 차례로 내며 `text`가 `None`이면 `message`를 낸다. `text`는 줄의 튜플이거나
 그 튜플을 돌려주는 callable이고, callable은 text 모드에서만 한 번 불린다. 줄이 튜플이 아니거나

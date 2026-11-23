@@ -170,6 +170,12 @@ def test_signal_connect_contract_is_stream() -> None:
     assert contract.output.kind == "stream"
 
 
+def test_stream_contracts_are_exactly_signal_connect() -> None:
+    """``kind == "stream"`` 인 계약은 ``signal connect`` 하나뿐이다 (#2773)."""
+    streams = {p for p, c in CLI_COMMAND_REGISTRY.items() if c.output.kind == "stream"}
+    assert streams == {("signal", "connect")}
+
+
 # ── registry baseline (account migration, #1846) ──────────────────────────
 #
 # #1844 시점에는 ``CLI_COMMAND_REGISTRY`` 가 빈 dict 라는 baseline 단언이

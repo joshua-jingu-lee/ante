@@ -65,25 +65,28 @@ CLI 계약이 있고 그 `kind`가 `stream`이 아닌 커맨드가 `--format jso
   직렬화한다. 결과 값의 `text`(text 모드의 줄)는 `str` 줄의 tuple이거나 그것을
   돌려주는 callable이며, envelope은 `text`를 쓰지 않고 callable은 text 모드에서만
   불린다. 예외는 `system start` 하나다: 결과 값을 돌려주지 않고 자식 프로세스를
-  띄우기 전에 envelope을 직접 한 번 내며, 자식의 종료 코드로 끝난다.
+  띄우기 전에 envelope을 직접 한 번 내며, 자식의 종료 코드로 끝나고 Ctrl+C에서는
+  종료 코드 0으로 끝난다.
 - 계약의 `kind`가 `stream`인 명령(`signal connect`)은 성공 출력으로 envelope을 내지
   않는다. 출력은 스트림 프로토콜이며 실패는 아래 [CLI error envelope](#cli-error-envelope)을
   따른다.
-- 계약이 없는 명령(`feed`·`init`·`update`)에는 훅이 관여하지 않는다.
+- 계약이 없는 명령(`feed`·`init`·`update`)의 성공 출력은 훅이 직렬화하지 않는다(결과
+  값을 돌려주면 아래와 같이 `TypeError`). 이 세 명령은 실패를 타입 예외로 올리고, 다른
+  명령과 같이 진입점 훅이 그 예외를 CLI error envelope(JSON)이나
+  `Error: <code>: <message>`(text)로 낸다. 그 앞에 명령이 `stderr`로 먼저 내는 줄이 있는
+  자리는 둘이다: `update`의 마이그레이션 실패(text 모드의 안내 줄)와, master를 만든 뒤
+  테스트 계좌 생성이 실패한 `init`(JSON 모드의 복구용 한 줄 JSON).
 - 결과 값을 돌려주는데 계약이 없거나 계약의 `kind`가 `stream`이면 훅은 envelope을
   내지 않고 `TypeError`를 낸다. 결과 값이 아닌 반환(`None` 포함)에는 훅이 아무것도
-  하지 않는다. 계약이 있고 `kind`가 `stream`이 아닌 명령의 콜백이 결과 값을
-  돌려주는가는 반환 타입 주석의 정적 테스트와 `mypy`가 잠근다.
+  하지 않는다. 계약이 있고 `kind`가 `stream`이 아닌 명령(`system start` 제외)의 콜백이
+  결과 값을 돌려주는가는 반환 타입 주석의 정적 테스트와 `mypy`가 잠근다.
 - `data` 배치: 결과 값의 payload가 객체면 그대로 `data`다. 배열이면
   `{<계약의 data_key>: 배열}`이다. 계약의 `data_key`가 없는데 payload가 배열이면 훅은
   envelope을 내지 않고 `TypeError`를 낸다. `data_key`의 이름은 배열의 행이 나타내는
-  자원의 복수형 snake_case 명사다(예: 결재 요청 행의 배열은 `approvals`).
-- 명령이 직접 만든 payload(평면 객체나 배열)를 내던 명령을 envelope으로 옮길 때는
-  payload의 키와 값을 바꾸지 않았다. 옛 payload가 객체면 그대로 `data`에 들어가고
-  `message`는 빈 문자열이며, payload 안의 `message` 키는 `data`에 남는다. 옛 payload가
-  배열이면 계약에 `data_key`를 채운다.
-- 이 전환의 버전 정책은 [D-021](../../decisions/D-021-trust-pyramid-governance.md)을
-  따른다.
+  자원의 복수형 snake_case 명사다(예: 결재 요청 행의 배열은 `approvals`). envelope의
+  `message`는 결과 값의 `message`이며, payload 객체 안의 `message` 키는 `data`에 남는다.
+- CLI 성공 출력 형태를 바꾸는 변경의 버전 정책은
+  [D-021](../../decisions/D-021-trust-pyramid-governance.md)을 따른다.
 
 ## CLI error envelope
 
@@ -224,7 +227,8 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
   [#2334](https://github.com/joshua-jingu-lee/ante/issues/2334)이며 **구현 PR 머지
   후 동작**한다(동기 버그 #2333 unblock; spec 단계에서는 미동작).
 - **결론**: 어느 표면이든 사용자/Agent에게 보이는 envelope은 CLI envelope 2형태
-  중 하나(JSON. 계약의 `kind`가 `stream`인 명령의 성공 출력은 envelope이 아니다), IPC
+  중 하나(JSON. 계약의 `kind`가 `stream`인 명령의 성공 출력은 envelope이 아니고, 계약이
+  없는 명령의 성공 출력은 본 규칙 밖이다), IPC
   envelope 2형태 중 하나(서버 응답)다. CLI가 IPC
   envelope 그대로를 출력하거나, IPC가 CLI envelope을 반환하는 시나리오는 본
   SSOT가 정의하는 envelope 형태가 아니다.
