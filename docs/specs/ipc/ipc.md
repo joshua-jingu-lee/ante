@@ -519,19 +519,9 @@ CLI 프로세스에서 서버의 Unix socket에 연결하여 커맨드를 전달
 소스: src/ante/core/registry.py
 ```
 
-```python
-@dataclass
-class ServiceRegistry:
-    account: AccountService
-    bot_manager: BotManager
-    treasury_manager: TreasuryManager
-    dynamic_config: DynamicConfigService
-    approval: ApprovalService
-    reconciler: PositionReconciler
-    eventbus: EventBus
-    strategy_registry: StrategyRegistry | None = None
-    audit_logger: AuditLogger | None = None  # #1472: approval.cancel_invalid audit
-```
+정의: `ante.core.registry.ServiceRegistry` (코드가 정본이다).
+
+- `audit_logger`: #1472: approval.cancel_invalid audit
 
 `audit_logger` 는 administrative mutation IPC (`approval.cancel_invalid`) 가
 정상 환경에서 `audit_log` 테이블에 기록을 남기기 위한 optional 필드다.
