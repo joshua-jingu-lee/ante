@@ -75,6 +75,14 @@ def register_all_handlers(registry):
 
 CLI_REGISTRY = "src/ante/contracts/cli_registry.py"
 
+SYSTEM = "src/ante/cli/commands/system.py"
+SYSTEM_SOURCE = """def start(proc):
+    try:
+        raise SystemExit(proc.returncode)
+    except KeyboardInterrupt:
+        raise SystemExit(0)
+"""
+
 
 def _contract(path: str, output: str) -> str:
     segments = ", ".join(f'"{segment}"' for segment in path.split())
@@ -109,6 +117,7 @@ def _tree(root: Path, files: dict[str, str] | None = None) -> Path:
     _write(root, REGISTRY, REGISTRY_SOURCE)
     _write(root, IPC_REGISTRY, IPC_SOURCE)
     _write(root, CLI_REGISTRY, CLI_REGISTRY_SOURCE)
+    _write(root, SYSTEM, SYSTEM_SOURCE)
     for rel, text in (files or {}).items():
         _write(root, rel, text)
     return root
@@ -2281,3 +2290,129 @@ def test_script_exits_1_when_a_command_echoes(tmp_path: Path) -> None:
     result = _script(["--root", str(root)], tmp_path)
     assert result.returncode == 1, result.stdout + result.stderr
     assert result.stdout == ""
+
+
+# ---------------------------------------------------------------- NON_ERROR_EXITS
+
+
+NON_ERROR_HINT = (
+    "NON_ERROR_EXITS는 에러가 아닌 종료만 담는다: 늘어난 종료가 에러 출구면 "
+    "타입 예외를 던지고, 종료가 사라졌거나 옮겨졌으면 그 항목을 실측으로 고친다."
+)
+
+
+def test_non_error_exits_constant_lists_system_start_only() -> None:
+    assert checker.NON_ERROR_EXITS == {("src/ante/cli/commands/system.py", "start"): 2}
+
+
+def test_repository_has_no_non_error_exit_mismatch() -> None:
+    assert checker.measure(REPO_ROOT).non_error_exit_mismatches == ()
+
+
+def test_listed_exits_are_not_counted(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path)
+    assert SYSTEM not in _freeze(root)["cli_exits"]
+    code, out = _run(root, capsys)
+    assert code == 0, out
+
+
+def test_other_calls_in_a_listed_function_are_counted(tmp_path: Path) -> None:
+    source = SYSTEM_SOURCE.replace(
+        "    try:\n",
+        '    fmt.error("m", code="REG")\n    getattr(e, "ipc_error_code", "")\n'
+        "    try:\n",
+    )
+    assert _counts(tmp_path, source, rel=SYSTEM) == {
+        "cli_error_calls": 1,
+        "cli_exits": 0,
+        "ipc_error_code_reads": 1,
+    }
+
+
+def test_new_exit_outside_the_listed_function_is_caught(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    _write(root, SYSTEM, SYSTEM_SOURCE + "\n\ndef stop():\n    raise SystemExit(1)\n")
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_exits\t{SYSTEM}: actual 1, baseline 0 (+1)",
+            *ALTERNATIVE_LINES,
+            MOVE_LINE,
+        ],
+    )
+
+
+def test_extra_exit_in_the_listed_function_is_caught(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    _write(
+        root,
+        SYSTEM,
+        SYSTEM_SOURCE.replace("    try:\n", "    raise SystemExit(1)\n    try:\n"),
+    )
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_exits\t{SYSTEM}:start: non-error exits 3, NON_ERROR_EXITS 2 (+1)",
+            NON_ERROR_HINT,
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "found"),
+    [
+        (SYSTEM_SOURCE.replace("raise SystemExit(0)", "return"), 1),
+        ("def start(proc):\n    return proc\n", 0),
+        (None, 0),
+    ],
+    ids=["one_removed", "all_removed", "file_removed"],
+)
+def test_stale_listing_is_caught(
+    tmp_path: Path, capsys: Capsys, source: str | None, found: int
+) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    if source is None:
+        (root / SYSTEM).unlink()
+    else:
+        _write(root, SYSTEM, source)
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_exits\t{SYSTEM}:start: non-error exits {found}, "
+            f"NON_ERROR_EXITS 2 ({found - 2:+d})",
+            NON_ERROR_HINT,
+        ],
+    )
+
+
+def test_renamed_listed_function_is_caught_twice(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    _write(root, SYSTEM, SYSTEM_SOURCE.replace("def start(", "def begin("))
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_exits\t{SYSTEM}: actual 2, baseline 0 (+2)",
+            f"cli_exits\t{SYSTEM}:start: non-error exits 0, NON_ERROR_EXITS 2 (-2)",
+            *ALTERNATIVE_LINES,
+            MOVE_LINE,
+            NON_ERROR_HINT,
+        ],
+    )

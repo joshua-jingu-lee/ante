@@ -105,9 +105,8 @@ CLI 커맨드가 `--format json` 모드에서 실패한 경우 출력하는 형�
 - `--format text` 모드는 `Error: <code>: <message>`를 `stderr`로 출력한다. 메시지가
   이미 `<code>: `로 시작하면 접두를 다시 붙이지 않는다. Click 자신의 사용법 오류는
   Click 기본 형식을 따르고, `strategy validate`·`strategy submit`의 검증 실패
-  출구(오류 줄 뒤에 상세 줄이 이어진다)는 `Error: <message>`다. `signal connect`의
-  핸드셰이크 실패는 `stderr`에 `<message>`만 낸다. JSON 모드는 `stdout`으로 envelope
-  한 줄을 출력한다.
+  출구(오류 줄 뒤에 상세 줄이 이어진다)는 `Error: <message>`다. JSON 모드는 `stdout`으로
+  envelope 한 줄을 출력한다.
 - `code` 값의 vocabulary(taxonomy, 도메인 prefix 등)는 본 SSOT 범위가 아니다 →
   [Non-Goals](#non-goals) 참조.
 - 구현 reference: `OutputFormatter.error()` (`src/ante/cli/formatter.py`).
@@ -192,12 +191,16 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
   `rule update`·`strategy set-status`는 포괄 `except` 앞에서 셋을 그대로 다시 올린다.
 - **streaming 핸드셰이크 passthrough(`signal connect`)**: `signal connect`의 핸드셰이크
   단계는 데몬이 생성한 IPC error envelope의 `error.code`/`error.message`를 CLI error
-  envelope으로 **1회만** 옮긴다. 이때 `message`는 **verbatim passthrough**한다 —
-  CLI가 번역·재작성·접두(`Error:` 등)하지 않는다. 따라서 데몬 핸드셰이크 검증
-  에러는 `{status:error, code, message}` 형태로 #1705 회귀 lock과 byte-identical하게
-  유지된다. 이는 위 **CLI IPC 헬퍼 계약**의 동형(streaming 표면) 적용이며, `code`
-  vocabulary와 streaming 프로토콜 자체는 본 SSOT 범위 밖이다(각각
-  `docs/specs/contracts/error-taxonomy.md`, `docs/specs/ipc/ipc.md`). 계약 정의는
+  envelope으로 **1회만** 옮긴다. 이때 JSON 모드의 `message`는 **verbatim
+  passthrough**한다 — CLI가 번역·재작성하지 않는다. 데몬이 낸 거부는
+  `IPCRemoteError`로, 연결 실패(소켓 없음·연결 거부·응답 끊김·시간 초과)는 위 헬퍼와
+  같은 `IPCServerNotRunningError`·`IPCClientTimeoutError`로 진입점 훅에 올린다.
+  따라서 JSON 모드의 데몬 핸드셰이크 검증 에러는 `{status:error, code, message}`
+  형태로 #1705 회귀 lock과 byte-identical하게 유지되고, text 모드는 위 text 규칙대로
+  `stderr`에 `Error: <code>: <message>` 한 줄을 낸다(#2762). 이는 위 **CLI IPC 헬퍼
+  계약**의 동형(streaming 표면) 적용이며, `code` vocabulary와 streaming 프로토콜
+  자체는 본 SSOT 범위 밖이다(각각 `docs/specs/contracts/error-taxonomy.md`,
+  `docs/specs/ipc/ipc.md`). 계약 정의는
   [#2334](https://github.com/joshua-jingu-lee/ante/issues/2334)이며 **구현 PR 머지
   후 동작**한다(동기 버그 #2333 unblock; spec 단계에서는 미동작).
 - **결론**: 어느 표면이든 사용자/Agent에게 보이는 envelope은 CLI envelope 2형태

@@ -1,12 +1,9 @@
 {
   "cli_error_calls": {
-    "src/ante/cli/commands/signal.py": 1,
     "src/ante/cli/commands/strategy.py": 2
   },
   "cli_exits": {
-    "src/ante/cli/commands/signal.py": 1,
-    "src/ante/cli/commands/strategy.py": 5,
-    "src/ante/cli/commands/system.py": 2
+    "src/ante/cli/commands/strategy.py": 5
   },
   "ipc_error_code_reads": {},
   "unregistered_codes": [],
@@ -30,7 +27,7 @@
   "cli_direct_output": {
     "src/ante/cli/commands/feed.py": 60,
     "src/ante/cli/commands/init.py": 22,
-    "src/ante/cli/commands/signal.py": 2,
+    "src/ante/cli/commands/signal.py": 1,
     "src/ante/cli/commands/strategy.py": 15,
     "src/ante/cli/commands/system.py": 2,
     "src/ante/cli/commands/update.py": 35
