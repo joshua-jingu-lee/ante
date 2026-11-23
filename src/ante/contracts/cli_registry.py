@@ -68,9 +68,9 @@ class OutputContract:
     """CLI command 의 출력 계약.
 
     Attributes:
-        data_key: standard envelope 의 ``data`` 슬롯 안에서 사용할 key
-            이름 (예: ``"account"``, ``"bots"``). ``raw`` / ``stream``
-            계열 또는 단일 slot 이 필요 없는 경우 ``None``.
+        data_key: 배열 payload 를 CLI success envelope 의 ``data`` 안에서
+            감쌀 key 이름 (예: ``"approvals"``). 배열 payload 를 돌려주지
+            않는 명령은 ``None``.
     """
 
     kind: ContractKind

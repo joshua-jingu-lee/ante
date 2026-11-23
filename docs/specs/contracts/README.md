@@ -59,8 +59,10 @@ enum/dataclass/helper/validator는 의도적으로 제외되어 있다 — 후�
 #### `kind`의 쓰임
 
 CLI 계약의 `OutputContract.kind` 가운데 동작에 닿는 값은 `stream` 하나다. 진입점
-훅은 계약의 `kind`가 `stream`인가만 읽는다(스트림 계약의 명령은 envelope을 내지
-않는다 — [envelopes.md](envelopes.md)의 「CLI 성공 출력과 계약」). 나머지 값
+훅이 `kind`에서 읽는 것은 `stream`인가뿐이다. 스트림 계약의 명령은 성공 출력으로
+envelope을 내지 않고, 실패는 CLI error envelope을 따른다
+([envelopes.md](envelopes.md)의 「CLI 성공 출력과 계약」). 훅은 이와 별도로
+`data_key`를 읽는다(배열 payload를 감쌀 키). `kind`의 나머지 값
 (`entity`·`operation`·`collection`·`raw`)은 문서 값이며 출력을 바꾸지 않는다.
 
 ### Drift helper skeleton (#1823)
