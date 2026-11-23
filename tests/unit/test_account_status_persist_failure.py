@@ -148,12 +148,13 @@ async def test_activate_cancelled_mid_write_restores_cache_and_db_rolls_back(
 
     monkeypatch.setattr(writer, "commit", blocked_commit)
     task = asyncio.create_task(service.activate("main", activated_by="admin"))
-    await entered.wait()
-    assert account.status == AccountStatus.ACTIVE
+    await asyncio.wait_for(entered.wait(), timeout=5)
+    status_during_write = account.status
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    assert status_during_write == AccountStatus.ACTIVE
     assert account.status == AccountStatus.SUSPENDED
     assert account.updated_at == before_updated_at
     assert await _db_status(db, "main") == before_row
@@ -240,13 +241,16 @@ async def test_overlapping_activate_returns_early_while_first_write_is_in_flight
 
     monkeypatch.setattr(service._db, "execute", execute)
     first = asyncio.create_task(service.activate("main", activated_by="admin"))
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=5)
 
-    await service.activate("main", activated_by="admin")
-    assert status_updates == 1
-    assert published == []
-
-    release.set()
+    try:
+        await asyncio.wait_for(
+            service.activate("main", activated_by="admin"), timeout=1
+        )
+        assert status_updates == 1
+        assert published == []
+    finally:
+        release.set()
     await first
     assert account.status == AccountStatus.ACTIVE
     assert [type(e) for e in published] == [AccountActivatedEvent, NotificationEvent]
