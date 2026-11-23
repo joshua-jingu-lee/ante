@@ -525,6 +525,10 @@ class DARTSource:
     def _extract_list(data: dict[str, Any]) -> list[dict[str, Any]]:
         """DART 응답에서 list 배열을 추출한다."""
         items = data.get("list", [])
+        if items is None:
+            msg = f"DART 응답의 list가 null이다 (status={data.get('status')})"
+            logger.error(msg)
+            raise DARTError(msg)
         if isinstance(items, dict):
             items = [items]
         return cast("list[dict[str, Any]]", items)
