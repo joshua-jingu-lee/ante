@@ -229,26 +229,24 @@ category와 트리거(#2334 §5/§9)는 생성 문서
 - **원천 code**: KIS `msg_cd`, broker HTTP status, exchange reject reason 등은
   envelope의 `code`/`error.code`로 노출하지 않는다.
   - 옵션 A — `details.broker_code` 필드를 통해 envelope `details` slot 안쪽으로
-    노출한다 ([Details 필드 reserved](#details-필드-reserved) 참조).
+    노출한다 ([Details 필드](#details-필드) 참조).
   - 옵션 B — log-only로 보관한다.
   - 본 PR은 spec만 결정하며 옵션 A/B 중 어느 것으로 구현할지의 결정은 후속
     이슈에 위임한다. 본 SSOT가 lock 하는 것은 "envelope 최상위 code 슬롯에는
     ante taxonomy code만 들어간다"는 invariant다.
 
-## Details 필드 reserved
+## Details 필드
 
-본 SSOT는 envelope의 `code`/`message` 외의 보조 정보를 위한 **`details: dict | None`
-slot을 reserved**로 선언한다.
+envelope의 `code`/`message` 외의 보조 정보는 **`details: dict | None`**에 싣는다.
 
-- **목적**: broker_code, 위반 필드 이름, 위치 정보 등 envelope 본문을 변경하지
-  않고 보조 정보를 노출하기 위한 미래 슬롯.
-- **현재 상태**: 본 SSOT 1.0은 `details`를 envelope에 강제 도입하지 않는다.
-  envelope 4형태의 normative shape은 [envelopes.md](envelopes.md)의 1.0 lock을
-  그대로 따른다. `details` 필드 도입의 normative 결정은 별도 SSOT 이슈
-  (envelope shape 변경) 책임이다.
-- **본 SSOT의 역할**: details slot의 vocabulary(예: `details.broker_code`)에 대한
-  의미는 본 문서가 reserved로 등록만 한다. 실제 구현 도입 시 본 문서의 갱신이
-  선행 조건이다.
+- **현재 상태**: CLI error envelope에만 있다([#2762](https://github.com/joshua-jingu-lee/ante/issues/2762)). 상세가 있을 때만 네 번째 키로
+  직렬화하고(`None`이면 키가 없다) 키는 [envelopes.md](envelopes.md)의 표가 정한다:
+  `STRATEGY_VALIDATION_FAILED` `{errors, warnings}`, `STRATEGY_VALIDATION_ERROR`
+  `{stage, errors}`(`strategy submit`의 검증 실패), `strategy submit`의 로드·meta·등록
+  실패 `{stage}`. IPC error envelope에는 `details`가 없다.
+- **reserved vocabulary**: `details.broker_code` 등 위 표 밖의 키는 reserved로 등록만
+  한다. 도입 시 본 문서와 envelopes.md의 갱신이 선행 조건이다.
+- 아래 Redaction 정책은 `details`에도 적용된다.
 
 ## Redaction 정책 (normative)
 
@@ -277,7 +275,7 @@ envelope `message`(CLI error의 `message`, IPC error의 `error.message`)는 사�
 | 필드 | 위치 | 1.0 상태 | 비고 |
 |------|------|----------|------|
 | `retryable` | `ErrorSpec.retryable` | 기본 `False`, reserved | 소비자 정해질 때까지 envelope에 직렬화 금지 |
-| `details` | envelope error 슬롯(`error.details` 또는 CLI error의 `details`) | 미도입, reserved | 도입 결정 시 envelope shape SSOT 갱신 선행 |
+| `details` | CLI error의 `details` (`dict \| None`) | 도입됨(CLI만, [#2762](https://github.com/joshua-jingu-lee/ante/issues/2762)) | IPC error의 `error.details`는 미도입 |
 | `exit_code` | `ErrorSpec.exit_code` | 기본 `1`, 명시적 | click usage exit 2 전면 정렬은 별도 이슈 |
 
 ## 후속 작업과 분리
@@ -291,7 +289,7 @@ envelope `message`(CLI error의 `message`, IPC error의 `error.message`)는 사�
 | `SERVICE_NOT_CONFIGURED` 등록 | normative | #1819 dispatch wrapper 도입 |
 | `EXECUTION_ERROR` 허용 범위 | normative | #1841 drift test guard |
 | broker external code 분리 (public taxonomy 분리 invariant) | normative | broker 원천 노출 구현 — 별도 이슈 |
-| `details` slot 의미 reserved | normative (slot은 도입 안 함) | envelope shape SSOT 갱신 별도 이슈 |
+| `details` slot | normative (CLI error에 도입, 키는 envelopes.md) | IPC error 도입·broker_code 등 새 키 — 별도 이슈 |
 | redaction 정책 | normative (규칙만) | 구현 전면화 — 후속 이슈 |
 | `ErrorSpec` mapper / helper 도입 | spec만 (shape) | [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) |
 | drift test guard / fmt.error code 누락 guard | — | [#1841](https://github.com/joshua-jingu-lee/ante/issues/1841) |
