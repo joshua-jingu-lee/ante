@@ -124,7 +124,7 @@ def test_table_cells_are_escaped(tmp_path: Path) -> None:
         _record("tests/e2e/t.py::t", "passed", [_cli(["--name", "a|b <i>"])]),
     )
     out = render_mod.render(tmp_path)
-    assert "<code>--name a&#124;b &lt;i&gt;</code>" in out
+    assert "<code>--name 'a&#124;b &lt;i&gt;'</code>" in out
     assert "<i>" not in out
 
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import shlex
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,7 @@ OUTCOME_LABELS = {"passed": "통과", "failed": "실패", "skipped": "건너뜀"
 
 def _text(value: Any) -> str:
     """표의 칸에 넣을 수 있게 HTML로 이스케이프하고 ``|``·줄바꿈을 막는다."""
-    escaped = html.escape(str(value), quote=True)
+    escaped = html.escape(str(value), quote=False)
     return escaped.replace("|", "&#124;").replace("\n", " ")
 
 
@@ -101,7 +102,7 @@ def _step_row(index: int, step: dict[str, Any]) -> str:
         return f"| {index} | 데몬 시작 | - | - | - | {state} |"
     args = step.get("args")
     words = args if isinstance(args, list) else []
-    command = _text(" ".join(str(a) for a in words))
+    command = _text(shlex.join(str(a) for a in words))
     count = _call_count(step)
     repeat = f" ×{count}" if count > 1 else ""
     mark = " (기대와 다름)" if _unexpected(step) else ""
