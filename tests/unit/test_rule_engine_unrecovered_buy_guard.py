@@ -626,6 +626,7 @@ class TestUnrecoveredBuyAgeHelper:
         "submitted_at",
         [
             "past",
+            "now",
             None,
             "",
             "not-a-timestamp",
@@ -638,9 +639,11 @@ class TestUnrecoveredBuyAgeHelper:
         caplog: pytest.LogCaptureFixture,
         submitted_at: str | None,
     ) -> None:
-        """과거 시각이나 산정 불가 값에는 시계 역행 경고를 남기지 않는다. #2936."""
+        """과거·지금 시각이나 산정 불가 값에는 시계 역행 경고를 남기지 않는다. #2936."""
         if submitted_at == "past":
             submitted_at = (manual_clock.now(UTC) - timedelta(seconds=100)).isoformat()
+        elif submitted_at == "now":
+            submitted_at = manual_clock.now(UTC).isoformat()
         with caplog.at_level(logging.WARNING, logger=ENGINE_LOGGER):
             RuleEngine._unrecovered_buy_age_seconds(submitted_at)
         assert _engine_warnings(caplog) == []
