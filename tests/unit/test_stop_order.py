@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta, tzinfo
 from unittest.mock import AsyncMock, MagicMock, patch  # noqa: F811
 
 import pytest
 
+from ante.core import clock
 from ante.eventbus.events import (
     OrderRequestEvent,
     StopOrderExpiredEvent,
@@ -1975,3 +1977,152 @@ class TestSessionEpochPruneAndExpireOrdering:
         assert expired == [(stop_id, "session_ended", False)]
         await manager.stop()
         assert len(expired) == 1
+
+
+class _SteppingClock:
+    """now 를 부를 때마다 step 만큼 가고 호출 수를 세는 시계."""
+
+    def __init__(self, start: datetime, step: timedelta) -> None:
+        self._at = start
+        self._step = step
+        self.now_calls = 0
+
+    def now(self, tz: tzinfo | None) -> datetime:
+        self.now_calls += 1
+        current = self._at
+        self._at = current + self._step
+        if tz is None:
+            return current.astimezone().replace(tzinfo=None)
+        return current.astimezone(tz)
+
+    def monotonic(self) -> float:
+        return 1000.0
+
+
+class TestSingleClockReadPerProcessing:
+    """한 처리는 세션 판정과 등록 시각에 쓰는 시각을 한 번 읽는다 (#2785)."""
+
+    _BOUNDARY = datetime(2026, 6, 19, 6, 29, 59, 500000, tzinfo=UTC)
+    _MIDSESSION = datetime(2026, 6, 19, 2, 0, 0, tzinfo=UTC)
+
+    @staticmethod
+    async def _register_buy(
+        manager: StopOrderManager, order_id: str, symbol: str = "005930"
+    ) -> str:
+        return await manager.register(
+            order_id=order_id,
+            bot_id="bot-001",
+            strategy_id="stg-001",
+            symbol=symbol,
+            side="buy",
+            quantity=1.0,
+            order_type="stop",
+            stop_price=50000.0,
+            account_id="acc-test",
+        )
+
+    async def test_boundary_tick_marks_and_triggers_every_order(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """세션 끝 경계의 한 틱은 같은 종목·계좌의 두 주문을 똑같이 판정한다."""
+        manager.start()
+        first = await self._register_buy(manager, "ord-a")
+        second = await self._register_buy(manager, "ord-b")
+        eventbus.publish.reset_mock()
+
+        with clock.use_clock(_SteppingClock(self._BOUNDARY, timedelta(seconds=1))):
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=True
+            )
+
+        for stop_id in (first, second):
+            order = manager.get_order(stop_id)
+            assert order is not None
+            assert order.entered_session is True
+            assert order.triggered is True
+        requests = [
+            c.args[0]
+            for c in eventbus.publish.call_args_list
+            if isinstance(c.args[0], OrderRequestEvent)
+        ]
+        assert len(requests) == 2
+
+    async def test_register_uses_one_moment_for_session_and_registered_at(
+        self, manager: StopOrderManager
+    ) -> None:
+        """등록은 세션 판정과 등록 시각에 같은 시각을 쓴다."""
+        manager.start()
+        manager._session_tick_marked.add("20260619:regular")
+
+        with clock.use_clock(_SteppingClock(self._BOUNDARY, timedelta(seconds=1))):
+            stop_id = await self._register_buy(manager, "ord-reg")
+
+        order = manager.get_order(stop_id)
+        assert order is not None
+        assert order.entered_session is True
+        assert order.registered_at == self._BOUNDARY
+
+    async def test_boundary_sweep_judges_every_order_at_one_moment(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """세션 끝 경계의 sweep 은 세션 안의 두 주문을 만료하지 않는다."""
+        manager.start()
+        ids = [
+            await self._register_buy(manager, "ord-x"),
+            await self._register_buy(manager, "ord-y"),
+        ]
+        for stop_id in ids:
+            order = manager.get_order(stop_id)
+            assert order is not None
+            order.entered_session = True
+        eventbus.publish.reset_mock()
+
+        with clock.use_clock(_SteppingClock(self._BOUNDARY, timedelta(seconds=1))):
+            await manager.check_session_expiry()
+
+        for stop_id in ids:
+            order = manager.get_order(stop_id)
+            assert order is not None
+            assert order.expired is False
+        eventbus.publish.assert_not_called()
+
+    @pytest.mark.parametrize("is_exchange_tick", [True, False])
+    async def test_price_update_without_trigger_reads_clock_once(
+        self, manager: StopOrderManager, eventbus: MagicMock, is_exchange_tick: bool
+    ) -> None:
+        """발동이 없는 시세 처리는 주문 수와 무관하게 시계를 한 번 읽는다."""
+        manager.start()
+        for i in range(3):
+            await self._register_buy(manager, f"ord-{i}")
+        eventbus.publish.reset_mock()
+        stepping = _SteppingClock(self._MIDSESSION, timedelta(seconds=1))
+
+        with clock.use_clock(stepping):
+            await manager.on_price_update(
+                "005930",
+                40000.0,
+                account_id="acc-test",
+                is_exchange_tick=is_exchange_tick,
+            )
+
+        assert stepping.now_calls == 1
+        eventbus.publish.assert_not_called()
+
+    async def test_sweep_without_expiry_reads_clock_once(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """만료가 없는 sweep 은 주문 수와 무관하게 시계를 한 번 읽는다."""
+        manager.start()
+        for i in range(3):
+            stop_id = await self._register_buy(manager, f"ord-{i}")
+            order = manager.get_order(stop_id)
+            assert order is not None
+            order.entered_session = True
+        eventbus.publish.reset_mock()
+        stepping = _SteppingClock(self._MIDSESSION, timedelta(seconds=1))
+
+        with clock.use_clock(stepping):
+            await manager.check_session_expiry()
+
+        assert stepping.now_calls == 1
+        eventbus.publish.assert_not_called()

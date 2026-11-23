@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from ante.account.errors import InvalidAccountIdError
@@ -53,6 +55,32 @@ class PositionHistory:
     def __init__(self, db: Database) -> None:
         self._db = db
         self._position_cache: dict[tuple[str, str], dict[str, PositionSnapshot]] = {}
+        self._deferred: list[tuple[str, str, float, float, str, float]] | None = None
+
+    @contextmanager
+    def defer_cache(self) -> Iterator[None]:
+        """블록 안의 캐시 반영을 미뤘다가 정상 종료 때만 순서대로 적용한다.
+
+        예외로 끝나면 미룬 반영을 버린다. 중첩하면 ``RuntimeError``.
+        FillApplier가 체결 트랜잭션을 감싸 캐시가 커밋된 DB만 따르게 한다.
+        """
+        if self._deferred is not None:
+            raise RuntimeError("defer_cache는 중첩할 수 없습니다")
+        pending: list[tuple[str, str, float, float, str, float]] = []
+        self._deferred = pending
+        try:
+            yield
+        finally:
+            self._deferred = None
+        for bot_id, symbol, quantity, avg_price, account_id, pnl_delta in pending:
+            self._update_cache(
+                bot_id,
+                symbol,
+                quantity,
+                avg_price,
+                account_id=account_id,
+                realized_pnl_delta=pnl_delta,
+            )
 
     async def initialize(self) -> None:
         """스키마 생성 + 캐시 워밍."""
@@ -370,6 +398,18 @@ class PositionHistory:
                 validated_account_id,
             ),
         )
+        if self._deferred is not None:
+            self._deferred.append(
+                (
+                    bot_id,
+                    symbol,
+                    quantity,
+                    avg_entry_price,
+                    validated_account_id,
+                    realized_pnl_delta,
+                )
+            )
+            return
         self._update_cache(
             bot_id,
             symbol,
