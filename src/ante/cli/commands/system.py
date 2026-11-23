@@ -201,8 +201,15 @@ def halt(ctx: click.Context, reason: str) -> CommandResult:
 
     actor = get_member_id(ctx)
 
-    data = _run(ipc_send("system.halt", {"reason": reason}, actor=actor))
-    count = data.get("accounts_changed", 0)
+    data = _run(
+        ipc_send(
+            "system.halt",
+            {"reason": reason},
+            actor=actor,
+            required=("accounts_changed",),
+        )
+    )
+    count = data["accounts_changed"]
     return CommandResult(data=data, message=f"시스템 HALTED — {count}개 계좌 거래 중지")
 
 
@@ -218,9 +225,14 @@ def clear_halt(ctx: click.Context, reason: str) -> CommandResult:
     actor = get_member_id(ctx)
 
     data = _run(
-        ipc_send("system.clear_halt", {"reason": reason} if reason else {}, actor=actor)
+        ipc_send(
+            "system.clear_halt",
+            {"reason": reason} if reason else {},
+            actor=actor,
+            required=("accounts_changed",),
+        )
     )
-    count = data.get("accounts_changed", 0)
+    count = data["accounts_changed"]
     return CommandResult(
         data=data,
         message=(
