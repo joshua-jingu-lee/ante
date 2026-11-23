@@ -166,6 +166,14 @@ credentials 복호화, 연결 세션, rate limit, circuit breaker, audit 경로�
 않으면 그 코드로 끝난다. `broker order`와 `broker stream prices`는 일반 운영 IPC 대상이 아니며 별도
 maintenance/test 스펙 없이는 제공하지 않는다.
 
+`broker.reconcile` 응답의 `fix`는 요청의 플래그이고, `fix_applied`는 보정 경로를
+탔는가다. `fix`이고 계좌의 봇이 정확히 하나이면 `true`이며, 보정 건수가 0이어도
+`true`다. 봇이 0개이거나 둘 이상인 계좌는 감지만 하므로
+([15-reconciliation.md](../broker-adapter/15-reconciliation.md)) `false`다.
+`corrections`는 실제 보정 건수(`adjustments`의 길이)다. `ante broker reconcile --fix`의
+사람용 출력은 `fix_applied`가 `false`이면 보정 건수 대신 자동 보정을 하지 않았다는 한
+줄을 낸다(#2632).
+
 #### Signal
 
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
