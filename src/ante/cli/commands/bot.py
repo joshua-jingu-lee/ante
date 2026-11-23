@@ -390,7 +390,10 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> CommandResu
             from ante.cli.commands.ipc_helpers import ipc_send
 
             return await ipc_send(
-                "bot.signal_key.rotate", {"bot_id": bot_id}, actor=actor
+                "bot.signal_key.rotate",
+                {"bot_id": bot_id},
+                actor=actor,
+                required=("signal_key",),
             )
 
         result = _run(_run_rotate())
