@@ -572,17 +572,16 @@ _BRACE_JSON: str = (
     "  }\n"
     "}\n"
 )
-_BRACE_TEXT: tuple[str, str, int] = ("", "Error: BACKTEST_ERROR: 'men'\n", 1)
 
 
-def _invoke_history_brace(mode: str) -> Result:
+def _invoke_history_brace(mode: str, name: str = _BRACE_NAME) -> Result:
     from ante.cli.main import cli
 
     @asynccontextmanager
     async def _open_cli_db(ctx: Any, **_: Any) -> AsyncIterator[AsyncMock]:
         yield AsyncMock()
 
-    args = ["backtest", "history", _BRACE_NAME]
+    args = ["backtest", "history", name]
     with (
         patch(
             "ante.backtest.run_store.BacktestRunStore.list_by_strategy",
@@ -606,11 +605,17 @@ def test_history_empty_json_keeps_brace_name() -> None:
     assert result.stderr == ""
 
 
-def test_history_empty_text_formats_message_again() -> None:
-    """같은 이름의 text는 지금처럼 안내 문장을 한 번 더 ``str.format``에 넣어
-    BACKTEST_ERROR로 실패한다(지금의 동작)."""
-    result = _invoke_history_brace("text")
-    assert (result.stdout, result.stderr, result.exit_code) == _BRACE_TEXT
+@pytest.mark.parametrize(
+    "name", ["mo{men}tum", "{}", "{runs}", "{message}", "{runs.__class__}", "50%"]
+)
+def test_history_empty_text_keeps_brace_name(name: str) -> None:
+    """빈 이력의 text는 전략 이름을 서식 템플릿으로 쓰지 않고 문장에 그대로 낸다."""
+    result = _invoke_history_brace("text", name)
+    assert (result.stdout, result.stderr, result.exit_code) == (
+        f"'{name}' 백테스트 이력이 없습니다.\n",
+        "",
+        0,
+    )
 
 
 def test_run_text_fails_on_text_only_fields() -> None:

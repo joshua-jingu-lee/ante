@@ -52,8 +52,9 @@ class TestSystemHaltIPC:
     def test_halt_sends_ipc_command(self, runner: CliRunner) -> None:
         """system halt가 IPC로 system.halt 커맨드를 전송."""
         mock_response = {
+            "id": "t",
             "status": "ok",
-            "data": {
+            "result": {
                 "status": "halted",
                 "accounts_changed": 3,
                 "changed_at": "2026-05-03T05:21:33+00:00",
@@ -91,8 +92,9 @@ class TestSystemHaltIPC:
     def test_halt_default_reason(self, runner: CliRunner) -> None:
         """system halt 사유 미지정 시 빈 문자열."""
         mock_response = {
+            "id": "t",
             "status": "ok",
-            "data": {
+            "result": {
                 "status": "halted",
                 "accounts_changed": 0,
                 "changed_at": "2026-05-03T05:21:33+00:00",
@@ -126,8 +128,9 @@ class TestSystemClearHaltIPC:
     def test_clear_halt_sends_ipc_command(self, runner: CliRunner) -> None:
         """system clear-halt가 IPC로 system.clear_halt 커맨드를 전송."""
         mock_response = {
+            "id": "t",
             "status": "ok",
-            "data": {
+            "result": {
                 "status": "halt_cleared",
                 "accounts_changed": 2,
                 "changed_at": "2026-05-03T05:21:33+00:00",
@@ -175,7 +178,7 @@ class TestSystemClearHaltIPC:
 class TestAccountSuspendIPC:
     def test_suspend_sends_ipc_command(self, runner: CliRunner) -> None:
         """account suspend가 IPC로 account.suspend 커맨드를 전송."""
-        mock_response = {"status": "ok", "data": {}}
+        mock_response = {"id": "t", "status": "ok", "result": {}}
 
         with patch(
             "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
@@ -200,7 +203,7 @@ class TestAccountSuspendIPC:
 
     def test_suspend_with_reason(self, runner: CliRunner) -> None:
         """account suspend --reason 옵션."""
-        mock_response = {"status": "ok", "data": {}}
+        mock_response = {"id": "t", "status": "ok", "result": {}}
 
         with patch(
             "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
@@ -231,7 +234,7 @@ class TestAccountSuspendIPC:
 class TestAccountActivateIPC:
     def test_activate_sends_ipc_command(self, runner: CliRunner) -> None:
         """account activate가 IPC로 account.activate 커맨드를 전송."""
-        mock_response = {"status": "ok", "data": {}}
+        mock_response = {"id": "t", "status": "ok", "result": {}}
 
         with patch(
             "ante.cli.commands.ipc_helpers.IPCClient", autospec=True

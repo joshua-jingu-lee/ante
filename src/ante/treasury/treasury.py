@@ -1431,9 +1431,8 @@ class Treasury:
 
         self._external_purchase_amount = external_purchase
         self._external_eval_amount = external_eval
-        await self._save_state()
-
         self._last_synced_at = clock.now(UTC)
+        await self._save_state()
 
         await self._eventbus.publish(
             BalanceSyncedEvent(
@@ -1486,9 +1485,8 @@ class Treasury:
         self._eval_amount = eval_amount
         self._external_purchase_amount = 0.0
         self._external_eval_amount = 0.0
-        await self._save_state()
-
         self._last_synced_at = clock.now(UTC)
+        await self._save_state()
 
         await self._eventbus.publish(
             BalanceSyncedEvent(

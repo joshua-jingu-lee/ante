@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -72,10 +73,13 @@ SAMPLE_SNAPSHOT_2 = {
 }
 
 
-def _make_mock_treasury(get_daily_return=None, get_range_return=None):
+def _make_mock_treasury(
+    get_daily_return=None, get_range_return=None, get_latest_return=None
+):
     """_create_treasury를 모킹하는 컨텍스트 매니저를 반환."""
     mock_treasury = AsyncMock()
     mock_treasury.get_daily_snapshot = AsyncMock(return_value=get_daily_return)
+    mock_treasury.get_latest_snapshot = AsyncMock(return_value=get_latest_return)
     mock_treasury.get_snapshots = AsyncMock(return_value=get_range_return or [])
 
     mock_db = AsyncMock()
@@ -117,10 +121,10 @@ def _invoke_root(runner, args, fmt="text"):
 
 
 class TestSnapshotDefault:
-    """인자 없이 호출 시 오늘 날짜 스냅샷 조회."""
+    """인자 없이 호출 시 가장 최근 스냅샷 조회."""
 
-    def test_default_today(self, runner, mock_auth):
-        ctx_patch, mock_t = _make_mock_treasury(get_daily_return=SAMPLE_SNAPSHOT)
+    def test_default_latest(self, runner, mock_auth):
+        ctx_patch, mock_t = _make_mock_treasury(get_latest_return=SAMPLE_SNAPSHOT)
         with ctx_patch:
             result = _invoke(runner, ["snapshot", "--account", "domestic"], mock_auth)
 
@@ -128,10 +132,11 @@ class TestSnapshotDefault:
         assert "일별 자산 스냅샷" in result.output
         assert "12,650,000" in result.output
         assert "2,650,000" in result.output
-        mock_t.get_daily_snapshot.assert_awaited_once()
+        mock_t.get_latest_snapshot.assert_awaited_once_with()
+        mock_t.get_daily_snapshot.assert_not_awaited()
 
     def test_default_no_data(self, runner, mock_auth):
-        ctx_patch, _ = _make_mock_treasury(get_daily_return=None)
+        ctx_patch, _ = _make_mock_treasury(get_latest_return=None)
         with ctx_patch:
             result = _invoke_root(runner, ["snapshot", "--account", "domestic"])
 
@@ -194,8 +199,11 @@ class TestSnapshotRange:
         assert "2026-03-21" in result.output
         mock_t.get_snapshots.assert_awaited_once_with("2026-03-20", "2026-03-21")
 
-    def test_from_only(self, runner, mock_auth):
-        """--from만 지정하면 오늘까지 조회."""
+    @pytest.mark.parametrize(
+        "manual_clock", [datetime(2026, 3, 21, 23, 0, tzinfo=UTC)], indirect=True
+    )
+    def test_from_only(self, runner, mock_auth, manual_clock):
+        """--from만 지정하면 KST 오늘까지 조회."""
         ctx_patch, mock_t = _make_mock_treasury(get_range_return=[SAMPLE_SNAPSHOT])
         with ctx_patch:
             result = _invoke(
@@ -205,10 +213,7 @@ class TestSnapshotRange:
             )
 
         assert result.exit_code == 0
-        # get_snapshots가 호출되었는지 확인
-        mock_t.get_snapshots.assert_awaited_once()
-        call_args = mock_t.get_snapshots.call_args[0]
-        assert call_args[0] == "2026-03-20"
+        mock_t.get_snapshots.assert_awaited_once_with("2026-03-20", "2026-03-22")
 
     def test_empty_range(self, runner, mock_auth):
         ctx_patch, _ = _make_mock_treasury(get_range_return=[])
