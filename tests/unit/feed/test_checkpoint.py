@@ -155,3 +155,31 @@ class TestCheckpointConcurrentAccess:
 
         cp2.save("2024-06-20")
         assert cp1.get_last_date() == "2024-06-20"
+
+
+class TestCheckpointMalformedFile:
+    """#2710: 객체가 아니거나 이진으로 손상된 파일은 경고 뒤 None이다."""
+
+    @pytest.mark.parametrize(
+        "content",
+        [b"[]", b"null", b'"x"', b"42", b"\xff\xfe"],
+        ids=["list", "null", "string", "number", "binary"],
+    )
+    def test_load_returns_none_and_warns(
+        self,
+        feed_dir: Path,
+        content: bytes,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """load()와 get_last_date()가 None을 돌려주고 경고를 남긴다."""
+        cp = Checkpoint(feed_dir, "data_go_kr", "ohlcv")
+        cp.file_path.parent.mkdir(parents=True, exist_ok=True)
+        cp.file_path.write_bytes(content)
+
+        with caplog.at_level("WARNING", logger="ante.feed.pipeline.checkpoint"):
+            assert cp.load() is None
+            assert cp.get_last_date() is None
+
+        assert any(
+            "체크포인트 파일 읽기 실패" in r.getMessage() for r in caplog.records
+        )
