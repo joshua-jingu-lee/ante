@@ -40,7 +40,7 @@ async def _create_account_service() -> tuple[Any, Any]:
 
 
 async def _get_broker(account_id: str | None = None) -> tuple[Any, Any]:
-    """브로커 어댑터 획득(account_id 없으면 Config 기반). 반환 db는 호출자가 close."""
+    """브로커 어댑터와 db(Config 기반이면 None) 획득. 받은 db는 호출자가 close."""
     if account_id:
         account_service, db = await _create_account_service()
         try:

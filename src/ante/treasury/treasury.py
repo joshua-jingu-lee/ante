@@ -640,7 +640,7 @@ class Treasury:
         return account_id == self._account_id
 
     async def _on_order_validated(self, event: object) -> None:
-        """룰 검증 통과 후 승인/거부 발행(매도·stop 계열 매수는 자금 예약 없이 승인)."""
+        """승인/거부 발행 — 매수 실패는 예외 대신 terminal ``OrderRejectedEvent`` 로."""
         from ante.eventbus.events import (
             OrderApprovedEvent,
             OrderRejectedEvent,

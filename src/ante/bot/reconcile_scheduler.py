@@ -24,9 +24,8 @@ class ReconcileScheduler:
     다른 계좌의 봇이 같은 스케줄러에 잡히는 경우 잘못된 broker positions가
     적용되지 않도록 ``run_once()`` 안에서 명시적으로 skip한다.
 
-    Args:
-        skip_initial_external_buy: True 면 ``start()`` 의 **기동 즉시 1회 대사**
-            에서만 "외부 매수" 분류 보정을 건너뛴다(barrier).
+    ``skip_initial_external_buy`` 가 True 면 ``start()`` 의 **기동 즉시 1회 대사**
+    에서만 "외부 매수" 분류 보정을 건너뛴다(barrier).
     """
 
     def __init__(
