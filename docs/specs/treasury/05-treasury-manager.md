@@ -6,27 +6,7 @@
 
 계좌별 Treasury 인스턴스를 생성·관리하는 상위 계층이다.
 
-```python
-class TreasuryManager:
-    """계좌별 Treasury 인스턴스 관리."""
-
-    def __init__(self, db: Database, eventbus: EventBus) -> None: ...
-
-    async def create_treasury(self, account: Account) -> Treasury:
-        """Account 정보로 Treasury 인스턴스 생성 및 등록."""
-
-    def get(self, account_id: str) -> Treasury:
-        """계좌의 Treasury 인스턴스 반환."""
-
-    def list_all(self) -> list[Treasury]:
-        """전체 Treasury 인스턴스 목록."""
-
-    async def initialize_all(self, accounts: list[Account]) -> None:
-        """각 계좌에 대해 Treasury 인스턴스 생성·초기화."""
-
-    async def get_total_summary(self) -> dict:
-        """전 계좌 합산 요약."""
-```
+정의: `ante.treasury.manager.TreasuryManager` (코드가 정본이다).
 
 `get_total_summary()` 반환 예시:
 
