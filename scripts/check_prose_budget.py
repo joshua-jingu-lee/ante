@@ -64,6 +64,11 @@ def read_baseline(root: Path) -> int:
         raise BaselineError(f"baseline file not found: {BASELINE_PATH}") from exc
     except (OSError, UnicodeDecodeError) as exc:
         raise BaselineError(f"cannot read {BASELINE_PATH}: {exc}") from exc
+    return parse_baseline(text)
+
+
+def parse_baseline(text: str) -> int:
+    """Return the line count held by the baseline file text."""
     value = text.strip()
     if not value.isascii() or not value.isdigit():
         raise BaselineError(
