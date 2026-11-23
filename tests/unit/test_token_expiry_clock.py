@@ -1,9 +1,9 @@
 """인증 토큰의 만료 시각과 만료 판정을 고정 시계로 단언한다 (#2768).
 
 발급(``register``·``rotate_token``)이 적는 ``token_expires_at``이 고정 시각 +
-TTL과 같은지, 인증(``authenticate``)이 그 시각 직전에는 통과하고 직후에는
-거부하는지 본다. 만료 판정은 SQL이 아니라 ``TokenManager.check_token_expiry``가
-``ante.core.clock``으로 한다.
+TTL과 같은지, 인증(``authenticate``)이 그 시각까지(정확히 그 시각 포함)
+통과하고 직후에는 거부하는지 본다. 만료 판정은 SQL이 아니라
+``TokenManager.check_token_expiry``가 ``ante.core.clock``으로 한다.
 """
 
 from __future__ import annotations
@@ -83,6 +83,10 @@ async def test_token_is_accepted_until_expiry_and_rejected_after(
     manual_clock.advance(_TTL_DAYS * 86400 - 1)
     assert (await service.authenticate(token)).member_id == "agent-1"
 
-    manual_clock.advance(2)
+    manual_clock.advance(1)
+    assert manual_clock.now(UTC) == _EXPIRES_AT
+    assert (await service.authenticate(token)).member_id == "agent-1"
+
+    manual_clock.advance(1)
     with pytest.raises(PermissionError, match="만료"):
         await service.authenticate(token)

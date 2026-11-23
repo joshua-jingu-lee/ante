@@ -16,9 +16,11 @@ from ante.core import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import DailyReportEvent
 from ante.treasury import Treasury
+from ante.treasury.treasury import _SNAPSHOT_RETENTION_DAYS
 
 _AT = datetime(2026, 1, 2, 3, 4, 5, 678901, tzinfo=UTC)
-_RETENTION_DAYS = 365 * 5
+
+_REPORT_DATE = (_AT - timedelta(days=10)).strftime("%Y-%m-%d")
 
 pytestmark = pytest.mark.parametrize("manual_clock", [_AT], indirect=True)
 
@@ -115,13 +117,16 @@ def _days_ago(days: int) -> str:
 
 
 async def test_snapshot_retention_cutoff_boundary(treasury: Treasury) -> None:
-    kept = [_days_ago(_RETENTION_DAYS - 1), _days_ago(_RETENTION_DAYS)]
-    dropped = _days_ago(_RETENTION_DAYS + 1)
+    kept = [
+        _days_ago(_SNAPSHOT_RETENTION_DAYS - 1),
+        _days_ago(_SNAPSHOT_RETENTION_DAYS),
+    ]
+    dropped = _days_ago(_SNAPSHOT_RETENTION_DAYS + 1)
     for snapshot_date in [*kept, dropped]:
         await treasury.save_daily_snapshot(snapshot_date)
 
     await treasury.take_snapshot(
-        DailyReportEvent(account_id="acc-clock", report_date=_AT.strftime("%Y-%m-%d"))
+        DailyReportEvent(account_id="acc-clock", report_date=_REPORT_DATE)
     )
 
     for snapshot_date in kept:
