@@ -111,3 +111,8 @@ pending_migration:
   - module: ante.treasury.exceptions
     class_anchor: TreasuryError
     reason: "base — no callsite; pending_migration baseline (#1842 AccountError 동형)"
+  # #2775: Treasury 내부 계약(ValueError 하위)이다. _on_order_validated가 잡아
+  # 발행 없이 버리므로 IPC·CLI 경계를 넘지 않는다.
+  - module: ante.treasury.exceptions
+    class_anchor: DuplicateReservationError
+    reason: "internal invariant, never crosses IPC/CLI (#2775); not registered by design"
