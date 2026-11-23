@@ -2,7 +2,7 @@
 
 처리기는 실제 ``_init_approval(s)`` 가 ``ApprovalService`` 에 등록한 사전에서
 결재 유형 문자열로만 꺼낸다. 서비스는 호출을 하나의 목록에 기록하는 대역이다.
-기대값은 지금 동작 그대로의 리터럴이다(#2686·#2582 의 동작 포함).
+기대값은 지금 동작 그대로의 리터럴이다(#2686 의 동작과 #2582 의 채택 검증 포함).
 """
 
 from __future__ import annotations
@@ -56,8 +56,8 @@ EXECUTOR_IS_COROUTINE_FUNCTION = {
     "strategy_adopt": True,
     "strategy_retire": True,
     "bot_create": True,
-    "bot_assign_strategy": False,
-    "bot_change_strategy": False,
+    "bot_assign_strategy": True,
+    "bot_change_strategy": True,
     "bot_stop": True,
     "bot_resume": False,
     "bot_delete": False,
@@ -70,8 +70,8 @@ VALIDATOR_IS_COROUTINE_FUNCTION = {
     "strategy_retire": True,
     "bot_create": True,
     "bot_delete": False,
-    "bot_change_strategy": False,
-    "bot_assign_strategy": False,
+    "bot_change_strategy": True,
+    "bot_assign_strategy": True,
     "bot_resume": False,
     "budget_change": False,
 }
@@ -505,17 +505,6 @@ class TestBotExecutors:
     @pytest.mark.parametrize(
         ("approval_type", "params", "expected"),
         [
-            pytest.param(
-                "bot_assign_strategy",
-                {"bot_id": "b-1", "strategy_id": "s-1"},
-                ("bot_manager.assign_strategy", ("b-1", "s-1"), {}),
-                id="bot_assign_strategy-issue_2582",
-            ),
-            (
-                "bot_change_strategy",
-                {"bot_id": "b-2", "strategy_id": "s-2"},
-                ("bot_manager.change_strategy", ("b-2", "s-2"), {}),
-            ),
             (
                 "bot_resume",
                 {"bot_id": "b-3", "strategy_id": "s-3"},
@@ -536,6 +525,58 @@ class TestBotExecutors:
         assert env.log.calls == []
         assert await result is None
         assert env.log.calls == [expected]
+
+
+@pytest.mark.parametrize(
+    ("approval_type", "manager_call"),
+    [
+        ("bot_assign_strategy", "bot_manager.assign_strategy"),
+        ("bot_change_strategy", "bot_manager.change_strategy"),
+    ],
+)
+class TestStrategySwitchExecutors:
+    async def test_adopted_calls_manager(
+        self, env: _Env, approval_type: str, manager_call: str
+    ) -> None:
+        params = {"bot_id": "b-1", "strategy_id": "s-adopted"}
+        assert await env.executor(approval_type)(params) is None
+        assert env.log.calls == [
+            ("strategy_registry.get", ("s-adopted",), {}),
+            (manager_call, ("b-1", "s-adopted"), {}),
+        ]
+
+    @pytest.mark.parametrize(
+        ("strategy_id", "message"),
+        [
+            ("s-x", "전략을 찾을 수 없습니다: s-x"),
+            (
+                "s-registered",
+                "전략이 adopted 상태가 아닙니다: s-registered (registered)",
+            ),
+            ("s-archived", "전략이 adopted 상태가 아닙니다: s-archived (archived)"),
+        ],
+    )
+    async def test_not_adopted_raises_before_manager_call(
+        self,
+        env: _Env,
+        approval_type: str,
+        manager_call: str,
+        strategy_id: str,
+        message: str,
+    ) -> None:
+        params = {"bot_id": "b-1", "strategy_id": strategy_id}
+        with pytest.raises(ValueError) as ei:
+            await env.executor(approval_type)(params)
+        assert str(ei.value) == message
+        assert env.log.calls == [("strategy_registry.get", (strategy_id,), {})]
+
+    async def test_empty_params_raises_key_error_before_any_call(
+        self, env: _Env, approval_type: str, manager_call: str
+    ) -> None:
+        with pytest.raises(KeyError) as ei:
+            await env.executor(approval_type)({})
+        assert ei.value.args == ("bot_id",)
+        assert env.log.calls == []
 
 
 class TestAccountExecutors:
@@ -733,38 +774,114 @@ class TestBotValidators:
             ),
         ]
 
+    async def test_change_strategy_missing_bot(self, env: _Env) -> None:
+        params = {"bot_id": "b-x", "strategy_id": "s-x"}
+        assert await _validate(env, "bot_change_strategy", params) == [
+            ("fail", "봇이 존재하지 않음", "system:bot_manager")
+        ]
+        assert env.log.calls == [("bot_manager.get_bot", ("b-x",), {})]
+
     @pytest.mark.parametrize(
-        ("bot_id", "expected"),
+        ("bot_id", "strategy_id", "expected"),
         [
-            ("b-x", [("fail", "봇이 존재하지 않음", "system:bot_manager")]),
-            ("b-stopped", [("pass", "", "system:bot_manager")]),
+            ("b-stopped", "s-adopted", [("pass", "", "system:bot_manager")]),
             (
                 "b-error",
+                "s-adopted",
                 [("fail", "봇이 error 상태 (stopped 필요)", "system:bot_manager")],
             ),
             (
                 "b-running",
+                "s-adopted",
                 [("fail", "봇이 running 상태 (stopped 필요)", "system:bot_manager")],
+            ),
+            (
+                "b-stopped",
+                "s-x",
+                [("fail", "전략을 찾을 수 없습니다: s-x", "system:strategy_registry")],
+            ),
+            (
+                "b-stopped",
+                "s-archived",
+                [
+                    (
+                        "fail",
+                        "전략이 adopted 상태가 아닙니다: s-archived",
+                        "system:strategy_registry",
+                    )
+                ],
+            ),
+            (
+                "b-running",
+                "s-registered",
+                [
+                    ("fail", "봇이 running 상태 (stopped 필요)", "system:bot_manager"),
+                    (
+                        "fail",
+                        "전략이 adopted 상태가 아닙니다: s-registered",
+                        "system:strategy_registry",
+                    ),
+                ],
+            ),
+            (
+                "b-stopped",
+                None,
+                [("fail", "전략을 찾을 수 없습니다: ", "system:strategy_registry")],
             ),
         ],
     )
-    async def test_change_strategy(self, env: _Env, bot_id: str, expected: Any) -> None:
-        assert (
-            await _validate(env, "bot_change_strategy", {"bot_id": bot_id}) == expected
-        )
-        assert env.log.calls == [("bot_manager.get_bot", (bot_id,), {})]
+    async def test_change_strategy(
+        self, env: _Env, bot_id: str, strategy_id: str | None, expected: Any
+    ) -> None:
+        params: dict[str, Any] = {"bot_id": bot_id}
+        if strategy_id is not None:
+            params["strategy_id"] = strategy_id
+        assert await _validate(env, "bot_change_strategy", params) == expected
+        assert env.log.calls == [
+            ("bot_manager.get_bot", (bot_id,), {}),
+            ("strategy_registry.get", (strategy_id or "",), {}),
+        ]
 
     @pytest.mark.parametrize(
-        "params",
-        [{}, {"bot_id": "b-x", "strategy_id": "s-x"}, {"bot_id": "b-running"}],
+        ("params", "expected"),
+        [
+            (
+                {},
+                ("fail", "전략을 찾을 수 없습니다: ", "system:strategy_registry"),
+            ),
+            (
+                {"bot_id": "b-x", "strategy_id": "s-x"},
+                ("fail", "전략을 찾을 수 없습니다: s-x", "system:strategy_registry"),
+            ),
+            (
+                {"bot_id": "b-running", "strategy_id": "s-registered"},
+                (
+                    "fail",
+                    "전략이 adopted 상태가 아닙니다: s-registered",
+                    "system:strategy_registry",
+                ),
+            ),
+            (
+                {"bot_id": "b-running", "strategy_id": "s-archived"},
+                (
+                    "fail",
+                    "전략이 adopted 상태가 아닙니다: s-archived",
+                    "system:strategy_registry",
+                ),
+            ),
+            (
+                {"bot_id": "b-running", "strategy_id": "s-adopted"},
+                ("pass", "", "system:strategy_registry"),
+            ),
+        ],
     )
-    async def test_assign_strategy_always_passes_issue_2582(
-        self, env: _Env, params: dict[str, Any]
+    async def test_assign_strategy_requires_adopted_strategy(
+        self, env: _Env, params: dict[str, Any], expected: Any
     ) -> None:
-        assert await _validate(env, "bot_assign_strategy", params) == [
-            ("pass", "", "system:report_store")
+        assert await _validate(env, "bot_assign_strategy", params) == [expected]
+        assert env.log.calls == [
+            ("strategy_registry.get", (params.get("strategy_id", ""),), {})
         ]
-        assert env.log.calls == []
 
     @pytest.mark.parametrize(
         ("bot_id", "expected"),
@@ -848,12 +965,14 @@ class TestLateBinding:
             env.log, {"b-1": _bot("b-1", BotStatus.STOPPED)}, tag="new_bot_manager"
         )
         await env.executor("bot_resume")({"bot_id": "b-1"})
-        assert await _validate(env, "bot_change_strategy", {"bot_id": "b-1"}) == [
+        params = {"bot_id": "b-1", "strategy_id": "s-adopted"}
+        assert await _validate(env, "bot_change_strategy", params) == [
             ("pass", "", "system:bot_manager")
         ]
         assert env.log.calls == [
             ("new_bot_manager.resume_bot", ("b-1",), {}),
             ("new_bot_manager.get_bot", ("b-1",), {}),
+            ("strategy_registry.get", ("s-adopted",), {}),
         ]
 
     async def test_replaced_treasury_manager_is_used(self, env: _Env) -> None:

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
     from ante.report.store import ReportStore
     from ante.rule.manager import RuleEngineManager
-    from ante.strategy.registry import StrategyRegistry
+    from ante.strategy.registry import StrategyRecord, StrategyRegistry
     from ante.trade.position import PositionHistory
     from ante.treasury.manager import TreasuryManager
 
@@ -61,6 +61,44 @@ def _approval_bot_create_config(params: dict[str, Any]) -> Any:
         account_id=account_id,
         interval_seconds=interval_seconds,
     )
+
+
+async def _adopted_strategy_failures(
+    s: ApprovalDeps, strategy_id: str
+) -> list[ValidationResult]:
+    """전략이 없거나 adopted 상태가 아니면 fail 결과를 돌려준다."""
+    record = await s.strategy_registry.get(strategy_id)
+    if record is None:
+        return [
+            ValidationResult(
+                "fail",
+                f"전략을 찾을 수 없습니다: {strategy_id}",
+                "system:strategy_registry",
+            )
+        ]
+    if record.status != StrategyStatus.ADOPTED:
+        return [
+            ValidationResult(
+                "fail",
+                f"전략이 adopted 상태가 아닙니다: {strategy_id}",
+                "system:strategy_registry",
+            )
+        ]
+    return []
+
+
+async def _require_adopted_strategy(
+    s: ApprovalDeps, strategy_id: str
+) -> StrategyRecord:
+    """전략이 없거나 adopted 상태가 아니면 ValueError를 낸다."""
+    record = await s.strategy_registry.get(strategy_id)
+    if record is None:
+        raise ValueError(f"전략을 찾을 수 없습니다: {strategy_id}")
+    if record.status != StrategyStatus.ADOPTED:
+        raise ValueError(
+            f"전략이 adopted 상태가 아닙니다: {strategy_id} ({record.status})"
+        )
+    return record
 
 
 async def _exec_rule_change(s: ApprovalDeps, params: dict[str, Any]) -> None:
@@ -123,13 +161,7 @@ async def _exec_bot_create(s: ApprovalDeps, params: dict[str, Any]) -> None:
     from ante.strategy.loader import StrategyLoader
 
     config = _approval_bot_create_config(params)
-    record = await s.strategy_registry.get(config.strategy_id)
-    if record is None:
-        raise ValueError(f"전략을 찾을 수 없습니다: {config.strategy_id}")
-    if record.status != StrategyStatus.ADOPTED:
-        raise ValueError(
-            f"전략이 adopted 상태가 아닙니다: {config.strategy_id} ({record.status})"
-        )
+    record = await _require_adopted_strategy(s, config.strategy_id)
 
     strategy_cls = StrategyLoader.load(Path(record.filepath))
     await s.bot_manager.create_bot(
@@ -137,6 +169,20 @@ async def _exec_bot_create(s: ApprovalDeps, params: dict[str, Any]) -> None:
         strategy_cls=strategy_cls,
         source_path=Path(record.filepath),
     )
+
+
+async def _exec_bot_assign_strategy(s: ApprovalDeps, params: dict[str, Any]) -> None:
+    bot_id = params["bot_id"]
+    strategy_id = params["strategy_id"]
+    await _require_adopted_strategy(s, strategy_id)
+    await s.bot_manager.assign_strategy(bot_id, strategy_id)
+
+
+async def _exec_bot_change_strategy(s: ApprovalDeps, params: dict[str, Any]) -> None:
+    bot_id = params["bot_id"]
+    strategy_id = params["strategy_id"]
+    await _require_adopted_strategy(s, strategy_id)
+    await s.bot_manager.change_strategy(bot_id, strategy_id)
 
 
 async def _exec_bot_stop_idempotent(s: ApprovalDeps, params: dict[str, Any]) -> None:
@@ -199,23 +245,7 @@ async def _validate_bot_create(
                 "system:bot_manager",
             )
         )
-    record = await s.strategy_registry.get(config.strategy_id)
-    if record is None:
-        results.append(
-            ValidationResult(
-                "fail",
-                f"전략을 찾을 수 없습니다: {config.strategy_id}",
-                "system:strategy_registry",
-            )
-        )
-    elif record.status != StrategyStatus.ADOPTED:
-        results.append(
-            ValidationResult(
-                "fail",
-                f"전략이 adopted 상태가 아닙니다: {config.strategy_id}",
-                "system:strategy_registry",
-            )
-        )
+    results.extend(await _adopted_strategy_failures(s, config.strategy_id))
     return results or [ValidationResult("pass", "", "system:bot_manager")]
 
 
@@ -250,30 +280,35 @@ def _validate_bot_delete(
     return results or [ValidationResult("pass", "", "system:bot_manager")]
 
 
-def _validate_bot_change_strategy(
+async def _validate_bot_change_strategy(
     s: ApprovalDeps, params: dict[str, Any]
 ) -> list[ValidationResult]:
-    """봇 전략 변경 사전 검증: stopped 상태 확인."""
+    """봇 전략 변경 사전 검증: stopped 상태, 전략 adopted 상태 확인."""
+    results: list[ValidationResult] = []
     bot_id = params.get("bot_id", "")
     bot = s.bot_manager.get_bot(bot_id)
     if not bot:
         return [ValidationResult("fail", "봇이 존재하지 않음", "system:bot_manager")]
     if bot.status != BotStatus.STOPPED:
-        return [
+        results.append(
             ValidationResult(
                 "fail",
                 f"봇이 {bot.status} 상태 (stopped 필요)",
                 "system:bot_manager",
             )
-        ]
-    return [ValidationResult("pass", "", "system:bot_manager")]
+        )
+    strategy_id = str(params.get("strategy_id") or "")
+    results.extend(await _adopted_strategy_failures(s, strategy_id))
+    return results or [ValidationResult("pass", "", "system:bot_manager")]
 
 
-def _validate_bot_assign_strategy(
+async def _validate_bot_assign_strategy(
     s: ApprovalDeps, params: dict[str, Any]
 ) -> list[ValidationResult]:
     """봇 전략 배정 사전 검증: 전략 adopted 상태 확인."""
-    return [ValidationResult("pass", "", "system:report_store")]
+    strategy_id = str(params.get("strategy_id") or "")
+    results = await _adopted_strategy_failures(s, strategy_id)
+    return results or [ValidationResult("pass", "", "system:strategy_registry")]
 
 
 def _validate_bot_resume(
@@ -337,12 +372,8 @@ def build_executors(s: ApprovalDeps) -> dict[str, Any]:
         "strategy_adopt": partial(_exec_strategy_adopt, s),
         "strategy_retire": partial(_exec_strategy_retire, s),
         "bot_create": partial(_exec_bot_create, s),
-        "bot_assign_strategy": lambda params: s.bot_manager.assign_strategy(
-            params["bot_id"], params["strategy_id"]
-        ),
-        "bot_change_strategy": lambda params: s.bot_manager.change_strategy(
-            params["bot_id"], params["strategy_id"]
-        ),
+        "bot_assign_strategy": partial(_exec_bot_assign_strategy, s),
+        "bot_change_strategy": partial(_exec_bot_change_strategy, s),
         "bot_stop": partial(_exec_bot_stop_idempotent, s),
         "bot_resume": lambda params: s.bot_manager.resume_bot(params["bot_id"]),
         "bot_delete": lambda params: s.bot_manager.delete_bot(params["bot_id"]),
