@@ -18,9 +18,7 @@ Core 모듈은 **모든 모듈이 공유하는 기반 인프라**를 제공한�
 
 ### 생성자
 
-```python
-Database(db_path: str)
-```
+정의: `ante.core.database.Database` (코드가 정본이다).
 
 `db_path`는 Config 스펙의 Ante instance/path contract에 따라 정규화된
 canonical DB 경로이다. 기본값은 `<config_dir>/db/ante.db`이며, CWD 기준
