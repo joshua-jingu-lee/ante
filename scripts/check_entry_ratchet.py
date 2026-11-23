@@ -13,9 +13,10 @@ Count keys, per file in ``src/ante/cli/**/*.py``:
   ``.exit(...)`` on a receiver named ``ctx``, and ``.exit(...)`` on the ``sys``
   module or a name it was imported as. Exits that are not error exits are left
   out by ``NON_ERROR_EXITS``: for each listed (file, top-level function) the
-  exits inside that function are not counted, and their number must equal the
-  listed number (a missing file or function has zero). A different number is a
-  mismatch (exit 1) whether exits were added or removed.
+  exits inside that function are not counted, and the sorted ``ast.unparse``
+  sources of those exits (the raised expression for ``raise``, the call for
+  ``.exit(...)``) must equal the listed sources (a missing file or function has
+  none). Any added, removed or changed exit is a mismatch (exit 1).
 - ``ipc_error_code_reads``: ``getattr(<anything>, "ipc_error_code", ...)``.
 
 The count keys skip the entry hook, ``AuthenticatedGroup.main`` in
@@ -93,9 +94,9 @@ Known limits of the output keys: calls through ``import click as ck`` and
 ``from sys import stdout`` are not counted.
 
 Exit 0: all nine keys equal ``scripts/entry_ratchet_baseline.json`` and every
-``NON_ERROR_EXITS`` entry has its listed number of exits.
+``NON_ERROR_EXITS`` entry has exactly its listed exits.
 Exit 1: a count differs from the baseline in either direction, a set differs,
-or a ``NON_ERROR_EXITS`` entry has another number of exits. Only these
+or a ``NON_ERROR_EXITS`` entry has other exits. Only these
 comparisons produce this code.
 Exit 2: every other failure: a missing or malformed baseline, a source file
 that cannot be read or parsed, a missing hook function or registry, a missing
@@ -145,13 +146,17 @@ COUNT_KEYS = (*ERROR_COUNT_KEYS, *REQUEST_COUNT_KEYS, CLI_DIRECT_OUTPUT)
 SET_KEYS = (UNREGISTERED_CODES, IPC_HANDLERS_WITHOUT_MODEL, RAW_LEGACY_CONTRACTS)
 FILE_COUNT_KEYS = frozenset((*ERROR_COUNT_KEYS, CLI_DIRECT_IPC_SEND, CLI_DIRECT_OUTPUT))
 
-# (file, top-level function) -> the number of exits in it that are not error
-# exits. These stay out of ``cli_exits``; the number must match exactly.
-NON_ERROR_EXITS: dict[tuple[str, str], int] = {
+# (file, top-level function) -> the sorted ``ast.unparse`` sources of the exits
+# in it that are not error exits. These stay out of ``cli_exits``; the sources
+# must match exactly.
+NON_ERROR_EXITS: dict[tuple[str, str], tuple[str, ...]] = {
     # ``system start``: ``raise SystemExit(proc.returncode)`` passes on the exit
     # code of the child process ``python -m ante.main``, and
     # ``raise SystemExit(0)`` ends a Ctrl+C normally. Neither judges an error.
-    ("src/ante/cli/commands/system.py", "start"): 2,
+    ("src/ante/cli/commands/system.py", "start"): (
+        "SystemExit(0)",
+        "SystemExit(proc.returncode)",
+    ),
 }
 BASELINE_ORDER = (
     *ERROR_COUNT_KEYS,
@@ -346,26 +351,38 @@ def count_cli_file(
     return errors, exits, reads
 
 
+def _exit_source(node: ast.AST) -> str:
+    if isinstance(node, ast.Raise) and node.exc is not None:
+        return ast.unparse(node.exc)
+    return ast.unparse(node)
+
+
 def non_error_exit_nodes(
     trees: dict[str, ast.Module],
 ) -> tuple[dict[str, frozenset[int]], tuple[str, ...]]:
     """Return the node ids per file of the ``NON_ERROR_EXITS`` functions and the
-    mismatch lines of the entries whose exit count differs from the listing."""
+    mismatch lines of the entries whose exits differ from the listing."""
     nodes: dict[str, set[int]] = {}
     mismatches: list[str] = []
     for (rel, name), allowed in sorted(NON_ERROR_EXITS.items()):
         tree = trees.get(rel)
         func = _top_functions(tree).get(name) if tree is not None else None
-        found = 0
+        found: tuple[str, ...] = ()
         if tree is not None and func is not None:
             sys_names = sys_aliases(tree)
             ids = {id(child) for child in ast.walk(func)}
             nodes.setdefault(rel, set()).update(ids)
-            found = sum(is_exit(child, sys_names) for child in ast.walk(func))
-        if found != allowed:
+            found = tuple(
+                sorted(
+                    _exit_source(child)
+                    for child in ast.walk(func)
+                    if is_exit(child, sys_names)
+                )
+            )
+        if found != tuple(sorted(allowed)):
             mismatches.append(
-                f"{CLI_EXITS}\t{rel}:{name}: non-error exits {found}, "
-                f"NON_ERROR_EXITS {allowed} ({found - allowed:+d})"
+                f"{CLI_EXITS}\t{rel}:{name}: non-error exits {list(found)}, "
+                f"NON_ERROR_EXITS {sorted(allowed)}"
             )
     return {rel: frozenset(ids) for rel, ids in nodes.items()}, tuple(mismatches)
 
