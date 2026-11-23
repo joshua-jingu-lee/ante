@@ -123,6 +123,15 @@ def _make_svc(
     return svc, audit_log
 
 
+KIS_FULL_CREDENTIALS = {"app_key": "AK", "app_secret": "AS", "account_no": "1234"}
+APP_KEY_MISSING_MESSAGE = "계좌에 인증정보(app_key)가 설정되지 않았습니다"
+
+
+def _account(broker_type: str, credentials: dict[str, str]) -> SimpleNamespace:
+    """Account stub — ``broker_type`` / ``credentials`` 노출."""
+    return SimpleNamespace(broker_type=broker_type, credentials=credentials)
+
+
 # ── bot.start ────────────────────────────────────────
 
 
@@ -139,7 +148,9 @@ class TestHandleBotStart:
         ``test_dispatch_wrapper_audit.py``).
         """
         bot = _make_bot(bot_id="bot-1", account_id="acc-1")
-        account = SimpleNamespace(credentials={"app_key": "AK-XYZ"})
+        account = _account(
+            "kis-domestic", {**KIS_FULL_CREDENTIALS, "app_key": "AK-XYZ"}
+        )
         svc, audit_log = _make_svc(bot=bot, account=account)
 
         result = await _handle_bot_start(
@@ -174,7 +185,7 @@ class TestHandleBotStart:
     async def test_missing_app_key_raises_credentials_error(self) -> None:
         """app_key 부재 → ``BotAccountCredentialsNotConfigured``."""
         bot = _make_bot()
-        account = SimpleNamespace(credentials={})  # app_key 누락
+        account = _account("kis-domestic", {})  # app_key 누락
         svc, audit_log = _make_svc(bot=bot, account=account)
 
         with pytest.raises(BotAccountCredentialsNotConfigured) as exc:
@@ -191,7 +202,7 @@ class TestHandleBotStart:
     async def test_bot_error_raises_state_conflict(self) -> None:
         """``BotManager.start_bot`` 의 ``BotError`` → ``BotStateConflict``."""
         bot = _make_bot()
-        account = SimpleNamespace(credentials={"app_key": "AK"})
+        account = _account("kis-domestic", dict(KIS_FULL_CREDENTIALS))
         svc, audit_log = _make_svc(
             bot=bot,
             account=account,
@@ -218,7 +229,7 @@ class TestHandleBotStart:
         skip 한다(``test_audit_action_without_audit_logger_no_crash``).
         """
         bot = _make_bot()
-        account = SimpleNamespace(credentials={"app_key": "AK"})
+        account = _account("kis-domestic", dict(KIS_FULL_CREDENTIALS))
         svc, _ = _make_svc(bot=bot, account=account, with_audit_logger=False)
 
         result = await _handle_bot_start(
@@ -234,6 +245,81 @@ class TestHandleBotStart:
             },
         }
         svc.bot_manager.start_bot.assert_awaited_once_with("bot-1")
+
+
+class TestHandleBotStartPresetCredentials:
+    """``bot.start`` 의 사전 확인 — 계좌 프리셋의 필수 인증정보 (#2609)."""
+
+    @pytest.mark.parametrize(
+        ("broker_type", "credentials"),
+        [
+            ("kis-domestic", {}),
+            ("kis-domestic", {"app_secret": "AS", "account_no": "1234"}),
+            ("kis-domestic", {**KIS_FULL_CREDENTIALS, "app_key": ""}),
+            ("test", {}),
+            ("test", {"app_secret": "AS"}),
+            ("unknown-broker", {}),
+        ],
+    )
+    async def test_missing_app_key_rejection_is_byte_identical(
+        self, broker_type: str, credentials: dict[str, str]
+    ) -> None:
+        """app_key 누락 거부는 코드·메시지가 바이트까지 같고 시작하지 않는다."""
+        svc, _ = _make_svc(bot=_make_bot(), account=_account(broker_type, credentials))
+
+        with pytest.raises(BotAccountCredentialsNotConfigured) as exc:
+            await _handle_bot_start(
+                svc, BotStartRequest(bot_id="bot-1"), "admin-master"
+            )
+
+        assert exc.value.code == BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_CODE
+        assert str(exc.value).encode() == APP_KEY_MISSING_MESSAGE.encode()
+        svc.bot_manager.start_bot.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        ("broker_type", "credentials"),
+        [
+            ("mock", {}),
+            ("test", {"app_key": "AK", "app_secret": "AS"}),
+            ("kis-domestic", dict(KIS_FULL_CREDENTIALS)),
+            ("unknown-broker", {"app_key": "AK"}),
+        ],
+    )
+    async def test_starts_when_required_credentials_present(
+        self, broker_type: str, credentials: dict[str, str]
+    ) -> None:
+        """프리셋의 필수 인증정보가 다 있으면 시작한다(mock 은 필수가 없다)."""
+        svc, _ = _make_svc(bot=_make_bot(), account=_account(broker_type, credentials))
+
+        await _handle_bot_start(svc, BotStartRequest(bot_id="bot-1"), "admin-master")
+
+        svc.bot_manager.start_bot.assert_awaited_once_with("bot-1")
+
+    @pytest.mark.parametrize(
+        ("credentials", "missing_key"),
+        [
+            ({"app_key": "AK"}, "app_secret"),
+            ({"app_key": "AK", "app_secret": "", "account_no": "1234"}, "app_secret"),
+            ({"app_key": "AK", "app_secret": "AS"}, "account_no"),
+        ],
+    )
+    async def test_rejects_first_missing_required_key_in_preset_order(
+        self, credentials: dict[str, str], missing_key: str
+    ) -> None:
+        """app_key 밖의 필수 키가 빠지면 프리셋 순서로 첫 빠진 키를 메시지에 넣는다."""
+        svc, _ = _make_svc(
+            bot=_make_bot(), account=_account("kis-domestic", credentials)
+        )
+
+        with pytest.raises(BotAccountCredentialsNotConfigured) as exc:
+            await _handle_bot_start(
+                svc, BotStartRequest(bot_id="bot-1"), "admin-master"
+            )
+
+        assert exc.value.code == BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_CODE
+        expected = f"계좌에 인증정보({missing_key})가 설정되지 않았습니다"
+        assert str(exc.value).encode() == expected.encode()
+        svc.bot_manager.start_bot.assert_not_awaited()
 
 
 # ── bot.stop ─────────────────────────────────────────

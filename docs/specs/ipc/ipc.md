@@ -78,7 +78,7 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
 | `ante bot create` | `bot.create` | `BotManager.create_bot()` | 등록된 `strategy_id`를 서버 StrategyRegistry에서 해석하고 BotManager 인메모리 `_bots` 반영 필요 |
-| `ante bot start <bot_id>` | `bot.start` | `BotManager.get_bot()` + `account_service.get()` + `BotManager.start_bot()` | live 봇 존재 확인 + `app_key` credential preflight + asyncio task 생성 + `BotStartedEvent` 발행. 성공 시 audit `bot.start` 기록 (#1712) |
+| `ante bot start <bot_id>` | `bot.start` | `BotManager.get_bot()` + `account_service.get()` + `BotManager.start_bot()` | live 봇 존재 확인 + 계좌 프리셋의 필수 인증정보 preflight + asyncio task 생성 + `BotStartedEvent` 발행. 성공 시 audit `bot.start` 기록 (#1712) |
 | `ante bot stop <bot_id>` | `bot.stop` | `BotManager.get_bot()` + `BotManager.stop_bot()` | live 봇 존재 확인 + 실행 task 취소 + `BotStoppedEvent` 발행. 성공 시 audit `bot.stop` 기록 (#1712) |
 | `ante bot update <bot_id>` | `bot.update` | `BotManager.update_bot()` | 중지 상태 봇 설정을 서버 BotManager 기준으로 갱신 |
 | `ante bot status <bot_id>` | `bot.status` | `BotManager.get_bot()` (read-only) | live 조회. 응답은 `{"bot": info}` envelope이며 `strategy_registry`/`treasury_manager`/`trade_service`가 있는 경우 strategy/budget/positions를 동적으로 보강 (#1712) |
@@ -94,8 +94,12 @@ error code를 사용한다.
 
 - `BOT_NOT_FOUND` (재사용 SSOT: `src/ante/bot/exceptions.py:BOT_NOT_FOUND_CODE`):
   `BotManager.get_bot()`이 `None`을 반환.
-- `BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED` (신규): `bot.start`에서
-  `account.credentials["app_key"]` 누락.
+- `BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED` (신규): `bot.start`에서 계좌의 브로커
+  프리셋(`BROKER_PRESETS[account.broker_type].required_credentials`)이 요구하는
+  인증정보 키 가운데 계좌의 `credentials`에 없거나 값이 빈 키가 있음. 메시지는
+  `계좌에 인증정보(<key>)가 설정되지 않았습니다`이고, 빠진 키가 여럿이면 `<key>`는
+  프리셋 순서로 첫 키다. 필수 인증정보가 없는 브로커(`mock`)는 이 사전 확인을
+  통과한다. 프리셋이 없는 `broker_type`은 `app_key`만 확인한다.
 - `BOT_STATE_CONFLICT` (신규): `bot.start`/`bot.stop`의 `BotManager.start_bot()` /
   `stop_bot()` 호출 중 `BotError`.
 
