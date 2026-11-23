@@ -130,8 +130,9 @@ class TestSystemCommands:
 
     def test_system_halt(self, runner):
         mock_response = {
+            "id": "t",
             "status": "ok",
-            "data": {
+            "result": {
                 "status": "halted",
                 "accounts_changed": 2,
                 "changed_at": "2026-05-03T05:21:33+00:00",
@@ -156,8 +157,9 @@ class TestSystemCommands:
 
     def test_system_clear_halt(self, runner):
         mock_response = {
+            "id": "t",
             "status": "ok",
-            "data": {
+            "result": {
                 "status": "halt_cleared",
                 "accounts_changed": 2,
                 "changed_at": "2026-05-03T05:21:33+00:00",
