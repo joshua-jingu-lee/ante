@@ -39,7 +39,7 @@
 | `load(symbol, timeframe) → int` | 데이터를 캐시에 로드. 로드된 행 수 반환 |
 | `get_ohlcv(symbol, timeframe, limit) → DataFrame` | 과거 OHLCV 반환. **현재 시점까지만 노출** (미래 참조 방지) |
 | `get_current_price(symbol) → float` | 현재 시점의 종가 반환 |
-| `get_indicator(symbol, indicator, params) → DataFrame` | 기술 지표 계산 (현재는 원본 OHLCV 데이터 반환) |
+| `get_indicator(symbol, indicator, params) → dict[str, Any]` | 기술 지표 계산. run timeframe의 OHLCV로 IndicatorCalculator 계산 |
 | `advance() → bool` | 시뮬레이션을 1스텝 전진. `False`면 데이터 끝 |
 | `get_current_timestamp() → datetime \| None` | 현재 시뮬레이션 시각 |
 | `get_total_steps() → int` | 전체 시뮬레이션 스텝 수 |
@@ -181,6 +181,7 @@ strategy.on_stop()
 | `slippage` | `float` | 슬리피지 금액 |
 | `reason` | `str` | Signal의 reason (기본값: `""`) |
 | `exchange` | `str` | 거래소 (기본값: `"KRX"`) |
+| `order_type` | `str` | 체결된 주문의 유형 `"market"` / `"limit"` — 스톱은 라이브의 스톱 변환과 같은 규칙(`stop` → `"market"`, `stop_limit` → `"limit"`) (기본값: `"market"`) |
 
 ### 성과 지표 계산 (metrics.py)
 

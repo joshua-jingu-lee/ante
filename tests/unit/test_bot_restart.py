@@ -13,6 +13,7 @@ from ante.eventbus import EventBus
 from ante.eventbus.events import (
     BotErrorEvent,
     BotRestartExhaustedEvent,
+    BotStartedEvent,
 )
 
 
@@ -303,6 +304,143 @@ class TestStopCancelsRestart:
 
         await manager.stop_all()
         assert len(manager._restart_tasks) == 0
+
+
+class TestDeleteStopsRestart:
+    """삭제가 진행되는 사이에 자동 재시작이 봇을 다시 띄우지 않는다 (#2883)."""
+
+    @staticmethod
+    async def _error_bot(manager):
+        config = BotConfig(
+            bot_id="b1",
+            strategy_id="s1",
+            restart_cooldown_seconds=10,
+            max_restart_attempts=3,
+            account_id="acc-test",
+        )
+        ctx = MagicMock()
+        ctx.get_positions.return_value = []
+        ctx.get_balance.return_value = 0.0
+        ctx._drain_actions.return_value = []
+        bot = await manager.create_bot(config, _make_strategy_cls(), ctx=ctx)
+        bot.status = BotStatus.ERROR
+        return bot
+
+    @staticmethod
+    def _gate_cooldown(monkeypatch) -> tuple[asyncio.Event, asyncio.Semaphore]:
+        wake = asyncio.Event()
+        entered = asyncio.Semaphore(0)
+
+        async def _wait_for_wake(seconds):  # noqa: ARG001
+            entered.release()
+            await wake.wait()
+
+        monkeypatch.setattr(bot_manager_module, "_cooldown_sleep", _wait_for_wake)
+        return wake, entered
+
+    @staticmethod
+    def _started(eventbus) -> list[BotStartedEvent]:
+        seen: list[BotStartedEvent] = []
+        eventbus.subscribe(BotStartedEvent, seen.append)
+        return seen
+
+    async def test_restart_called_during_delete_does_not_start(
+        self, manager, eventbus, monkeypatch, _fast_restart_cooldown
+    ):
+        bot = await self._error_bot(manager)
+        started = self._started(eventbus)
+
+        async def _restart_during_delete(target):
+            await manager._restart_after_cooldown("b1")
+
+        monkeypatch.setattr(manager, "_liquidate_positions", _restart_during_delete)
+        await manager.delete_bot("b1", handle_positions="liquidate")
+
+        assert started == []
+        assert bot.status == BotStatus.DELETED
+        assert bot._task is None or bot._task.done()
+
+    async def test_restart_scheduled_before_delete_waking_during_delete_does_not_start(
+        self, manager, eventbus, monkeypatch
+    ):
+        bot = await self._error_bot(manager)
+        wake, entered = self._gate_cooldown(monkeypatch)
+        started = self._started(eventbus)
+        await eventbus.publish(
+            BotErrorEvent(bot_id="b1", error_message="test", account_id="acc-test")
+        )
+        task = manager._restart_tasks["b1"]
+        await entered.acquire()
+
+        async def _wake_restart_during_delete(target):
+            wake.set()
+            await asyncio.wait([task], timeout=5.0)
+
+        monkeypatch.setattr(
+            manager, "_liquidate_positions", _wake_restart_during_delete
+        )
+        try:
+            await manager.delete_bot("b1", handle_positions="liquidate")
+        finally:
+            await manager.stop_all()
+            if bot._task and not bot._task.done():
+                bot._task.cancel()
+
+        assert task.done() and not task.cancelled()
+        assert task.exception() is None
+        assert started == []
+        assert bot.status == BotStatus.DELETED
+        assert bot._task is None or bot._task.done()
+        assert "b1" not in manager._restart_tasks
+
+    async def test_delete_cancels_scheduled_restart_and_reset_tasks(
+        self, manager, eventbus, monkeypatch
+    ):
+        bot = await self._error_bot(manager)
+        _, entered = self._gate_cooldown(monkeypatch)
+        await eventbus.publish(
+            BotErrorEvent(bot_id="b1", error_message="test", account_id="acc-test")
+        )
+        manager._schedule_restart_reset("b1")
+        restart = manager._restart_tasks["b1"]
+        reset = manager._restart_reset_tasks["b1"]
+        await entered.acquire()
+        await entered.acquire()
+
+        await manager.delete_bot("b1")
+        await asyncio.wait([restart, reset], timeout=5.0)
+
+        assert restart.cancelled()
+        assert reset.cancelled()
+        assert "b1" not in manager._restart_tasks
+        assert "b1" not in manager._restart_reset_tasks
+        assert bot.status == BotStatus.DELETED
+
+    async def test_failed_delete_keeps_scheduled_restart(
+        self, manager, eventbus, monkeypatch
+    ):
+        bot = await self._error_bot(manager)
+        _, entered = self._gate_cooldown(monkeypatch)
+        await eventbus.publish(
+            BotErrorEvent(bot_id="b1", error_message="test", account_id="acc-test")
+        )
+        restart = manager._restart_tasks["b1"]
+        await entered.acquire()
+
+        async def _fail_liquidate(target):
+            raise RuntimeError("liquidate down")
+
+        monkeypatch.setattr(manager, "_liquidate_positions", _fail_liquidate)
+        try:
+            with pytest.raises(RuntimeError, match="liquidate down"):
+                await manager.delete_bot("b1", handle_positions="liquidate")
+
+            assert manager._restart_tasks.get("b1") is restart
+            assert not restart.done()
+            assert manager.get_bot("b1") is bot
+            assert bot.status == BotStatus.ERROR
+        finally:
+            await manager.stop_all()
 
 
 # ── BotRestartExhaustedEvent 필드 ──────────────────
