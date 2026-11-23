@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -16,6 +15,7 @@ from ante.broker.base import BrokerAdapter
 from ante.broker.exceptions import BrokerError, OrderNotFoundError
 from ante.broker.models import CommissionInfo
 from ante.core import clock
+from ante.core.price import is_valid_price
 
 logger = logging.getLogger(__name__)
 
@@ -33,18 +33,12 @@ def _reject_json_constant(name: str) -> NoReturn:
 
 
 def _valid_price(value: object, where: str, prices_file: str) -> float:
-    price = math.nan
-    if isinstance(value, int | float) and not isinstance(value, bool):
-        try:
-            price = float(value)
-        except OverflowError:
-            price = math.inf
-    if not math.isfinite(price) or price <= 0:
+    if not is_valid_price(value):
         raise BrokerError(
             f"Mock 가격 파일의 {where} 값은 0보다 큰 유한한 수여야 함: "
             f"{value!r} ({prices_file})"
         )
-    return price
+    return float(value)
 
 
 def _load_prices_file(config: dict[str, Any]) -> tuple[dict[str, float], float | None]:

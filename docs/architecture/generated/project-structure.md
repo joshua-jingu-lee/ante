@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-11-23 (KST)
+> 마지막 생성 시점: 2026-11-24 (KST)
 
 ## 최상위 구조
 
@@ -165,6 +165,7 @@ src/ante/
 │   ├── database.py                   # Database — SQLite WAL 연결 관리
 │   ├── exchange.py
 │   ├── market_data_vocab.py
+│   ├── price.py
 │   ├── registry.py
 │   └── time.py
 ├── data/

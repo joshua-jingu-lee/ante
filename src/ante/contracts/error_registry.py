@@ -20,6 +20,7 @@ from ante.account.errors import (
     AccountSuspendedError,
     BrokerReconnectFailedError,
     InvalidAccountIdError,
+    InvalidBrokerConfigError,
     InvalidBrokerTypeError,
     InvalidExchangeError,
     MissingCredentialsError,
@@ -223,6 +224,11 @@ _ACCOUNT_INVALID_BROKER_TYPE_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 _ACCOUNT_INVALID_EXCHANGE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="VALIDATION_ERROR",
+    category="validation",
+)
+
+_ACCOUNT_INVALID_BROKER_CONFIG_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="VALIDATION_ERROR",
     category="validation",
 )
@@ -1075,6 +1081,7 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     AccountAlreadyExistsError: _ACCOUNT_ALREADY_EXISTS_SPEC,
     InvalidBrokerTypeError: _ACCOUNT_INVALID_BROKER_TYPE_SPEC,
     InvalidExchangeError: _ACCOUNT_INVALID_EXCHANGE_SPEC,
+    InvalidBrokerConfigError: _ACCOUNT_INVALID_BROKER_CONFIG_SPEC,
     MissingCredentialsError: _ACCOUNT_MISSING_CREDENTIALS_SPEC,
     AccountAlreadySuspendedError: _ACCOUNT_ALREADY_SUSPENDED_SPEC,
     AccountDeletedError: _ACCOUNT_DELETED_SPEC,
