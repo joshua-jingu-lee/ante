@@ -4,25 +4,23 @@
 
 # ApprovalRequest 모델
 
-```python
-@dataclass
-class ApprovalRequest:
-    id: str                     # UUID
-    type: str                   # 요청 유형 (아래 표 참조)
-    status: str                 # pending | approved | rejected | on_hold | expired | cancelled
-    requester: str              # 요청자 식별 (예: "agent", "agent:strategy-dev")
-    title: str                  # 요청 제목 (사람이 읽을 수 있는 요약)
-    body: str                   # 본문 (사유, 현황 분석, 기대 효과 등 자유 형식)
-    params: dict                # 유형별 실행 파라미터
-    reviews: list[dict] = []    # 사전 검증 결과 (아래 참조)
-    history: list[dict] = []    # 감사 이력 (아래 참조)
-    reference_id: str = ""      # 참조 ID (report_id 등)
-    expires_at: str = ""        # 만료 시각 (빈 문자열이면 만료 없음)
-    created_at: str = ""        # 생성 시각
-    resolved_at: str = ""       # 처리 시각
-    resolved_by: str = ""       # 처리자 ("user" 등)
-    reject_reason: str = ""     # 거절 사유
-```
+정의: `ante.approval.models.ApprovalRequest` (코드가 정본이다).
+
+- `id`: UUID
+- `type`: 요청 유형 (아래 표 참조)
+- `status`: pending | approved | execution_failed | rejected | on_hold | expired | cancelled
+- `requester`: 요청자 식별 (예: "agent", "agent:strategy-dev")
+- `title`: 요청 제목 (사람이 읽을 수 있는 요약)
+- `body`: 본문 (사유, 현황 분석, 기대 효과 등 자유 형식)
+- `params`: 유형별 실행 파라미터
+- `reviews`: 사전 검증 결과 (아래 참조)
+- `history`: 감사 이력 (아래 참조)
+- `reference_id`: 참조 ID (report_id 등)
+- `expires_at`: 만료 시각 (빈 문자열이면 만료 없음)
+- `created_at`: 생성 시각
+- `resolved_at`: 처리 시각
+- `resolved_by`: 처리자 ("user" 등)
+- `reject_reason`: 거절 사유
 
 ### reviews (사전 검증)
 
