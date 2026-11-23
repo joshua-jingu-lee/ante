@@ -55,6 +55,8 @@
 | `buy` | `stop`, `stop_limit` | **자금 잠금 없이** `OrderApprovedEvent(reserved_amount=0.0)` 발행 (#1337) | 트리거 발동 후 변환된 일반 매수 주문이 정상 reserve 절차를 거친다. `price=None` 이어도 거부하지 않는다. **분기 우선순위 1** — market buy quote resolver 분기보다 먼저 평가된다. |
 | `sell` | 모든 타입 | 자금 잠금 없이 즉시 `OrderApprovedEvent(reserved_amount=0.0)` | 매도는 보유 포지션 기반이므로 reserve 대상이 아님. |
 
+**같은 `order_id`의 재예약 (#2775)**: `reserve_for_order`는 그 `order_id`의 예약 항목이 남아 있으면 예산·예약 표·DB를 바꾸지 않고 `DuplicateReservationError`(`ValueError`의 하위 클래스)로 거부한다. `_on_order_validated`는 그런 이벤트를 오류 로그만 남기고 승인·거부 이벤트 없이 버린다 — 거부를 내면 같은 id의 살아 있는 첫 주문이 종결되고, 승인을 다시 내면 중복 제출된다. 이미 예약 항목이 있는 id면 계좌 준비성 게이트보다 먼저 버리므로 준비되지 않은 계좌의 거부도 나가지 않는다. 시장가 매수의 기준가 조회를 기다리는 사이 같은 id가 먼저 예약한 경우도 예약 메서드의 거부로 같게 버린다. 유계 한계: 주문이 종결돼 예약 항목이 빠진 뒤 같은 id가 다시 오면 감지하지 못한다.
+
 **매수 stop / stop_limit no-reserve invariant (#1337)**:
 
 - 매수 stop / stop_limit 주문은 등록 시점에 자금을 잠그지 않는다. 따라서 사용자(또는 다른 봇)는 같은 자금에 대해 다른 매수 주문을 자유롭게 걸 수 있다.
