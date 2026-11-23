@@ -490,7 +490,9 @@ class TestTreasuryAtomicityRollback:
         seen_during_settlement: list[dict[str, float]] = []
 
         async def _reserve_then_fail(*args, **kwargs):
-            await treasury.reserve_for_order("bot1", "ord-sell", 1_000.0)
+            # reserve_for_order는 자기 트랜잭션을 열어(#2770) 같은 태스크에서
+            # 정산 트랜잭션 안에 넣을 수 없다. 표 항목만 직접 만든다.
+            treasury._reservations["ord-sell"] = ("bot1", 1_000.0)
             seen_during_settlement.append(dict(treasury.get_reservations("bot1")))
             raise RuntimeError("boom")
 

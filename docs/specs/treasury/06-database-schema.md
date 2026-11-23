@@ -4,7 +4,7 @@
 
 # 데이터베이스 스키마
 
-테이블 정의: [`bot_budgets`](../../architecture/generated/db-schema.md#bot_budgets), [`treasury_transactions`](../../architecture/generated/db-schema.md#treasury_transactions), [`treasury_fill_dedup`](../../architecture/generated/db-schema.md#treasury_fill_dedup), [`treasury_state`](../../architecture/generated/db-schema.md#treasury_state) (코드의 DDL에서 생성된다).
+테이블 정의: [`bot_budgets`](../../architecture/generated/db-schema.md#bot_budgets), [`treasury_transactions`](../../architecture/generated/db-schema.md#treasury_transactions), [`treasury_fill_dedup`](../../architecture/generated/db-schema.md#treasury_fill_dedup), [`treasury_state`](../../architecture/generated/db-schema.md#treasury_state), [`treasury_reservations`](../../architecture/generated/db-schema.md#treasury_reservations) (코드의 DDL에서 생성된다).
 
 - `bot_budgets`: 봇별 예산 상태
 - `bot_budgets.account_id`: 소속 계좌 ID, fallback default 없음
@@ -15,6 +15,7 @@
 - `treasury_fill_dedup.fill_dedup_key`: order_id:canonical(confirmed_cumulative)
 - `treasury_state`: 계좌별 상태 저장
 - `treasury_state.account_id`: 계좌별 분리 (기존: key TEXT PK)
+- `treasury_reservations`: 미종결 매수 주문의 잔여 예약 (#2770). 주문 하나에 한 행(PK `order_id`)이고 그 주문의 예약이 회수·정산으로 끝나면 지운다. `account_id` fallback 없음
 
 > **`purchasable_amount` 컬럼 의미 (#2384)**: 이 컬럼이 보관하는 매수가능액의 SSOT 출처는 KIS `inquire-psbl-order`의 `nrcvb_buy_amt`(미수 미사용 매수가능금액, 보수값)다. `inquire-balance`의 `psbl_sbst_amt`(대용가능금액)와는 다른 값이며, **컬럼 셋·DDL은 변경되지 않는다**(의미만 재지정). `substitute_amount`(대용가능금액)는 broker-balance dict 전용으로 Treasury가 영속화하지 않으므로 신규 컬럼을 추가하지 않는다. 따라서 `docs/architecture/generated/db-schema.md`는 재생성이 불필요하다(treasury_state 6컬럼 동일: `account_id`/`account_balance`/`purchasable_amount`/`total_evaluation`/`currency`/`last_synced_at`).
 
