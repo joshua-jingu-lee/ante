@@ -1358,6 +1358,70 @@ class TestPositionHistory:
         assert pos["realized_pnl"] == pytest.approx(149900.0)
 
 
+def _defer_trade(side: str, quantity: float, price: float) -> TradeRecord:
+    return TradeRecord(
+        trade_id=uuid4(),
+        bot_id="bot1",
+        strategy_id="s1",
+        symbol="005930",
+        side=side,
+        quantity=quantity,
+        price=price,
+        status=TradeStatus.FILLED,
+        timestamp=datetime.now(UTC),
+        account_id="acc-test",
+    )
+
+
+def _cached(position_history) -> list[tuple[str, float, float]]:
+    return [
+        (p.symbol, p.quantity, p.realized_pnl)
+        for p in position_history.get_positions_sync("bot1", account_id="acc-test")
+    ]
+
+
+class TestPositionCacheDeferral:
+    """#2819: defer_cache 블록 안의 캐시 반영은 블록이 정상 종료할 때만 적용된다."""
+
+    async def test_cache_untouched_inside_block_and_applied_in_order_on_exit(
+        self, position_history
+    ):
+        with position_history.defer_cache():
+            await position_history.on_trade(_defer_trade("buy", 10, 50000))
+            await position_history.on_trade(_defer_trade("sell", 4, 55000))
+            assert _cached(position_history) == []
+
+        assert _cached(position_history) == [("005930", 6.0, 20000.0)]
+
+    async def test_exception_discards_pending_cache_changes(self, position_history):
+        await position_history.on_trade(_defer_trade("buy", 10, 50000))
+
+        with pytest.raises(RuntimeError, match="boom"):
+            with position_history.defer_cache():
+                await position_history.on_trade(_defer_trade("sell", 10, 55000))
+                raise RuntimeError("boom")
+
+        assert _cached(position_history) == [("005930", 10.0, 0.0)]
+
+    async def test_deferral_ends_with_block(self, position_history):
+        with pytest.raises(RuntimeError):
+            with position_history.defer_cache():
+                raise RuntimeError("boom")
+
+        await position_history.on_trade(_defer_trade("buy", 3, 50000))
+
+        assert _cached(position_history) == [("005930", 3.0, 0.0)]
+
+    async def test_nested_defer_is_rejected(self, position_history):
+        with position_history.defer_cache():
+            with pytest.raises(RuntimeError):
+                with position_history.defer_cache():
+                    pass
+            await position_history.on_trade(_defer_trade("buy", 2, 50000))
+
+        assert _cached(position_history) == [("005930", 2.0, 0.0)]
+
+
 # ── PerformanceTracker ───────────────────────────────
 
 

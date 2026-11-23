@@ -614,3 +614,115 @@ async def test_fallback_publish_without_outbox_leaves_dedup_key_empty(
     assert delta == 40.0
     assert len(events) == 1
     assert events[0].fill_dedup_key == ""
+
+
+async def _applier_with_outbox(db, tracker, position_history, eventbus):
+    from ante.trade.fill_outbox import FillOutbox
+
+    rec = TradeRecorder(db, position_history)
+    await rec.initialize()
+    outbox = FillOutbox(db)
+    await outbox.initialize()
+    applier = FillApplier(
+        db=db,
+        order_tracker=tracker,
+        position_history=position_history,
+        eventbus=eventbus,
+        outbox=outbox,
+    )
+    return applier, outbox
+
+
+def _inject_failure(monkeypatch, position_history, outbox, failing_step):
+    raised = (
+        asyncio.CancelledError
+        if failing_step == "cancelled_before_commit"
+        else RuntimeError
+    )
+
+    async def _fail(*args, **kwargs):
+        raise raised(failing_step)
+
+    target = {
+        "save_history": (position_history, "_save_history"),
+        "enqueue": (outbox, "enqueue"),
+        "cancelled_before_commit": (outbox, "enqueue"),
+    }[failing_step]
+    monkeypatch.setattr(*target, _fail)
+    return raised
+
+
+FAILING_STEPS = ["save_history", "enqueue", "cancelled_before_commit"]
+
+
+@pytest.mark.parametrize("failing_step", FAILING_STEPS)
+async def test_rolled_back_fill_leaves_position_cache_unchanged(
+    db, tracker, position_history, eventbus, monkeypatch, failing_step
+):
+    """#2819: 롤백된 체결은 포지션 캐시에 남지 않고, 커밋된 재적용만 반영된다."""
+    applier, outbox = await _applier_with_outbox(
+        db, tracker, position_history, eventbus
+    )
+    await _seed(tracker)
+    raised = _inject_failure(monkeypatch, position_history, outbox, failing_step)
+
+    with pytest.raises(raised):
+        await applier.apply_cumulative(
+            account_id=ACCT,
+            broker_order_id="0001",
+            observed_cumulative=40.0,
+            avg_price=1000.0,
+            submitted_date=DATE,
+        )
+
+    pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
+    assert pos["quantity"] == 0.0
+    assert position_history.get_positions_sync("bot-1", account_id=ACCT) == []
+
+    monkeypatch.undo()
+    delta = await applier.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=40.0,
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+    assert delta == 40.0
+    cached = position_history.get_positions_sync("bot-1", account_id=ACCT)
+    assert [(p.symbol, p.quantity) for p in cached] == [("005930", 40.0)]
+
+
+@pytest.mark.parametrize("failing_step", FAILING_STEPS)
+async def test_rolled_back_sell_keeps_cached_holding(
+    db, tracker, position_history, eventbus, monkeypatch, failing_step
+):
+    """#2819: 롤백된 매도는 캐시의 보유 수량을 줄이거나 지우지 않는다."""
+    applier, outbox = await _applier_with_outbox(
+        db, tracker, position_history, eventbus
+    )
+    await _seed(tracker)
+    await applier.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=100.0,
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+    await _seed(
+        tracker, order_id="ord-2", broker_order_id="0002", qty=100.0, side="sell"
+    )
+    raised = _inject_failure(monkeypatch, position_history, outbox, failing_step)
+
+    with pytest.raises(raised):
+        await applier.apply_cumulative(
+            account_id=ACCT,
+            broker_order_id="0002",
+            observed_cumulative=100.0,
+            avg_price=1100.0,
+            submitted_date=DATE,
+        )
+
+    pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
+    assert pos["quantity"] == 100.0
+    cached = position_history.get_positions_sync("bot-1", account_id=ACCT)
+    assert [(p.symbol, p.quantity) for p in cached] == [("005930", 100.0)]

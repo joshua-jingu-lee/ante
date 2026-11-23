@@ -360,9 +360,13 @@ class TestCancelInvalidScopeAndDecorators:
         agent_admin = _make_agent(scopes=["approval:admin"])
         mock_client, ipc_cls_patch, socket_patch = _patch_ipc(
             send_return={
-                "id": "inv-1",
-                "status": "cancelled",
-                "type": "sample_invalid_type",
+                "id": "req-1",
+                "status": "ok",
+                "result": {
+                    "id": "inv-1",
+                    "status": "cancelled",
+                    "type": "sample_invalid_type",
+                },
             }
         )
 
@@ -390,9 +394,13 @@ class TestCancelInvalidIPCCall:
         """IPC 가 정확한 command name, args, actor 로 호출된다."""
         mock_client, ipc_cls_patch, socket_patch = _patch_ipc(
             send_return={
-                "id": "inv-1",
-                "status": "cancelled",
-                "type": "sample_invalid_type",
+                "id": "req-1",
+                "status": "ok",
+                "result": {
+                    "id": "inv-1",
+                    "status": "cancelled",
+                    "type": "sample_invalid_type",
+                },
             }
         )
 
@@ -441,9 +449,13 @@ class TestCancelInvalidIPCCall:
         """``--format json`` 성공 시 IPC 응답이 data 에 포함된다."""
         mock_client, ipc_cls_patch, socket_patch = _patch_ipc(
             send_return={
-                "id": "inv-1",
-                "status": "cancelled",
-                "type": "sample_invalid_type",
+                "id": "req-1",
+                "status": "ok",
+                "result": {
+                    "id": "inv-1",
+                    "status": "cancelled",
+                    "type": "sample_invalid_type",
+                },
             }
         )
 
