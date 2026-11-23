@@ -1961,6 +1961,119 @@ class TestUpdateBudget:
         assert treasury.unallocated == 10_000_000.0
 
 
+class TestUpdateBudgetErrorCodes:
+    """#2630: update_budget이 거부 원인별 IPC 오류 코드를 그대로 낸다."""
+
+    @pytest.fixture
+    async def checked(self, db, eventbus):
+        """봇 상태 확인 콜백이 설정된 Treasury."""
+        statuses: dict[str, str] = {}
+        t = Treasury(
+            db=db,
+            eventbus=eventbus,
+            account_id=ACCOUNT_ID,
+            bot_status_checker=lambda bid: statuses.get(bid, ""),
+        )
+        await t.initialize()
+        await t.set_account_balance(10_000_000.0)
+        return t, statuses
+
+    @staticmethod
+    async def _code_of(coro) -> str:
+        from ante.contracts.helpers import ipc_error_payload
+
+        with pytest.raises(Exception) as exc_info:
+            await coro
+        return ipc_error_payload(exc_info.value)["code"]
+
+    @staticmethod
+    def _snapshot(t, bot_id):
+        budget = t.get_budget(bot_id)
+        allocated = budget.allocated if budget else None
+        available = budget.available if budget else None
+        return allocated, available, t.unallocated
+
+    async def test_running_bot_increase_is_bot_not_stopped(self, checked):
+        t, statuses = checked
+        statuses["bot1"] = "stopped"
+        await t.allocate("bot1", 1_000_000.0)
+        statuses["bot1"] = "running"
+        before = self._snapshot(t, "bot1")
+
+        code = await self._code_of(t.update_budget("bot1", 2_000_000.0))
+
+        assert code == "TREASURY_BOT_NOT_STOPPED"
+        assert self._snapshot(t, "bot1") == before
+
+    async def test_running_bot_new_budget_is_bot_not_stopped(self, checked):
+        t, statuses = checked
+        statuses["bot1"] = "running"
+        before = self._snapshot(t, "bot1")
+
+        code = await self._code_of(t.update_budget("bot1", 1_000.0))
+
+        assert code == "TREASURY_BOT_NOT_STOPPED"
+        assert self._snapshot(t, "bot1") == before
+
+    async def test_running_bot_decrease_is_bot_not_stopped(self, checked):
+        t, statuses = checked
+        statuses["bot1"] = "stopped"
+        await t.allocate("bot1", 5_000_000.0)
+        statuses["bot1"] = "running"
+        before = self._snapshot(t, "bot1")
+
+        code = await self._code_of(t.update_budget("bot1", 1_000_000.0))
+
+        assert code == "TREASURY_BOT_NOT_STOPPED"
+        assert self._snapshot(t, "bot1") == before
+
+    @pytest.mark.parametrize("target", [float("nan"), float("inf"), float("-inf")])
+    async def test_non_finite_target_is_invalid_amount(self, checked, target):
+        t, statuses = checked
+        statuses["bot1"] = "stopped"
+        await t.allocate("bot1", 5_000_000.0)
+        before = self._snapshot(t, "bot1")
+
+        code = await self._code_of(t.update_budget("bot1", target))
+
+        assert code == "TREASURY_INVALID_AMOUNT"
+        assert self._snapshot(t, "bot1") == before
+
+    async def test_increase_short_unallocated_is_insufficient_funds(self, checked):
+        t, statuses = checked
+        statuses["bot1"] = "stopped"
+        await t.allocate("bot1", 8_000_000.0)
+        before = self._snapshot(t, "bot1")
+
+        code = await self._code_of(t.update_budget("bot1", 15_000_000.0))
+
+        assert code == "TREASURY_INSUFFICIENT_FUNDS"
+        assert self._snapshot(t, "bot1") == before
+
+    async def test_decrease_exceeding_available_is_insufficient_funds(self, checked):
+        t, statuses = checked
+        statuses["bot1"] = "stopped"
+        await t.allocate("bot1", 5_000_000.0)
+        await t.reserve_for_order("bot1", "ord1", 4_000_000.0)
+        before = self._snapshot(t, "bot1")
+
+        code = await self._code_of(t.update_budget("bot1", 0.0))
+
+        assert code == "TREASURY_INSUFFICIENT_FUNDS"
+        assert self._snapshot(t, "bot1") == before
+
+    async def test_running_bot_same_amount_is_noop(self, checked):
+        t, statuses = checked
+        statuses["bot1"] = "stopped"
+        await t.allocate("bot1", 3_000_000.0)
+        statuses["bot1"] = "running"
+        before = self._snapshot(t, "bot1")
+
+        await t.update_budget("bot1", 3_000_000.0)
+
+        assert self._snapshot(t, "bot1") == before
+
+
 # -- 부분체결 비례 정산 (#1947) -------------------------------
 
 
