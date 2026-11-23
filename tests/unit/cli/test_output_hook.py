@@ -106,6 +106,11 @@ class TestCommandResult:
         with pytest.raises(TypeError, match="tuple of lines"):
             CommandResult(text=text)
 
+    @pytest.mark.parametrize("text", [(1,), ("a", None), ("a", b"b")])
+    def test_text_non_str_line_is_type_error(self, text: Any) -> None:
+        with pytest.raises(TypeError, match="lines must all be str"):
+            CommandResult(text=text)
+
     def test_repr_has_no_data_or_text(self) -> None:
         secret = "tok-fixture-0001"
         result = CommandResult(
@@ -206,8 +211,9 @@ class TestLazyText:
             ("한 줄", "not a str"),
             (["a"], "tuple of lines"),
             (None, "tuple of lines"),
+            (("a", 1), "lines must all be str"),
         ],
-        ids=["empty", "str", "list", "none"],
+        ids=["empty", "str", "list", "none", "int-line"],
     )
     def test_bad_return_is_type_error(
         self, value: Any, match: str, capsys: pytest.CaptureFixture[str]
