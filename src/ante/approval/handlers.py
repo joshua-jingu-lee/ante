@@ -208,16 +208,24 @@ async def _validate_strategy_adopt(
     record = await s.strategy_registry.get(strategy_id)
     if record is None:
         return [ValidationResult("fail", "전략을 찾을 수 없습니다", "system")]
+    if await s.report_store.get(report_id) is None:
+        return [
+            ValidationResult(
+                "fail", f"리포트를 찾을 수 없습니다: {report_id}", "system"
+            )
+        ]
     return [ValidationResult("pass", "", "system")]
 
 
 async def _validate_strategy_retire(
     s: ApprovalDeps, params: dict[str, Any]
 ) -> list[ValidationResult]:
-    """전략 폐기 사전 검증: 전략 상태 확인."""
+    """전략 폐기 사전 검증: report_id 누락·전략 상태 확인."""
     strategy_id = params.get("strategy_id", "")
     if not strategy_id:
         return [ValidationResult("fail", "strategy_id가 누락되었습니다", "system")]
+    if not params.get("report_id", ""):
+        return [ValidationResult("fail", "report_id가 누락되었습니다", "system")]
     record = await s.strategy_registry.get(strategy_id)
     if record is None:
         return [ValidationResult("fail", "전략을 찾을 수 없습니다", "system")]
