@@ -10,9 +10,8 @@
   한 열도 바뀌지 않는다. 중복 등록·재시작은 어떤 행도 바꾸지 않는다. 체결은 대상
   행을 누적이 늘 때만 ``partially_filled``·``filled``로, ``mark_terminal``은 대상
   행을 요청한 상태로만, ``expire_stale``은 그 계좌의 기한 지난 ``open`` 행만
-  ``expired``로 바꾼다. 알려진 결함 둘은 그 규칙의 허용에 명시적으로 넣었다 —
-  체결이 종결된 행을 되살리는 것(#2705), ``mark_terminal``이 종결 상태를 다른 종결
-  상태로 덮어쓰는 것(#2778)
+  ``expired``로 바꾼다. ``mark_terminal``은 열린 행만 바꾼다. 알려진 결함 하나는
+  그 규칙의 허용에 명시적으로 넣었다 — 체결이 종결된 행을 되살리는 것(#2705)
 - O2: ``recorded_filled_qty``는 줄지 않고 ``ordered_qty``를 넘지 않는다
 - O3: ``terminal_at IS NULL`` ⟺ 상태가 열린 상태(``open``·``partially_filled``)
 - O4: 열린 캐시의 주문 집합 == DB의 열린 행 집합 − 되살아난 행(#2705), 재시작 뒤에도.
@@ -161,7 +160,7 @@ class OrderTrackerMachine(RuleBasedStateMachine):
             assert changed <= FILL_COLUMNS, where
         elif via == "mark_terminal":
             assert oid == target and expect["status"] in TERMINAL, where
-            # 종결 상태가 다른 종결 상태로 덮인다(#2778).
+            assert prev["status"] in OPEN, where
             assert row["status"] == expect["status"], where
             assert changed <= STATUS_COLUMNS, where
         elif via == "expire_stale":
@@ -405,24 +404,26 @@ async def test_fill_after_cancel_keeps_open_cache_in_sync(tmp_path: Path) -> Non
         await db.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#2778",
-)
 async def test_terminal_status_is_not_overwritten(tmp_path: Path) -> None:
     """종결된 주문은 다른 종결 상태로 바뀌지 않는다.
 
-    최소 순서: 등록 → 취소 → 거절. ``mark_terminal``의 가드는 ``status != 'filled'``
-    뿐이라 ``cancelled``가 ``rejected``로 덮이고 ``terminal_at``이 다시 찍힌다.
+    최소 순서: 등록 → 취소 → 거절. 첫 종결이 이긴다 — 상태도 ``terminal_at``도
+    그대로다. ``terminal_at``은 초 단위라 센티널로 바꿔 두고 행 전체를 비교한다.
     """
     db, tracker = await _tracker_with_order(tmp_path, 2.0)
     try:
         await tracker.mark_terminal("ord-0", "cancelled")
         if await _status(tracker) != "cancelled":
             pytest.fail("준비: 취소가 반영되지 않았다")
+        await db.execute(
+            "UPDATE order_tracker SET terminal_at = ? WHERE order_id = ?",
+            ("2000-01-01 00:00:00", "ord-0"),
+        )
+        query = "SELECT * FROM order_tracker WHERE order_id = ?"
+        before = await db.fetch_one(query, ("ord-0",))
         await tracker.mark_terminal("ord-0", "rejected")
 
         assert await _status(tracker) == "cancelled"
+        assert await db.fetch_one(query, ("ord-0",)) == before
     finally:
         await db.close()
