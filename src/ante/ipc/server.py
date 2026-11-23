@@ -52,19 +52,58 @@ def _field_path(loc: tuple[str | int, ...]) -> str:
     return ".".join(_escaped(part) for part in loc)
 
 
-def _validation_message(command: str, exc: ValidationError) -> str:
+def _json_bytes(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+
+
+def _text_bytes(text: str) -> int:
+    return _json_bytes(text) - _json_bytes("")
+
+
+def _message_budget(request_id: Any) -> int:
+    """검증 오류 응답이 한 프레임에 들도록 message에 남는 바이트 수."""
+    frame = {
+        "id": request_id,
+        "status": "error",
+        "error": {"code": RequestValidationError.code, "message": ""},
+    }
+    return protocol.MAX_MESSAGE_SIZE - _json_bytes(frame)
+
+
+def _shortened(head: str, fields: list[str], budget: int) -> str:
+    """앞에서부터 들어가는 필드만 싣고 나머지를 「외 N건」으로 센다."""
+    used = _text_bytes(head)
+    loaded = 0
+    for field in fields:
+        cost = _text_bytes(field) + (_text_bytes(", ") if loaded else 0)
+        tail = _text_bytes(f" 외 {len(fields) - loaded - 1}건")
+        if used + cost + tail > budget:
+            break
+        used += cost
+        loaded += 1
+    if not loaded:
+        return f"{head}외 {len(fields)}건"
+    return f"{head}{', '.join(fields[:loaded])} 외 {len(fields) - loaded}건"
+
+
+def _validation_message(command: str, exc: ValidationError, budget: int) -> str:
     errors = exc.errors(include_url=False, include_input=False, include_context=False)
-    fields = ", ".join(
+    fields = [
         f"{_field_path(error['loc']) or 'args'}({error['type']})" for error in errors
-    )
-    return f"{command} 인자 검증 실패: {fields}"
+    ]
+    head = f"{command} 인자 검증 실패: "
+    message = head + ", ".join(fields)
+    if _text_bytes(message) <= budget:
+        return message
+    return _shortened(head, fields, budget)
 
 
-def _validated_args(spec: CommandSpec, args: Any) -> Any:
+def _validated_args(spec: CommandSpec, args: Any, request_id: Any) -> Any:
     try:
         return spec.request_model.model_validate(args)
     except ValidationError as exc:
-        raise RequestValidationError(_validation_message(spec.name, exc)) from None
+        message = _validation_message(spec.name, exc, _message_budget(request_id))
+        raise RequestValidationError(message) from None
 
 
 def _logged_expected_reject(
@@ -413,7 +452,7 @@ class IPCServer:
             return self._service_not_configured(request_id, missing)
 
         try:
-            args = _validated_args(spec, args)
+            args = _validated_args(spec, args, request_id)
             result = await spec.handler(self._service_registry, args, actor)
             audit_detail: dict[str, Any] | None = None
             if isinstance(result, dict):
