@@ -176,7 +176,7 @@ per-account 4개 플래그를 둔다. 디폴트 초기값은 `not_ready`이며, 
 
 - virtual은 broker API를 미호출하므로(주문은 `VirtualExecutor`가 가상 체결, [api-gateway.md](../api-gateway/api-gateway.md) "Virtual 주문 라우팅" 참조) broker / fill / reconcile이 무의미하다. test도 동일하다. **단, virtual broker_ready 면제는 VirtualExecutor의 시장가 가격 안전(가격 조회 실패 시 0원 체결 금지·terminal reject, api-gateway.md 참조)과 짝을 이룬다** — broker 장애 중 virtual 시장가 0원 체결 회귀 방지(#2398). **virtual / test fill·reconcile은 broker-backed 스케줄러를 등록하지 않고 registry에 no-op으로 ready mark(면제)한다([must_fix H] 재정의 / R2 정합)** — broker-backed 등록을 유지하면 `_init_fill_recovery`/`_init_reconcile`이 `get_broker`를 호출해 virtual을 KIS 토큰/connect 실패에 **재노출**하여 readiness 분리 전제가 붕괴되기 때문이다. readiness SSOT는 registry 단독이므로 broker-backed dict에 virtual key가 없어도 drift가 없다(registry no-op mark가 단일 권위). LIVE 계좌만 broker-backed 스케줄러 등록 → registry mark.
 - `BROKER_REGISTRY` 미래 타입의 default 정책은 **fail-closed**다(매트릭스에 미지정인 `(broker_type, trading_mode)` pair는 모든 플래그를 요구로 취급).
-- `mock`은 가상 전용이라 `(mock, live)` 행을 두지 않는다. 그 조합은 계좌 생성과 어댑터 조립에서 거부되며([broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#브로커-타입-mock)), 매트릭스에서는 위 fail-closed 기본 정책을 따른다.
+- `mock`은 가상 전용이라 `(mock, live)` 행을 두지 않는다. 그 조합은 계좌 생성과 어댑터 조립에서 거부되며([broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#브로커-타입-mock)), 매트릭스에서는 위 fail-closed 기본 정책을 따른다. 시나리오 하네스의 테스트 주입으로 열린 `(mock, live)` 계좌도 이 기본 정책(넷 다 요구)을 따른다.
 
 #### (5) 자동전이 ([must_fix B], normative)
 

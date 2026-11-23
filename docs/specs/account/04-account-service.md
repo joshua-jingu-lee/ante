@@ -50,6 +50,8 @@
 
 판정은 `Account.trading_mode`로 한다. 어댑터 config의 `trading_mode`는 `broker_config`가 덮어쓸 수 있으므로 쓰지 않는다. 가상 전용 타입의 집합은 한 곳에 두고 두 지점이 함께 쓴다. 상세는 [broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#브로커-타입-mock)를 따른다.
 
+제품에는 이 거부를 끄는 스위치가 없다. 데몬 구동 시나리오의 하네스는 자기 하위 프로세스에 싣는 테스트 주입으로 이 조합을 연다([broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#가상-전용)).
+
 ### 런타임 구조 변경 차단
 
 브로커 어댑터와 계좌별 consumer(Treasury, RuleEngine, Gateway, BotManager)는 서버 시작 시점의
