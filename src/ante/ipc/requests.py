@@ -271,7 +271,7 @@ class TreasurySetBalanceRequest(IPCRequest):
 class RuleUpdateRequest(IPCRequest):
     account_id: AccountId
     rule_type: str
-    enabled: bool = True
+    enabled: bool | None = None
     params: dict[str, Any] = {}
 
 
