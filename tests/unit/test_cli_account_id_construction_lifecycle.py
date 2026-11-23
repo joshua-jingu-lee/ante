@@ -156,6 +156,7 @@ def _make_mock_treasury(summary=None, snapshot=None):
         return_value=summary if summary is not None else _SAMPLE_SUMMARY
     )
     mock_t.get_daily_snapshot = AsyncMock(return_value=snapshot)
+    mock_t.get_latest_snapshot = AsyncMock(return_value=snapshot)
     mock_t.get_snapshots = AsyncMock(return_value=[])
     mock_db = AsyncMock()
     mock_db.connect = AsyncMock()
@@ -824,7 +825,9 @@ class TestAccountLifecycleValidRegression:
     def test_valid_account_id_dispatches_ipc(
         self, runner, name, argv, ipc_cmd, success
     ) -> None:
-        client_send_mock = AsyncMock(return_value={"status": "ok", "data": {}})
+        client_send_mock = AsyncMock(
+            return_value={"id": "t", "status": "ok", "result": {}}
+        )
         mock_client = AsyncMock()
         mock_client.send = client_send_mock
         client_cls = MagicMock(return_value=mock_client)

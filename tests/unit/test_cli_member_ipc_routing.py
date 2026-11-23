@@ -372,3 +372,79 @@ class TestRegisterIpcErrorCode:
         payload = json.loads(result.output)
         assert payload["code"] == code
         assert payload["message"] == message
+
+
+_SECRET_MISSING = [
+    pytest.param(
+        ["member", "register", "--id", "new-agent", "--type", "agent"],
+        {"member_id": "new-agent", "type": "agent", "role": "default"},
+        ("토큰:",),
+        id="register-token",
+    ),
+    pytest.param(
+        ["member", "rotate-token", "target"],
+        {"member_id": "target"},
+        ("새 토큰:",),
+        id="rotate-token",
+    ),
+    pytest.param(
+        ["member", "regenerate-recovery-key", "--password-env", "ANTE_REGEN_PW"],
+        {},
+        ("새 복구 키", "복구 키가 폐기"),
+        id="regenerate-recovery-key",
+    ),
+    pytest.param(
+        ["bot", "signal-key", "b1", "--rotate"],
+        {"bot_id": "b1"},
+        ("재발급 완료",),
+        id="bot-signal-key-rotate",
+    ),
+]
+
+
+class TestSecretMissingFromResultFails:
+    """비밀을 내는 명령은 응답 result 에 그 키가 없으면 UNKNOWN 으로 끝난다."""
+
+    @pytest.mark.parametrize("mode", ["json", "text"])
+    @pytest.mark.parametrize("cli_args,result_body,absent", _SECRET_MISSING)
+    def test_missing_secret_key_is_unknown_error(
+        self,
+        tmp_path,
+        mode: str,
+        cli_args: list[str],
+        result_body: dict,
+        absent: tuple[str, ...],
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        client = AsyncMock()
+        client.send = AsyncMock(
+            return_value={"id": "x", "status": "ok", "result": result_body}
+        )
+        fmt = ["--format", "json"] if mode == "json" else []
+        with (
+            patch("ante.cli.cold_path.is_active_runtime", return_value=True),
+            patch(
+                "ante.cli.commands.ipc_helpers.IPCClient",
+                MagicMock(return_value=client),
+            ),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/x.sock",
+            ),
+            patch.dict("os.environ", {"ANTE_REGEN_PW": "current-pw-value"}),
+        ):
+            result = _invoke(["--config-dir", str(tmp_path), *fmt, *cli_args])
+        client.send.assert_awaited_once()
+        assert result.exit_code == 1, result.output
+        for text in absent:
+            assert text not in result.output
+        if mode == "json":
+            payload = json.loads(result.output)
+            assert payload == {
+                "status": "error",
+                "code": "UNKNOWN",
+                "message": "IPC 응답이 계약과 다릅니다",
+            }
+        else:
+            assert result.output == "Error: UNKNOWN: IPC 응답이 계약과 다릅니다\n"

@@ -138,6 +138,7 @@ class BotManager:
         self._restart_reset_tasks: dict[str, asyncio.Task[None]] = {}
         self._bot_update_locks: dict[str, asyncio.Lock] = {}
         self._bot_signal_locks: dict[str, asyncio.Lock] = {}
+        self._deleting_bots: set[Bot] = set()
 
     def _get_signal_lock(self, bot_id: str) -> asyncio.Lock:
         """``on_step`` ↔ ``on_external_signal`` 직렬화용 per-bot lock(lazy)."""
@@ -456,6 +457,7 @@ class BotManager:
             }
             config_fields.update(updates)
             new_config = BotConfig(**config_fields)  # type: ignore[arg-type]
+            self._require_registered(bot)
             old_strategy_cls = bot._strategy_cls
             if new_strategy_cls is not None:
                 bot.rebind_strategy(new_config.strategy_id, new_strategy_cls)
@@ -477,6 +479,7 @@ class BotManager:
                 raise
 
             if new_budget is not None:
+                self._require_registered(bot)
                 try:
                     from ante.treasury.exceptions import TreasuryNotConfiguredError
 
@@ -540,6 +543,7 @@ class BotManager:
         await self._rebind_and_save(bot, strategy_id, strategy_cls)
 
         if was_running:
+            self._require_registered(bot)
             self._load_strategy_rules(strategy_id)
             await bot.start()
 
@@ -653,60 +657,64 @@ class BotManager:
             )
 
         bot = self._get_bot(bot_id)
-        reg = self._signal_channel_registry
-        if reg is not None:
-            reg.close_bot(bot_id, "deleted")
-        if bot.status == BotStatus.RUNNING:
-            await bot.stop()
+        self._deleting_bots.add(bot)
+        try:
+            reg = self._signal_channel_registry
+            if reg is not None:
+                reg.close_bot(bot_id, "deleted")
+            if bot.status == BotStatus.RUNNING:
+                await bot.stop()
 
-        if handle_positions == "liquidate":
-            await self._liquidate_positions(bot)
+            if handle_positions == "liquidate":
+                await self._liquidate_positions(bot)
 
-        self._unregister_bot_events(bot)
+            self._unregister_bot_events(bot)
 
-        if self._context_factory and self._context_factory._virtual_executor:
-            self._context_factory._virtual_executor.unregister_bot(bot_id)
+            if self._context_factory and self._context_factory._virtual_executor:
+                self._context_factory._virtual_executor.unregister_bot(bot_id)
 
-        if self._signal_key_manager:
-            await self._signal_key_manager.revoke(bot_id)
+            if self._signal_key_manager:
+                await self._signal_key_manager.revoke(bot_id)
 
-        if self._snapshot:
-            self._snapshot.cleanup(bot_id)
+            if self._snapshot:
+                self._snapshot.cleanup(bot_id)
 
-        if self._treasury_manager:
-            released = 0.0
-            try:
-                treasury = self._treasury_manager.get(bot.config.account_id)
-                released = await treasury.release_budget(bot_id)
-            except KeyError:
-                pass
-            if released == 0.0:
-                for t in self._treasury_manager.list_all():
-                    released = await t.release_budget(bot_id)
-                    if released > 0:
-                        break
-            if released > 0:
-                logger.info(
-                    "봇 삭제 시 예산 환수: %s -- %s",
-                    bot_id,
-                    f"{released:,.0f}",
+            if self._treasury_manager:
+                released = 0.0
+                try:
+                    treasury = self._treasury_manager.get(bot.config.account_id)
+                    released = await treasury.release_budget(bot_id)
+                except KeyError:
+                    pass
+                if released == 0.0:
+                    for t in self._treasury_manager.list_all():
+                        released = await t.release_budget(bot_id)
+                        if released > 0:
+                            break
+                if released > 0:
+                    logger.info(
+                        "봇 삭제 시 예산 환수: %s -- %s",
+                        bot_id,
+                        f"{released:,.0f}",
+                    )
+
+            deleted = _transition_status(bot, BotStatus.DELETED)
+            del self._bots[bot_id]
+            if hard:
+                await self._db.execute(
+                    "DELETE FROM bots WHERE bot_id = ?",
+                    (bot_id,),
                 )
-
-        deleted = _transition_status(bot, BotStatus.DELETED)
-        del self._bots[bot_id]
-        if hard:
-            await self._db.execute(
-                "DELETE FROM bots WHERE bot_id = ?",
-                (bot_id,),
-            )
-            logger.info("봇 삭제 (hard delete): %s", bot_id)
-        else:
-            await self._db.execute(
-                "UPDATE bots SET status = ?, updated_at = datetime('now')"
-                " WHERE bot_id = ?",
-                (deleted.value, bot_id),
-            )
-            logger.info("봇 삭제 (soft delete): %s", bot_id)
+                logger.info("봇 삭제 (hard delete): %s", bot_id)
+            else:
+                await self._db.execute(
+                    "UPDATE bots SET status = ?, updated_at = datetime('now')"
+                    " WHERE bot_id = ?",
+                    (deleted.value, bot_id),
+                )
+                logger.info("봇 삭제 (soft delete): %s", bot_id)
+        finally:
+            self._deleting_bots.discard(bot)
 
     async def remove_bot(
         self,
@@ -812,6 +820,11 @@ class BotManager:
             raise BotNotFoundError(bot_id)
         return bot
 
+    def _require_registered(self, bot: Bot) -> None:
+        """삭제 중이거나 목록에서 빠진 봇이면 ``BotNotFoundError``를 올린다."""
+        if bot in self._deleting_bots or self._bots.get(bot.bot_id) is not bot:
+            raise BotNotFoundError(bot.bot_id)
+
     async def _prepare_strategy(
         self, bot_id: str, *, account_id: str, strategy_id: str
     ) -> type[Strategy]:
@@ -855,6 +868,7 @@ class BotManager:
         self, bot: Bot, strategy_id: str, strategy_cls: type[Strategy]
     ) -> None:
         """봇에 전략을 묶고 저장한다. 저장이 실패하면 옛 전략으로 되돌린다."""
+        self._require_registered(bot)
         old_strategy_id = bot.config.strategy_id
         old_strategy_cls = bot._strategy_cls
         bot.rebind_strategy(strategy_id, strategy_cls)

@@ -253,7 +253,7 @@ def history(
         if not rows:
             message = f"'{strategy_name}' 백테스트 이력이 없습니다."
             empty: dict[str, Any] = {"message": message, "runs": []}
-            return CommandResult(data=empty, text=lambda: _history_empty_text(empty))
+            return CommandResult(data=empty, text=(message,))
 
         columns = [
             "run_id",
@@ -277,13 +277,6 @@ def _history_rows_text(
 ) -> tuple[str, ...]:
     try:
         return tuple(table_lines(rows, columns))
-    except Exception as e:
-        raise BacktestError(str(e)) from e
-
-
-def _history_empty_text(empty: dict[str, Any]) -> tuple[str, ...]:
-    try:
-        return (empty["message"].format(**empty),)
     except Exception as e:
         raise BacktestError(str(e)) from e
 

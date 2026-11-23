@@ -298,6 +298,29 @@ async def test_direct_fill_publishes_nothing(
     assert await stack.count("order_tracker") == 0
 
 
+@pytest.mark.parametrize("failure", [RuntimeError, asyncio.CancelledError])
+async def test_direct_fill_rollback_leaves_position_cache_unchanged(
+    stack: _Stack, monkeypatch: pytest.MonkeyPatch, failure: type[BaseException]
+) -> None:
+    """#2819: 이력 저장 실패·커밋 전 취소로 롤백되면 캐시에도 포지션이 없다."""
+
+    async def _boom(*args: Any, **kwargs: Any) -> None:
+        raise failure
+
+    monkeypatch.setattr(stack.position_history, "_save_history", _boom)
+
+    with pytest.raises(failure):
+        await stack.applier.apply_direct_fill(**_direct())
+
+    assert await stack.count("positions") == 0
+    assert stack.position_history.get_positions_sync(BOT, account_id=ACCT) == []
+
+    monkeypatch.undo()
+    assert await stack.applier.apply_direct_fill(**_direct()) is True
+    cached = stack.position_history.get_positions_sync(BOT, account_id=ACCT)
+    assert [(p.symbol, p.quantity) for p in cached] == [(SYMBOL, 2.0)]
+
+
 @pytest.mark.parametrize("account_id", ["", "default"])
 async def test_direct_fill_rejects_invalid_account_id(
     stack: _Stack, account_id: str
