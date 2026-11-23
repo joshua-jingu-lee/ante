@@ -987,9 +987,10 @@ class TestStrategySubmit:
         )
         assert result.exit_code == 1
         data = json.loads(result.output)
-        assert data["submitted"] is False
-        assert data["stage"] == "validate"
-        assert len(data["errors"]) > 0
+        assert data["status"] == "error"
+        assert data["code"] == "STRATEGY_VALIDATION_ERROR"
+        assert data["details"]["stage"] == "validate"
+        assert len(data["details"]["errors"]) > 0
 
     def test_submit_load_failure(self, runner, tmp_path):
         """로드 테스트 실패 (올바른 AST이지만 import 불가)."""
@@ -1065,8 +1066,9 @@ class TestStrategySubmit:
             )
             assert result.exit_code == 1
             data = json.loads(result.output)
-            assert data["submitted"] is False
-            assert data["stage"] == "register"
+            assert data["status"] == "error"
+            assert data["details"] == {"stage": "register"}
+            assert data["message"] == ("Strategy already registered: test_strat_v1.0.0")
 
     def test_submit_load_failure_text_keeps_load_test_failed_wording(
         self, runner, strategy_file
@@ -1113,7 +1115,8 @@ class TestStrategySubmit:
         registry.register.assert_awaited_once()
         assert result.exit_code == 1
         data = json.loads(result.output)
-        assert data["stage"] == "register"
+        assert data["status"] == "error"
+        assert data["details"] == {"stage": "register"}
         assert data["code"] == expected_code
 
 

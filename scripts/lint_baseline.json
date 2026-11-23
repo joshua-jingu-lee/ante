@@ -102,7 +102,7 @@
     },
     "src/ante/cli/commands/strategy.py": {
       "BLE001": 2,
-      "C901": 3
+      "C901": 2
     },
     "src/ante/cli/commands/treasury.py": {
       "S608": 2,

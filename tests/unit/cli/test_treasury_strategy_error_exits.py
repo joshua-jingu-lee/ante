@@ -828,8 +828,7 @@ def test_strategy_validate_failure_keeps_its_details(mode: str, tmp_path: Path) 
                 "status": "error",
                 "code": "STRATEGY_VALIDATION_FAILED",
                 "message": f"Validation failed: {path}",
-                "data": {
-                    "valid": False,
+                "details": {
                     "errors": ["on_step 없음", "meta 없음"],
                     "warnings": ["print 사용"],
                 },
@@ -839,7 +838,7 @@ def test_strategy_validate_failure_keeps_its_details(mode: str, tmp_path: Path) 
         _assert_text(
             result,
             [
-                f"Error: Validation failed: {path}",
+                f"Error: STRATEGY_VALIDATION_FAILED: Validation failed: {path}",
                 "  - on_step 없음",
                 "  - meta 없음",
                 "  [warn] print 사용",
@@ -859,16 +858,23 @@ def test_strategy_submit_validation_failure_keeps_its_details(
         _assert_json(
             result,
             {
-                "submitted": False,
-                "stage": "validate",
+                "status": "error",
                 "code": "STRATEGY_VALIDATION_ERROR",
-                "errors": ["on_step 없음", "meta 없음"],
+                "message": f"Validation failed: {path}",
+                "details": {
+                    "stage": "validate",
+                    "errors": ["on_step 없음", "meta 없음"],
+                },
             },
         )
     else:
         _assert_text(
             result,
-            [f"Error: Validation failed: {path}", "  - on_step 없음", "  - meta 없음"],
+            [
+                f"Error: STRATEGY_VALIDATION_ERROR: Validation failed: {path}",
+                "  - on_step 없음",
+                "  - meta 없음",
+            ],
         )
 
 
@@ -895,10 +901,10 @@ def test_strategy_submit_load_failure(mode: str, tmp_path: Path) -> None:
         _assert_json(
             result,
             {
-                "submitted": False,
-                "stage": "load",
+                "status": "error",
                 "code": "STRATEGY_LOAD_ERROR",
-                "error": "모듈을 불러올 수 없습니다",
+                "message": "Load test failed: 모듈을 불러올 수 없습니다",
+                "details": {"stage": "load"},
             },
         )
     else:
@@ -922,10 +928,10 @@ def test_strategy_submit_meta_shape(mode: str, tmp_path: Path) -> None:
         _assert_json(
             result,
             {
-                "submitted": False,
-                "stage": "meta_validation",
+                "status": "error",
                 "code": "STRATEGY_VALIDATION_ERROR",
-                "error": "meta는 StrategyMeta 인스턴스여야 합니다 (받은 타입: dict)",
+                "message": "Invalid meta shape: expected StrategyMeta, got dict",
+                "details": {"stage": "meta_validation"},
             },
         )
     else:
@@ -960,10 +966,10 @@ def test_strategy_submit_register_failure(mode: str, tmp_path: Path) -> None:
         _assert_json(
             result,
             {
-                "submitted": False,
-                "stage": "register",
+                "status": "error",
                 "code": "STRATEGY_INCOMPATIBLE_EXCHANGE",
-                "error": "거래소가 맞지 않습니다",
+                "message": "거래소가 맞지 않습니다",
+                "details": {"stage": "register"},
             },
         )
     else:
@@ -983,10 +989,10 @@ def test_strategy_submit_register_failure_without_a_code(tmp_path: Path) -> None
     _assert_json(
         result,
         {
-            "submitted": False,
-            "stage": "register",
+            "status": "error",
             "code": "STRATEGY_ERROR",
-            "error": "등록 실패",
+            "message": "등록 실패",
+            "details": {"stage": "register"},
         },
     )
 
