@@ -388,13 +388,7 @@ class PositionReconciler:
         i_qty: float,
         b_qty: float,
     ) -> None:
-        """self-submitted 분기 공통 이벤트 발행 — `PositionMismatchEvent` +
-        info `NotificationEvent`. buy-side·sell-side 동일 계층.
-
-        reason 은 방향 중립 ``REASON_SELF_SUBMITTED`` 를 재사용한다. 방향은
-        ``internal_qty``/``broker_qty`` 대소(buy=broker>internal, sell=
-        internal>broker)로 판별된다.
-        """
+        """self-submitted 공통 발행: `PositionMismatchEvent` + `NotificationEvent`."""
         from ante.eventbus.events import NotificationEvent, PositionMismatchEvent
 
         await self._eventbus.publish(

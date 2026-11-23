@@ -34,28 +34,7 @@ def _run(coro: Coroutine[Any, Any, Any]) -> Any:
 async def _create_services(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[Config, DynamicConfigService, Database]]:
-    """CLI 에서 ``Config`` / ``DynamicConfigService`` / ``Database`` 를 함께
-    구성하는 async context manager.
-
-    ``open_cli_db`` 기반 lifecycle (factory composition, account.py 패턴
-    1:1 미러). 호출 패턴:
-
-        async with _create_services(ctx=ctx) as (static_config, dynamic, db):
-            ...
-
-    Args:
-        ctx: Click 컨텍스트. ``None`` 이면 ``click.get_current_context``
-            (silent=True) 로 fallback. 신규 호출은 ctx 명시 전달 권장.
-
-    Yields:
-        ``DynamicConfigService.initialize()`` 가 완료된 3-tuple.
-        ``DynamicConfigService.initialize()`` 는 read-only 명시 예외(schema
-        bootstrap) 로 호출을 보존한다.
-
-    Cleanup invariant:
-        - ``open_cli_db`` 가 ``BaseException`` 까지 catch — service init 실패
-          시에도 ``Database.close()`` 보장.
-    """
+    """Config·DynamicConfigService·Database 를 함께 구성하는 async context manager."""
     from ante.cli.main import get_config_dir
     from ante.config.config import Config
     from ante.config.dynamic import DynamicConfigService

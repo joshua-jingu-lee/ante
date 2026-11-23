@@ -185,74 +185,7 @@ class StrategyValidator:
     _STRATEGY_MODULES: set[str] = {"ante.strategy", "ante.strategy.base"}
 
     def _find_strategy_classes(self, tree: ast.Module) -> list[_StrategyClassMatch]:
-        """실제 ante ``Strategy`` 를 상속하는 module-level 클래스 + 바인딩 스냅샷 탐색.
-
-        (Strategy import-resolution + StrategyMeta 일관화)
-
-        **`tree.body`(module-scope)를 정의 순서대로 위에서 아래로 한 번** 순회하며
-        이름별 "현재 바인딩"을 추적한다 — Strategy 바인딩(`name_binding:
-        dict[str, str]`, 값 ∈ {``"ante_strategy"``, ``"local_class"``, ``"other"``}),
-        StrategyMeta 바인딩(`strategymeta_binding: dict[str, str]`, 값 ∈
-        {``"ante_strategy_meta"``}; 재바인딩 시 키 제거), 그리고 두 심볼이 같은
-        모듈(`ante.strategy`/`.base`)에서 export 되므로 **공용** 모듈 별칭
-        (`module_aliases: set[str]`). 각 ``ClassDef`` 를 만나면 **먼저** 그 시점의
-        바인딩으로 base 를 해석해 ante ``Strategy`` 상속 여부를 판정하고(인정 시
-        그 시점의 ``strategymeta_binding``·``module_aliases`` 스냅샷을 함께 캡처해
-        ``_StrategyClassMatch`` 로 반환), **그 다음** 그 클래스 이름을
-        ``local_class`` 로 갱신한다(이후 등장 클래스에만 shadow 적용).
-
-        StrategyMeta 바인딩 스냅샷은 ``_meta_is_strategy_meta_call`` 이 ``meta =
-        StrategyMeta(...)`` / ``meta = astg.StrategyMeta(...)`` 호출을 **클래스 정의
-        시점 import 바인딩**으로 해석하는 데 쓰인다(Strategy 와 동일 order-
-        aware). 이로써 ``import fake; meta = fake.StrategyMeta(...)`` 같이 ante 가
-        아닌 임의 ``*.StrategyMeta`` 호출을 거부하고(false-positive 차단), submit 의
-        ``isinstance(meta, StrategyMeta)`` 런타임 검사와 정합시킨다.
-
-        Python 은 이름을 **실행 시점(정의 순서)** 에 바인딩하므로, 클래스 정의
-        시점의 바인딩으로 base 를 해석해야 런타임/loader 의미와 정합한다. 예:
-        ``import Strategy as S; class X(S); class S`` 는 X 정의 시점에 S 가 import
-        된 ante ``Strategy`` 이므로 X 를 인정하고(loader 도 X 카운트), 그 뒤에 온
-        ``class S`` 만 로컬로 재바인딩한다. 반대로 ``import Strategy; class
-        Strategy; class X(Strategy)`` 는 X 정의 시점에 Strategy 가 이미 로컬
-        클래스로 재바인딩된 뒤이므로 미인정한다(loader 도 비카운트).
-
-        탐지·바인딩 추적·shadow 판정 모두 **module-scope(`tree.body`)** 로
-        한정한다. loader 는 import·실행 후 module 네임스페이스(`vars(module)`)
-        에서 Strategy subclass 를 찾으므로, 함수/클래스 내부에 중첩된 import·
-        class 정의는 module attribute 가 아니라 loader 가 보지 못한다. 함수-로컬
-        `from ante.strategy import Strategy` 같은 바인딩을 module-scope 클래스에
-        적용하면(false positive) loader 와 불일치하므로, module-scope 로 한정해
-        정합시킨다.
-
-        재바인딩 무효화(`name_binding`·`strategymeta_binding` ↔ `module_aliases`
-        대칭): Strategy 바인딩(`name_binding`)·StrategyMeta
-        바인딩(`strategymeta_binding`)·module-alias(`module_aliases`) 모두 정의
-        순서대로 재바인딩되면 동일 규칙으로 무효화한다. 즉 ``import ante.strategy
-        as astg; astg = other; class X(astg.Strategy)`` 는 X 정의 시점에 ``astg``
-        가 이미 다른 값으로 재바인딩됐으므로 미인정한다(loader 도 비카운트).
-        반대로 ``import ante.strategy as astg; class X(astg.Strategy); astg =
-        other`` 는 X 가 재바인딩 **이전**이라 인정한다. ``import
-        ante.strategy``(dotted alias)는 root 이름(``ante``)이 재바인딩되면
-        무효화한다. 재바인딩 노드는 ``Assign``/value 있는 ``AnnAssign``/``ClassDef``
-        /``Import``/``ImportFrom``/``del`` 이다. StrategyMeta Name 바인딩도 동일하게
-        재바인딩되면 ``strategymeta_binding`` 에서 제거된다.
-
-        정적 name-resolution 모델 (bounded, known-limitation):
-        Strategy·StrategyMeta **모두** 다음을 정확히 모델링한다 — 직접/asname
-        import (``from ante.strategy import Strategy [as S]`` / ``import
-        StrategyMeta [as M]``), ``import ante.strategy [as x]`` module-alias
-        attribute (``x.Strategy`` / ``x.StrategyMeta``), module-level 정의 순서
-        기반 local-class shadow, 그리고 Name·module-alias 의 재바인딩(``Assign``/
-        ``AnnAssign``/``ClassDef``/``del``/재import) 무효화. 그 밖의 병리적 케이스
-        — 조건부 import, ``from ante.strategy import *`` star-import, 간접 alias
-        체인(``x = ante.strategy; x.Strategy``), 동적 import 등 — 는 정적으로
-        모델링하지 않는다(known-limitation). validate 는 정적 best-effort
-        pre-check 이며, 실제 타입 검증의 **authoritative gate 는 loader 의 load
-        후 런타임 ``issubclass(obj, Strategy)`` + submit 의 ``isinstance(meta,
-        StrategyMeta)``** 다. 이 비대칭은 의도적으로 수용한다(추가 round chase
-        차단). star-import 는 보수적으로 Strategy/StrategyMeta 를 명시 바인딩하지
-        않아 미인정(loader 보다 약하나 흔치 않은 known-limitation 범위).
-        """
+        """ante ``Strategy`` 를 상속하는 module-level 클래스 + 바인딩 스냅샷 탐색."""
         name_binding: dict[str, str] = {}
         strategymeta_binding: dict[str, str] = {}
         module_aliases: set[str] = set()
@@ -265,11 +198,7 @@ class StrategyValidator:
                 module_aliases.discard(stale)
 
         def _invalidate(name: str) -> None:
-            """이름 재바인딩 시 ante Strategy/StrategyMeta 바인딩·module-alias 무효화.
-
-            Strategy(`name_binding`)·StrategyMeta(`strategymeta_binding`)·
-            module-alias(`module_aliases`) 를 대칭으로 함께 무효화한다.
-            """
+            """이름 재바인딩 시 Strategy/StrategyMeta 바인딩·module-alias 무효화."""
             name_binding[name] = "other"
             strategymeta_binding.pop(name, None)
             _discard_module_aliases(name)

@@ -133,7 +133,7 @@ class BacktestService:
         result: BacktestResult,
         effective: BacktestConfig,
     ) -> str:
-        """결과를 durable JSON artifact 로 저장하고 경로를 반환한다."""
+        """결과를 JSON artifact 로 저장하고 경로를 반환한다(저장 실패면 ``""``)."""
         from pathlib import Path
 
         try:

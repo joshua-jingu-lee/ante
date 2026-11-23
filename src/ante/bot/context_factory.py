@@ -89,11 +89,7 @@ class StrategyContextFactory:
         return account.trading_mode
 
     def _get_live_portfolio(self, config: BotConfig) -> LivePortfolioView:
-        """봇의 계좌에 맞는 LivePortfolioView를 반환.
-
-        TreasuryManager가 있으면 계좌별 Treasury로 새 LivePortfolioView를 생성하고,
-        없으면 기본 live_portfolio를 반환한다.
-        """
+        """봇 계좌의 LivePortfolioView(계좌 Treasury가 없으면 기본 live_portfolio)."""
         if self._treasury_manager and self._position_history:
             try:
                 treasury = self._treasury_manager.get(config.account_id)
@@ -199,11 +195,7 @@ class StrategyContextFactory:
         return ctx
 
     def _resolve_virtual_balance(self, config: BotConfig) -> float:
-        """Virtual 계좌 봇의 초기 잔고를 Account 레벨(Treasury)에서 조회.
-
-        Treasury에 해당 봇의 예산이 배정되어 있으면 allocated 값을 사용하고,
-        Treasury가 없으면 0.0을 반환한다.
-        """
+        """Virtual 봇 초기 잔고: 예산의 allocated, Treasury·예산이 없으면 0.0."""
         if self._treasury_manager is not None:
             try:
                 treasury = self._treasury_manager.get(config.account_id)

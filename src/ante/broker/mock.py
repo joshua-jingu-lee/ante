@@ -211,7 +211,7 @@ class MockBrokerAdapter(BrokerAdapter):
     ) -> dict[str, float]:
         """매수가능 조회 — 보유 현금(``cash``) 기반 가상 산정.
 
-        브로커 호출 없이 보유 현금으로 산정한다. 시장가/``price=None``이면 내부
+        브로커 호출 없이 보유 현금으로 산정한다. ``price=None``이면 내부
         현재가를 단가로 사용하며, 단가 0이면 수량은 0.0이다.
         """
         cash = self._cash

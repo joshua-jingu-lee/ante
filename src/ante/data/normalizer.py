@@ -410,7 +410,7 @@ class DARTNormalizer:
         return pl.concat([cfs, ofs_fallback])
 
     def _convert_report_date(self, df: pl.DataFrame) -> pl.DataFrame:
-        """reprt_code + bsns_year → date 컬럼 변환."""
+        """reprt_code + bsns_year → date 컬럼 변환(매핑된 reprt_code 행만 남긴다)."""
         from calendar import monthrange
         from datetime import date as date_cls
 

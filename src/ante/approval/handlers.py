@@ -298,13 +298,7 @@ def _validate_bot_resume(
 def _validate_budget_change(
     s: ApprovalDeps, params: dict[str, Any]
 ) -> list[ValidationResult]:
-    """예산 변경 사전 검증: 미할당 잔액 충분 여부 (warn).
-
-    ``params.get("account_id", "test")`` fallback 은 두지 않는다.
-    invalid account_id 는 ``ValidationResult("fail", ...)``
-    으로 변환해 ``ApprovalService`` 가 ``ApprovalValidationError`` 로
-    변환하도록 한다 (validator 계약: raise 대신 fail 반환).
-    """
+    """예산 변경 사전 검증: 미할당 잔액 부족은 warn, account_id·Treasury 문제는 fail."""
     from ante.account.errors import InvalidAccountIdError
 
     try:

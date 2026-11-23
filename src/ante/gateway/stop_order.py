@@ -308,19 +308,7 @@ class StopOrderManager:
         return self._is_session_type_active_now(order.trading_session)
 
     def _session_epoch_key(self, session_type: str) -> str:
-        """거래일 멤버십 마킹 epoch 키 SSOT(``{거래일}:{세션종류}``).
-
-        P2-B: ``on_price_update``(실 틱 add)와
-        ``register``(조회)가 **같은 헬퍼**로 키를 생성해 drift 를 막는다.
-
-        ``business_date_kst()`` 는 휴장일/주말/시간외를 backward-roll 하지
-        **않고** 순수 KST 캘린더 날짜(``YYYYMMDD``)를 반환한다(fill_scheduler.
-        py:88). 따라서 금요일 틱과 토요일은 서로 다른 키가 되며, epoch 키에
-        raw calendar date 를 별도로 덧붙일 필요가 없다(``business_date_kst``
-        자체가 이미 raw calendar date 다). 이 날짜 분리가 epoch 휴장일
-        안전성의 핵심이다 — 1일차 epoch 가 2일차로 누설돼 2일차 신규 주문을
-        오마킹하지 않는다(주말이 사이에 끼어도 다른 키).
-        """
+        """epoch 키 SSOT ``{KST 캘린더 날짜}:{세션종류}``(휴장일·주말도 roll 안 함)."""
         from ante.broker.fill_scheduler import business_date_kst
 
         return f"{business_date_kst()}:{session_type}"

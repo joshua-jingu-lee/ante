@@ -79,20 +79,7 @@ def _coerce_finite_optional_price(value: object) -> float | None:
 
 
 def _safe_str(value: object) -> str:
-    """sqlite ``TEXT`` 컬럼 바인딩용 안전한 ``str`` 정규화.
-
-    Python 3.13의 ``int`` ↔ ``str`` 변환 4300자리 제한
-    (``sys.set_int_max_str_digits``), 사용자 정의 ``__repr__``가 raise하는
-    모든 경우, ``MemoryError``까지 포괄한다. builder가 절대 raise하지 않는
-    invariant를 지키기 위한 단일 진입점.
-
-    ``str``은 그대로 통과시켜 sqlite ``TEXT`` 컬럼 호환을 유지하고
-    (``"hold"``→``"hold"``), 그 외 값은 ``repr()`` 시도 후 실패 시
-    ``"<unrenderable {type}>"`` placeholder로 떨어뜨린다.
-
-    ``reason`` 메시지 조립에는 quote 보존이 필요하므로 ``_safe_repr``를 사용한다
-    (``"hold"``→``"'hold'"``).
-    """
+    """``TEXT`` 바인딩용 ``str`` 정규화(비-str은 ``repr()``, 실패 시 placeholder)."""
     if isinstance(value, str):
         return value
     try:
@@ -399,16 +386,7 @@ class RuleEngine:
         return overall, reason, actions
 
     async def _query_treasury_data(self, bot_id: str = "") -> dict[str, float]:
-        """Treasury에서 자산/손익 데이터를 조회한다.
-
-        Args:
-            bot_id: 봇 할당 예산 조회를 위한 봇 ID.
-
-        Returns:
-            daily_pnl, total_pnl, prev_day_total_asset,
-            total_asset, total_exposure, bot_allocated_budget 딕셔너리.
-            조회 실패 시 각 값은 0.0.
-        """
+        """Treasury에서 자산/손익 데이터를 조회한다."""
         result = {
             "daily_pnl": 0.0,
             "total_pnl": 0.0,
@@ -458,19 +436,7 @@ class RuleEngine:
     async def _calculate_bot_unrealized_pnl(
         self, bot_id: str, current_price: float, order_symbol: str
     ) -> float:
-        """봇의 전체 미실현 손익을 계산한다.
-
-        현재 주문 대상 종목은 current_price를 사용하고,
-        그 외 종목은 avg_entry_price를 현재가로 간주한다 (미실현=0 근사).
-
-        Args:
-            bot_id: 봇 ID.
-            current_price: 주문 대상 종목의 현재 가격.
-            order_symbol: 주문 대상 종목 코드.
-
-        Returns:
-            미실현 손익 합계.
-        """
+        """미실현 손익 합계를 계산한다."""
         if self._trade_service is None:
             return 0.0
 
@@ -583,20 +549,7 @@ class RuleEngine:
         return broker_type, trading_mode
 
     async def _resolve_account_status(self) -> Any | None:
-        """G7 — live ``AccountStatus`` 3-state 조회(``RuleContext.account_status`` 는
-        dead field). 공유 SSOT 헬퍼 ``ante.account.gate.resolve_account_status`` 에
-        위임한다 — 계층1(여기)·계층3(APIGateway)가 **동일 헬퍼**로 status 축을 평가해
-        중복 구현을 막는다(메타리뷰 followup).
-
-        status 는 런타임 가변 kill-switch(``account suspend`` IPC)라 반드시 **live**
-        조회하며, ``self._account`` 생성시점 스냅샷으로 fallback 하지 않는다
-        (stale ACTIVE 통과 시 suspended 계좌가 kill-switch 를 우회). 3-state:
-
-        - ``account_service is None`` → ``None``(status 축 비활성, 비게이트 레거시).
-        - 소스 present + ``get`` 예외/None/status 미상 → ``STATUS_UNAVAILABLE``
-          (검증 불가 → 호출자 fail-closed, spec 07:88).
-        - 소스 present + 조회 성공 + status present → verified status.
-        """
+        """G7 — live ``AccountStatus`` 3-state 조회(``resolve_account_status`` 위임)."""
         from ante.account.gate import resolve_account_status
 
         return await resolve_account_status(self._account_service, self._account_id)

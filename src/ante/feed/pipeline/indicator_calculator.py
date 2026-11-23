@@ -146,7 +146,7 @@ class IndicatorCalculator:
 
     @staticmethod
     def _with_effective_availability(quarterly: pl.DataFrame) -> pl.DataFrame:
-        """분기 프레임에 effective availability 키(``_EFFECTIVE_KEY``)를 부여한다."""
+        """분기 프레임에 ``_EFFECTIVE_KEY``를 부여하고 그 값이 null인 행은 제거한다."""
         if _AVAILABLE_DATE_KEY in quarterly.columns:
             available = pl.col(_AVAILABLE_DATE_KEY)
         else:

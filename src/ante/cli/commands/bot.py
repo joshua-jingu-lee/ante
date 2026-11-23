@@ -57,35 +57,7 @@ def _run(coro: Coroutine[Any, Any, Any]) -> Any:
 async def _create_services(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[Database, EventBus, BotManager, AccountService]]:
-    """CLI 에서 ``Database``/``EventBus``/``BotManager``/``AccountService`` 를
-    함께 구성하는 async context manager.
-
-    ``open_cli_db`` 기반 lifecycle (factory composition, account.py 패턴
-    1:1 미러). 호출 패턴:
-
-        async with _create_services(ctx=ctx) as (db, eventbus, mgr, account_service):
-            ...
-
-    ``open_cli_db`` 가 normal/exception/cancellation 모든 경로에서
-    ``Database.close()`` 를 보장하므로 (cleanup invariant), callsite 의
-    ``try/finally: await db.close()`` 패턴이 제거된다.
-
-    Args:
-        ctx: Click 컨텍스트. ``None`` 이면 ``click.get_current_context``
-            (silent=True) 로 fallback 해 ctx-less call sites 와의 하위 호환을
-            유지한다. 신규 호출은 항상 ctx 명시 전달이 권장된다
-            (offline-factory.md §3.1).
-
-    Yields:
-        ``initialize()`` 가 완료된 ``(db, eventbus, manager, account_service)``
-        4-tuple. ``BotManager``/``AccountService`` 의 ``initialize()`` 호출은
-        그대로 보존된다 (read-only 명시 예외는 ``AuditLogger`` /
-        ``DynamicConfigService`` 만; 본 helper 는 read-only skip 적용 안 함).
-
-    Cleanup invariant:
-        - ``open_cli_db`` 가 ``BaseException`` 까지 catch 하므로 service
-          ``initialize()`` 가 raise 해도 ``Database.close()`` 가 1회 호출된다.
-    """
+    """Database·EventBus·BotManager·AccountService 를 구성하는 async context manager."""
     from ante.account.service import AccountService
     from ante.bot.manager import BotManager
     from ante.eventbus.bus import EventBus
