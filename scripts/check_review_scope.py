@@ -20,9 +20,9 @@ file at the repository root. A regular file mode is ``100644`` or ``100755``.
 - ``baseline-lowered``: ``scripts/comment_baseline.json`` modified with the
   same regular file mode before and after, both sides decoding as UTF-8 and
   passing ``parse_baseline`` of ``check_comments.py`` (loaded by file path
-  next to this script), every head key of ``comments``, ``docstring_history``
-  and ``docstring_excess`` present in base with a value not above base, and
-  ``docstring_lines`` not above base. Equal values qualify. A key removed in
+  next to this script), and every head key of ``comments``,
+  ``docstring_history`` and ``docstring_excess`` present in base with a value
+  not above base. Equal values qualify. A key removed in
   head is a decrease. A head key missing from base, or a side that cannot be
   loaded or validated, is ``review``. Since both sides go through the same
   ``parse_baseline``, a base whose top-level keys differ from the ones it
@@ -279,7 +279,6 @@ def baseline_lowered(old: bytes, new: bytes) -> bool:
             _not_above(after.comments, before.comments)
             and _not_above(after.docstring_history, before.docstring_history)
             and _not_above(after.docstring_excess, before.docstring_excess)
-            and after.docstring_lines <= before.docstring_lines
         )
     except (Exception, SystemExit):
         return False

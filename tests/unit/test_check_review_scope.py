@@ -403,7 +403,6 @@ BASELINE = "scripts/comment_baseline.json"
 def _baseline_dict(
     comments: dict[str, int] | None = None,
     history: dict[str, int] | None = None,
-    lines: int = 10,
     excess: dict[str, int] | None = None,
 ) -> dict[str, object]:
     return {
@@ -414,17 +413,15 @@ def _baseline_dict(
         "docstring_excess": {"src/ante/a.py": 4, "src/ante/b.py": 2}
         if excess is None
         else excess,
-        "docstring_lines": lines,
     }
 
 
 def _baseline_json(
     comments: dict[str, int] | None = None,
     history: dict[str, int] | None = None,
-    lines: int = 10,
     excess: dict[str, int] | None = None,
 ) -> str:
-    return json.dumps(_baseline_dict(comments, history, lines, excess), indent=2)
+    return json.dumps(_baseline_dict(comments, history, excess), indent=2)
 
 
 def _without_excess(text: str) -> str:
@@ -433,9 +430,16 @@ def _without_excess(text: str) -> str:
     return json.dumps(data, indent=2)
 
 
+def _with_lines(text: str, lines: int = 10) -> str:
+    data = json.loads(text)
+    data["docstring_lines"] = lines
+    return json.dumps(data, indent=2)
+
+
 BASE_BASELINE = _baseline_json()
-EMPTY_BASELINE = _baseline_json(comments={}, history={}, lines=0, excess={})
+EMPTY_BASELINE = _baseline_json(comments={}, history={}, excess={})
 OLD_SHAPE_BASE_BASELINE = _without_excess(BASE_BASELINE)
+LINES_SHAPE_BASE_BASELINE = _with_lines(BASE_BASELINE)
 
 BASELINE_CASES = [
     pytest.param(
@@ -462,7 +466,9 @@ BASELINE_CASES = [
     pytest.param(
         _baseline_json(history={"src/ante/b.py": 1}), False, id="new-history-key"
     ),
-    pytest.param(_baseline_json(lines=11), False, id="docstring-lines-increase"),
+    pytest.param(
+        _with_lines(EMPTY_BASELINE, 0), False, id="head-with-docstring-lines-key"
+    ),
     pytest.param(
         _baseline_json(excess={"src/ante/a.py": 1, "src/ante/b.py": 2}),
         True,
@@ -497,7 +503,6 @@ BASELINE_CASES = [
                 "comments": {},
                 "docstring_history": {},
                 "docstring_excess": {},
-                "docstring_lines": 0,
                 "extra": {},
             }
         ),
@@ -551,6 +556,7 @@ def test_baseline_path_matches_comment_checker() -> None:
         pytest.param("﻿".encode() + BASE_BASELINE.encode(), id="base-bom"),
         pytest.param(b"\xff\xfe", id="base-not-utf8"),
         pytest.param(OLD_SHAPE_BASE_BASELINE.encode(), id="base-without-excess-key"),
+        pytest.param(LINES_SHAPE_BASE_BASELINE.encode(), id="base-with-lines-key"),
     ],
 )
 def test_malformed_base_baseline_is_not_lowered(old: bytes) -> None:
@@ -582,6 +588,25 @@ def test_base_with_other_key_set_requires_review(repo: Repo, head: str) -> None:
     repo.mark_base()
     repo.write(BASELINE, head)
     repo.commit("new-shape baseline")
+    result = repo.check()
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"review\tM\t{BASELINE}" in result.stdout
+    assert "verdict: REVIEW" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        pytest.param(EMPTY_BASELINE, id="lowered"),
+        pytest.param(BASE_BASELINE, id="values-kept"),
+    ],
+)
+def test_base_with_docstring_lines_key_requires_review(repo: Repo, head: str) -> None:
+    repo.write(BASELINE, LINES_SHAPE_BASE_BASELINE)
+    repo.commit("baseline with docstring_lines")
+    repo.mark_base()
+    repo.write(BASELINE, head)
+    repo.commit("drop docstring_lines")
     result = repo.check()
     assert result.returncode == 1, result.stdout + result.stderr
     assert f"review\tM\t{BASELINE}" in result.stdout
