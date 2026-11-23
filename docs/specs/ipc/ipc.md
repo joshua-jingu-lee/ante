@@ -261,6 +261,14 @@ BrokerAdapter disconnect와 DB close가 시작되는 구간이므로 read-only�
 `PID alive AND socket exists`를 active runtime으로 판정하므로, `unlink_socket()`은
 BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 
+상태는 앞으로만 바뀐다. 허용 전이는 `STOPPED`→`RUNNING`,
+`RUNNING`→`SHUTTING_DOWN`·`DRAINING`·`STOPPED`, `SHUTTING_DOWN`→`DRAINING`·`STOPPED`,
+`DRAINING`→`STOPPED`이다. 수명주기 메서드가 이 표에 없는 전이를 요구하면 상태를 바꾸지
+않고 돌아간다. 이때 `start()`는 listener와 소켓 파일을 건드리지 않고(`STOPPED`가 아닐 때의
+시작은 아무것도 하지 않는다), `stop_dispatching()`·`unlink_socket()`도 아무것도 하지 않는다.
+따라서 `STOPPED`에서의 `stop()`은 그 경로의 소켓 파일을 지우지 않는다. `stop_accepting()`만은
+상태와 관계없이 남은 listener가 있으면 닫는다.
+
 ## Handler taxonomy
 
 `CommandRegistry`는 각 등록 명령을 `CommandSpec`으로 보관하며, `is_mutating` taxonomy를
