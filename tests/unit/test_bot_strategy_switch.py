@@ -494,3 +494,23 @@ class TestFailureAfterStopRollsBack:
         assert await _db_strategy_ids(db) == (a, a)
         await manager.start_bot("bot1")
         assert (await _next_order(orders, 1)).symbol == "AAA"
+
+    async def test_update_bot_save_failure_restores_old_strategy(
+        self, manager, ctx, db, orders, strategies, monkeypatch
+    ):
+        a, b = strategies
+        bot = await _running_on_a(manager, ctx, db, orders, a)
+        await manager.stop_bot("bot1")
+
+        async def _fail(config):
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr(manager, "_save_bot_config", _fail)
+        with pytest.raises(RuntimeError, match="db down"):
+            await manager.update_bot("bot1", strategy_id=b)
+        monkeypatch.undo()
+
+        assert bot.config.strategy_id == a
+        assert await _db_strategy_ids(db) == (a, a)
+        await manager.start_bot("bot1")
+        assert (await _next_order(orders, 1)).symbol == "AAA"
