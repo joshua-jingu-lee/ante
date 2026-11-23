@@ -6,7 +6,13 @@
 **상태 대입**: 대상이 ``.status`` 속성인 ``Assign``/``AnnAssign``/``AugAssign``
 이다. 우변은 보지 않는다. 대상은 튜플·리스트·``Starred`` 안까지 펼친다.
 파일마다 모듈 수준 함수 ``_transition_status`` 의 본문 안에 정확히 1개, 밖에
-0개여야 한다.
+0개여야 한다. 계좌 파일만 예외로 ``_restore_status`` 안에 1개를 더 허용한다.
+
+**되돌리기** (#2667): ``_restore_status`` 는 계좌 파일의 모듈 수준 함수이고,
+부르는 곳은 ``activate``·``delete`` 의 ``except BaseException`` 처리기뿐이다.
+그 처리기는 ``SET status`` UPDATE를 감싼 ``try`` 에 달려 있고 마지막 문이
+인자 없는 ``raise`` 다. 되돌릴 값은 전이 호출보다 앞에서 잡는다. ``suspend``
+에는 되돌리기도 ``try`` 도 없다(실패 정책은 유지관리자 결정 대기).
 
 **생성자 키워드**: 이름이 ``status`` 인 키워드 인자를 가진 호출이다. 감싸는
 함수와 호출 대상 이름의 쌍이 계좌는 ``_row_to_account`` 1곳, 멤버는
@@ -46,6 +52,7 @@ _ACCOUNT = _REPO_ROOT / "src" / "ante" / "account" / "service.py"
 _MEMBER = _REPO_ROOT / "src" / "ante" / "member" / "service.py"
 _CIRCUIT = _REPO_ROOT / "src" / "ante" / "broker" / "circuit_breaker.py"
 _TRANSITION_FUNC = "_transition_status"
+_RESTORE_FUNC = "_restore_status"
 
 _FILES = pytest.mark.parametrize("path", [_ACCOUNT, _MEMBER], ids=["account", "member"])
 
@@ -122,12 +129,19 @@ def test_transition_function_is_a_module_level_function(path):
     assert len(everywhere) == 1
 
 
-@_FILES
-def test_status_is_assigned_only_inside_transition_function(path):
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (_ACCOUNT, {_TRANSITION_FUNC: 1, _RESTORE_FUNC: 1}),
+        (_MEMBER, {_TRANSITION_FUNC: 1}),
+    ],
+    ids=["account", "member"],
+)
+def test_status_is_assigned_only_inside_transition_function(path, expected):
     tree = _parse(path)
     owner = _enclosing_functions(tree)
     where = Counter(owner[id(node)] for node in _status_assignments(tree))
-    assert dict(where) == {_TRANSITION_FUNC: 1}
+    assert dict(where) == expected
 
 
 @pytest.mark.parametrize(
@@ -256,6 +270,99 @@ def test_transition_precedes_the_status_update_and_feeds_it(path):
         params = update.args[1]
         assert isinstance(params, ast.Tuple), name
         assert ast.unparse(params.elts[0]) == "status", name
+
+
+def _async_methods(tree: ast.Module) -> dict[str, ast.AsyncFunctionDef]:
+    return {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef)
+    }
+
+
+def _restore_handlers(tree: ast.Module) -> list[tuple[str, ast.Try, ast.ExceptHandler]]:
+    owner = _enclosing_functions(tree)
+    found: list[tuple[str, ast.Try, ast.ExceptHandler]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        for handler in node.handlers:
+            calls = [
+                call
+                for stmt in handler.body
+                for call in ast.walk(stmt)
+                if isinstance(call, ast.Call) and _callee_name(call) == _RESTORE_FUNC
+            ]
+            if calls:
+                found.append((owner[id(node)], node, handler))
+    return found
+
+
+def test_restore_is_called_only_in_activate_and_delete_failure_handlers():
+    tree = _parse(_ACCOUNT)
+    owner = _enclosing_functions(tree)
+    module_level = [
+        node.name for node in tree.body if isinstance(node, ast.FunctionDef)
+    ]
+    assert _RESTORE_FUNC in module_level
+    calls = sorted(
+        (owner[id(node)], tuple(ast.unparse(arg) for arg in node.args))
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _callee_name(node) == _RESTORE_FUNC
+    )
+    args = ("account", "previous_status", "previous_updated_at")
+    assert calls == [("activate", args), ("delete", args)]
+
+    handlers = _restore_handlers(tree)
+    assert sorted(name for name, _, _ in handlers) == ["activate", "delete"]
+    methods = _async_methods(tree)
+    for name, try_node, handler in handlers:
+        assert handler.type is not None and ast.unparse(handler.type) == (
+            "BaseException"
+        ), name
+        assert handler.name is None, name
+        last = handler.body[-1]
+        assert isinstance(last, ast.Raise) and last.exc is None, name
+        update = _status_update(methods[name])
+        assert any(update in list(ast.walk(stmt)) for stmt in try_node.body), name
+        (transition,) = [
+            call
+            for call in ast.walk(methods[name])
+            if isinstance(call, ast.Call) and _callee_name(call) == _TRANSITION_FUNC
+        ]
+        captures = [
+            node
+            for node in ast.walk(methods[name])
+            if isinstance(node, ast.Assign)
+            and [ast.unparse(t) for t in node.targets]
+            == ["(previous_status, previous_updated_at)"]
+            and ast.unparse(node.value) == "(account.status, account.updated_at)"
+        ]
+        assert len(captures) == 1, name
+        assert captures[0].lineno < transition.lineno, name
+
+
+def test_suspend_does_not_restore_until_maintainer_decides_failure_policy():
+    tree = _parse(_ACCOUNT)
+    suspend = _async_methods(tree)["suspend"]
+    reason = (
+        "suspend 실패 정책은 유지관리자 결정 대기(#2667): 결정 전까지 "
+        "suspend에 되돌리기나 SET status UPDATE를 감싸는 try를 넣지 않는다"
+    )
+    restores = [
+        node
+        for node in ast.walk(suspend)
+        if isinstance(node, ast.Call) and _callee_name(node) == _RESTORE_FUNC
+    ]
+    assert restores == [], reason
+    update = _status_update(suspend)
+    wrapping = [
+        node
+        for node in ast.walk(suspend)
+        if isinstance(node, ast.Try)
+        and any(update in list(ast.walk(stmt)) for stmt in node.body)
+    ]
+    assert wrapping == [], reason
 
 
 def _guards_before_transition(method: ast.AsyncFunctionDef) -> list[str]:
