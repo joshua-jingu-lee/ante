@@ -148,7 +148,7 @@ paper·live 간 / 영업일 재사용으로 충돌할 수 있다. 따라서:
   반환한다. **FillApplier의 트랜잭션 안에서만 호출**. `confirmed_cumulative`는
   체결 이벤트 outbox의 결정적 `fill_dedup_key` 산출 기준이다(§10, #1949) —
   입력 `observed_cumulative`가 아니라 DB가 RETURNING으로 확정한 값을 쓴다.
-- `mark_terminal(order_id, status)`: 취소·거부·실패·만료 종료 표기.
+- `mark_terminal(order_id, status)`: 취소·거부·실패·만료 종료 표기. 열린 상태(`open`·`partially_filled`)의 행만 갱신하고, 이미 종결된 행(`filled` 포함)은 바꾸지 않는다(첫 종결이 이긴다).
 - `get_open_orders(account_id)`: 계좌의 non-terminal(open/partially_filled) 주문.
 - `lookup_order_id(account_id, broker_order_id, submitted_date) → order_id | None`:
   관측 → 내부 주문 매핑(non-terminal/same-day scope).
