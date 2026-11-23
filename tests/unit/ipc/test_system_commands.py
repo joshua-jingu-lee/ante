@@ -144,17 +144,24 @@ CLEARED_RESPONSE = {
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("args", "detail"),
+    [
+        pytest.param({}, "reason=IPC clear_halt", id="default"),
+        pytest.param({"reason": "점검 완료"}, "reason=점검 완료", id="given"),
+    ],
+)
 async def test_clear_halt_activates_all_and_returns_envelope(
-    harness: _Harness,
+    harness: _Harness, args: dict[str, Any], detail: str
 ) -> None:
-    response = await harness.send("system.clear_halt", {})
+    response = await harness.send("system.clear_halt", args)
     assert response == CLEARED_RESPONSE
     harness.account.activate_all.assert_awaited_once_with(activated_by="ops-lead")
     harness.audit_logger.log.assert_awaited_once_with(
         member_id="ops-lead",
         action="system.clear_halt",
         resource="system:kill_switch",
-        detail="",
+        detail=detail,
         ip="",
     )
 
@@ -255,6 +262,13 @@ def test_clear_halt_cli_success_output(argv: list[str], output: str) -> None:
     assert (exit_code, got) == (0, output)
 
 
-def test_clear_halt_cli_sends_no_reason() -> None:
-    _code, _out, send = _invoke_clear_halt(["system", "clear-halt", "--reason", "r"])
-    send.assert_awaited_once_with("system.clear_halt", {}, actor=ACTOR)
+@pytest.mark.parametrize(
+    ("argv", "args"),
+    [
+        pytest.param(["--reason", "r"], {"reason": "r"}, id="given"),
+        pytest.param([], {"reason": ""}, id="omitted"),
+    ],
+)
+def test_clear_halt_cli_sends_reason(argv: list[str], args: dict[str, str]) -> None:
+    _code, _out, send = _invoke_clear_halt(["system", "clear-halt", *argv])
+    send.assert_awaited_once_with("system.clear_halt", args, actor=ACTOR)
