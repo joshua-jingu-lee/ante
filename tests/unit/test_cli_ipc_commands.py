@@ -169,7 +169,9 @@ class TestSystemClearHaltIPC:
         assert "2" in result.output
         # 봇 자동 재시작 안내 문구 (Refs #1213 SSOT)
         assert "자동 재시작" in result.output
-        mock_client.send.assert_called_once_with("system.clear_halt", {}, "test-master")
+        mock_client.send.assert_called_once_with(
+            "system.clear_halt", {"reason": ""}, "test-master"
+        )
 
 
 # ── account suspend IPC ────────────────────────────
