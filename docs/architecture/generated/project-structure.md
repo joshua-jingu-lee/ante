@@ -378,6 +378,7 @@ scripts/
 ├── import_baseline.json
 ├── install-service.sh                # OS 감지 후 systemd/launchd 서비스 설치
 ├── lint_baseline.json
+├── render_e2e_records.py
 ├── scan_create_services_anti_pattern.py
 ├── spec_code_block_baseline.json
 ├── uninstall-service.sh              # 서비스 제거
