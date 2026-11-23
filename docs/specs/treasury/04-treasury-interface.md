@@ -20,7 +20,7 @@
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `initialize` | — | `None` | 스키마 생성 + DB 복원 + EventBus 구독 |
+| `initialize` | — | `None` | 스키마 생성 + DB 복원(예산·주문별 잔여 예약) + EventBus 구독 |
 | `set_account_balance` | balance: float | `None` | 계좌 잔고 설정. 미할당 자금 자동 재계산 |
 | `get_available` | bot_id: str | float | 봇의 가용 예산 조회 |
 | `get_budget` | bot_id: str | BotBudget \| None | 봇의 예산 상태 조회 |
