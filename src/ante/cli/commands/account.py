@@ -109,20 +109,20 @@ def _get_selectable_broker_types() -> list[str]:
 
 
 def _split_key_value(
-    raw: str, *, fmt: OutputFormatter, option_label: str
+    raw: str, *, fmt: OutputFormatter, option_label: str, position: int
 ) -> tuple[str, str]:
-    """`key=value` 한 쌍을 파싱한다. 형식 위반 시 즉시 종료."""
+    """`key=value` 한 쌍을 파싱하고 형식 위반은 원문 없이 순번으로 알린다."""
     if "=" not in raw:
         raise CliMissingRequiredInputError(
             "CLI_MISSING_REQUIRED_INPUT: "
-            f"{option_label} 옵션은 key=value 형식이어야 합니다: {raw!r}"
+            f"{option_label} 옵션의 {position}번째 인자가 key=value 형식이 아닙니다."
         )
     key, _, value = raw.partition("=")
     key = key.strip()
     if not key:
         raise CliMissingRequiredInputError(
             "CLI_MISSING_REQUIRED_INPUT: "
-            f"{option_label} 옵션의 key가 비어 있습니다: {raw!r}"
+            f"{option_label} 옵션의 {position}번째 인자의 key가 비어 있습니다."
         )
     return key, value
 
@@ -159,13 +159,19 @@ def _resolve_credentials(
     required_set = set(required_keys)
     seen: dict[str, str] = {}
 
-    def _set_or_dup(key: str, value: str, channel: str) -> None:
+    def _allowed_key(raw: str, channel: str, position: int) -> tuple[str, str]:
+        key, rest = _split_key_value(
+            raw, fmt=fmt, option_label=channel, position=position
+        )
         if key not in required_set:
             raise AccountUnknownCredentialKeyError(
                 "ACCOUNT_UNKNOWN_CREDENTIAL_KEY: "
-                f"알 수 없는 credential key: {key!r} ({channel}). "
-                f"허용되는 key: {sorted(required_set)}"
+                f"알 수 없는 credential key입니다 ({channel} 옵션의 "
+                f"{position}번째 인자). 허용되는 key: {sorted(required_set)}"
             )
+        return key, rest
+
+    def _set_or_dup(key: str, value: str) -> None:
         if key in seen:
             raise AccountDuplicateCredentialKeyError(
                 "ACCOUNT_DUPLICATE_CREDENTIAL_KEY: "
@@ -173,18 +179,18 @@ def _resolve_credentials(
             )
         seen[key] = value
 
-    for raw in direct_pairs:
-        key, value = _split_key_value(raw, fmt=fmt, option_label="--credential")
+    for position, raw in enumerate(direct_pairs, start=1):
+        key, value = _allowed_key(raw, "--credential", position)
         if value == "":
             raise AccountMissingRequiredCredentialError(
                 "ACCOUNT_MISSING_REQUIRED_CREDENTIAL: "
                 f"--credential {key}: 값이 비어 있습니다. "
                 "credential 값은 비어 있을 수 없습니다."
             )
-        _set_or_dup(key, value, "--credential")
+        _set_or_dup(key, value)
 
-    for raw in env_pairs:
-        key, env_name = _split_key_value(raw, fmt=fmt, option_label="--credential-env")
+    for position, raw in enumerate(env_pairs, start=1):
+        key, env_name = _allowed_key(raw, "--credential-env", position)
         env_name_clean = env_name.strip()
         if not env_name_clean:
             raise CliMissingRequiredInputError(
@@ -198,10 +204,10 @@ def _resolve_credentials(
                 f"--credential-env {key}={env_name_clean}: "
                 "환경변수가 설정되지 않았거나 공란입니다."
             )
-        _set_or_dup(key, env_value, "--credential-env")
+        _set_or_dup(key, env_value)
 
-    for raw in file_pairs:
-        key, path_str = _split_key_value(raw, fmt=fmt, option_label="--credential-file")
+    for position, raw in enumerate(file_pairs, start=1):
+        key, path_str = _allowed_key(raw, "--credential-file", position)
         path_clean = path_str.strip()
         if not path_clean:
             raise CliMissingRequiredInputError(
@@ -228,7 +234,7 @@ def _resolve_credentials(
                 "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: "
                 f"--credential-file {key}={path_clean}: 파일이 비어 있습니다."
             )
-        _set_or_dup(key, value, "--credential-file")
+        _set_or_dup(key, value)
 
     if required_set:
         missing = sorted(required_set - seen.keys())
@@ -250,8 +256,10 @@ def _resolve_broker_config(
 ) -> dict[str, Any]:
     """`--broker-config key=value` 반복 옵션을 dict로 파싱한다."""
     out: dict[str, Any] = {}
-    for raw in pairs:
-        key, value_str = _split_key_value(raw, fmt=fmt, option_label="--broker-config")
+    for position, raw in enumerate(pairs, start=1):
+        key, value_str = _split_key_value(
+            raw, fmt=fmt, option_label="--broker-config", position=position
+        )
         if key in out:
             raise CliMissingRequiredInputError(
                 "CLI_MISSING_REQUIRED_INPUT: "

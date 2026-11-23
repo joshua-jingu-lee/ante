@@ -163,22 +163,66 @@ _CREATE = [
 _CRED_OK = ["--credential", f"app_key={_SECRET}", "--credential", "app_secret=fake-s1"]
 
 
+_NOT_KEY_VALUE = "{} 옵션의 {}번째 인자가 key=value 형식이 아닙니다."
+_EMPTY_KEY = "{} 옵션의 {}번째 인자의 key가 비어 있습니다."
+_UNKNOWN_KEY = (
+    "알 수 없는 credential key입니다 ({} 옵션의 {}번째 인자). "
+    "허용되는 key: ['app_key', 'app_secret']"
+)
+
+
 def _create_case(extra: list[str], code: str, message: str, case_id: str) -> Any:
     return pytest.param(extra, code, message, id=case_id)
 
 
 _CREATE_INPUT_EXITS = [
     _create_case(
-        ["--credential", "app_key"],
+        ["--credential", f"app_key{_SECRET}"],
         "CLI_MISSING_REQUIRED_INPUT",
-        "--credential 옵션은 key=value 형식이어야 합니다: 'app_key'",
+        _NOT_KEY_VALUE.format("--credential", 1),
         "credential-no-equals",
+    ),
+    _create_case(
+        ["--credential", f"app_key={_SECRET}", "--credential", f"app_secret{_SECRET}"],
+        "CLI_MISSING_REQUIRED_INPUT",
+        _NOT_KEY_VALUE.format("--credential", 2),
+        "credential-no-equals-second",
     ),
     _create_case(
         ["--credential", "=fake-v0"],
         "CLI_MISSING_REQUIRED_INPUT",
-        "--credential 옵션의 key가 비어 있습니다: '=fake-v0'",
+        _EMPTY_KEY.format("--credential", 1),
         "credential-empty-key",
+    ),
+    _create_case(
+        ["--credential", f"={_SECRET}"],
+        "CLI_MISSING_REQUIRED_INPUT",
+        _EMPTY_KEY.format("--credential", 1),
+        "credential-empty-key-secret",
+    ),
+    _create_case(
+        ["--credential", f"{_SECRET}="],
+        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+        _UNKNOWN_KEY.format("--credential", 1),
+        "credential-secret-as-key-empty-value",
+    ),
+    _create_case(
+        ["--credential", f"{_SECRET}=x"],
+        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+        _UNKNOWN_KEY.format("--credential", 1),
+        "credential-secret-as-key",
+    ),
+    _create_case(
+        ["--credential", f"{_SECRET}=="],
+        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+        _UNKNOWN_KEY.format("--credential", 1),
+        "credential-padded-secret-as-key",
+    ),
+    _create_case(
+        ["--credential", f"app_key={_SECRET}", "--credential", "nope="],
+        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+        _UNKNOWN_KEY.format("--credential", 2),
+        "credential-unknown-key-second",
     ),
     _create_case(
         ["--credential", "app_key="],
@@ -190,9 +234,43 @@ _CREATE_INPUT_EXITS = [
     _create_case(
         ["--credential", f"nope={_SECRET}"],
         "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
-        "알 수 없는 credential key: 'nope' (--credential). "
-        "허용되는 key: ['app_key', 'app_secret']",
+        _UNKNOWN_KEY.format("--credential", 1),
         "credential-unknown-key",
+    ),
+    _create_case(
+        [
+            "--credential-env",
+            "app_key=FAKE_ENV_A",
+            "--credential-env",
+            f"{_SECRET}=FAKE_ENV_UNSET",
+        ],
+        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+        _UNKNOWN_KEY.format("--credential-env", 2),
+        "credential-env-secret-as-key",
+    ),
+    _create_case(
+        ["--credential-env", "nope="],
+        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+        _UNKNOWN_KEY.format("--credential-env", 1),
+        "credential-env-unknown-key-empty-name",
+    ),
+    _create_case(
+        ["--credential-file", f"{_SECRET}=/p"],
+        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+        _UNKNOWN_KEY.format("--credential-file", 1),
+        "credential-file-secret-as-key",
+    ),
+    _create_case(
+        ["--credential-file", "nope=/nonexistent-ante-fake/cred.txt"],
+        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+        _UNKNOWN_KEY.format("--credential-file", 1),
+        "credential-file-unknown-key-not-read",
+    ),
+    _create_case(
+        ["--credential-file", "nope="],
+        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+        _UNKNOWN_KEY.format("--credential-file", 1),
+        "credential-file-unknown-key-empty-path",
     ),
     _create_case(
         [
@@ -241,8 +319,14 @@ _CREATE_INPUT_EXITS = [
     _create_case(
         [*_CRED_OK, "--broker-config", "is_paper"],
         "CLI_MISSING_REQUIRED_INPUT",
-        "--broker-config 옵션은 key=value 형식이어야 합니다: 'is_paper'",
+        _NOT_KEY_VALUE.format("--broker-config", 1),
         "broker-config-no-equals",
+    ),
+    _create_case(
+        [*_CRED_OK, "--broker-config", "a=1", "--broker-config", "=fake-v0"],
+        "CLI_MISSING_REQUIRED_INPUT",
+        _EMPTY_KEY.format("--broker-config", 2),
+        "broker-config-empty-key-second",
     ),
     _create_case(
         [*_CRED_OK, "--broker-config", "a=1", "--broker-config", "a=2"],
@@ -266,7 +350,7 @@ def test_account_create_input_exit(
         env={"FAKE_ENV_A": "fake-env-v", "FAKE_ENV_UNSET": ""},
     )
     _assert_exit(mode, result, code, f"{code}: {message}", f"Error: {code}: {message}")
-    _assert_no_secret(result, _SECRET, "fake-s1", "fake-env-v")
+    _assert_no_secret(result, _SECRET, "fake-s1", "fake-env-v", "fake-v0")
     service.create.assert_not_called()
 
 
@@ -589,9 +673,22 @@ def test_account_delete_service_error(
             "test",
             ["--credential", f"nope={_SECRET}"],
             "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
-            "알 수 없는 credential key: 'nope' (--credential). "
-            "허용되는 key: ['app_key', 'app_secret']",
+            _UNKNOWN_KEY.format("--credential", 1),
             id="unknown-key",
+        ),
+        pytest.param(
+            "test",
+            ["--credential", f"app_key{_SECRET}"],
+            "CLI_MISSING_REQUIRED_INPUT",
+            _NOT_KEY_VALUE.format("--credential", 1),
+            id="no-equals",
+        ),
+        pytest.param(
+            "test",
+            ["--credential", f"{_SECRET}="],
+            "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+            _UNKNOWN_KEY.format("--credential", 1),
+            id="secret-as-key",
         ),
     ],
 )
