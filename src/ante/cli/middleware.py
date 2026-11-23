@@ -125,10 +125,10 @@ def _emit_command_result(ctx: click.Context, rv: object) -> None:
     contract = get_contract(path)
     if contract is None:
         raise TypeError(f"CommandResult from {path!r} without a CLI contract")
-    if contract.output.envelope != "standard":
+    if contract.output.kind == "stream":
         raise TypeError(
-            f"CommandResult from {path!r} with envelope "
-            f"{contract.output.envelope!r}; the contract must be 'standard'"
+            f"CommandResult from {path!r} whose contract kind is 'stream'; "
+            "a stream command writes its own output"
         )
     data = rv.data
     if isinstance(data, list):

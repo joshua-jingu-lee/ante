@@ -11,12 +11,13 @@ remaining / `#1845`/`#1848` drift guard) 가 contract entry 를 등록하기
 * :class:`AuthContract` / :class:`OutputContract` /
   :class:`CliCommandContract` 의 필드 이름 집합과 순서.
 * default 값 (``scopes`` 는 빈 frozenset, ``data_key`` 는 ``None``,
-  ``envelope`` 는 ``"standard"``, ``ipc_command`` 는 ``None``).
+  ``ipc_command`` 는 ``None``).
 * ``frozen=True`` dataclass 인지 (불변 instance 보장).
-* :data:`ante.contracts.vocab.AuthMode` / :data:`ContractKind` /
-  :data:`EnvelopeForm` Literal 의 모든 값이 dataclass 에 받아들여진다.
-* ``raw_legacy`` 가 :data:`EnvelopeForm` 자리이지 :data:`ContractKind`
-  자리가 아니다 (#1820 결정).
+* :data:`ante.contracts.vocab.AuthMode` / :data:`ContractKind` Literal 의
+  모든 값이 dataclass 에 받아들여진다.
+* ``OutputContract`` 에 ``envelope`` 필드가 없고 ``EnvelopeForm`` 이 없다
+  (#2773 — 값이 ``standard`` 하나만 남아 필드째 지웠다). 스트림은
+  ``kind == "stream"`` 으로 표현되고 ``signal connect`` 가 그 계약이다.
 * :data:`CLI_COMMAND_REGISTRY` 는 본 PR 시점 빈 dict, 두 accessor 가
   비어있다.
 * :mod:`ante.contracts.cli_registry` 또는 :mod:`ante.contracts` import 가
@@ -38,6 +39,7 @@ import typing
 
 import pytest
 
+from ante.contracts import vocab
 from ante.contracts.cli_registry import (
     CLI_COMMAND_REGISTRY,
     AuthContract,
@@ -47,7 +49,7 @@ from ante.contracts.cli_registry import (
     all_contracts,
     get_contract,
 )
-from ante.contracts.vocab import AuthMode, ContractKind, EnvelopeForm
+from ante.contracts.vocab import AuthMode, ContractKind
 
 # ── dataclass field signature lock ─────────────────────────────────────────
 
@@ -80,7 +82,7 @@ def test_auth_contract_scope_set_is_immutable() -> None:
 
 def test_output_contract_field_names_and_order() -> None:
     fields = dataclasses.fields(OutputContract)
-    assert [f.name for f in fields] == ["kind", "data_key", "envelope"]
+    assert [f.name for f in fields] == ["kind", "data_key"]
 
 
 def test_output_contract_is_frozen() -> None:
@@ -90,7 +92,6 @@ def test_output_contract_is_frozen() -> None:
 def test_output_contract_defaults() -> None:
     instance = OutputContract(kind="entity")
     assert instance.data_key is None
-    assert instance.envelope == "standard"
 
 
 def test_cli_command_contract_field_names_and_order() -> None:
@@ -145,12 +146,6 @@ def test_contract_kind_literal_values_accepted_by_output_contract() -> None:
         assert instance.kind == value
 
 
-def test_envelope_form_literal_values_accepted_by_output_contract() -> None:
-    for value in _literal_values(EnvelopeForm):
-        instance = OutputContract(kind="raw", envelope=value)  # type: ignore[arg-type]
-        assert instance.envelope == value
-
-
 def test_execution_class_literal_values_match_spec() -> None:
     # docs/specs/cli/03-commands.md 의 5 모드와 1:1 정합 (external process 흡수).
     assert set(_literal_values(ExecutionClass)) == {
@@ -162,14 +157,17 @@ def test_execution_class_literal_values_match_spec() -> None:
     }
 
 
-def test_raw_legacy_is_envelope_form_not_contract_kind() -> None:
-    """``raw_legacy`` 는 EnvelopeForm 값이지 ContractKind 값이 아니다 (#1820)."""
-    assert "raw_legacy" in _literal_values(EnvelopeForm)
+def test_envelope_form_is_gone() -> None:
+    """``EnvelopeForm`` 과 ``raw_legacy`` 값이 어휘에 없다 (#2773)."""
+    assert not hasattr(vocab, "EnvelopeForm")
     assert "raw_legacy" not in _literal_values(ContractKind)
-    # 표현 lock: kind="raw" + envelope="raw_legacy" 조합으로 표현된다.
-    instance = OutputContract(kind="raw", envelope="raw_legacy")
-    assert instance.kind == "raw"
-    assert instance.envelope == "raw_legacy"
+
+
+def test_signal_connect_contract_is_stream() -> None:
+    """``signal connect`` 의 계약은 ``kind == "stream"`` 이다 (#2773)."""
+    contract = get_contract(("signal", "connect"))
+    assert contract is not None
+    assert contract.output.kind == "stream"
 
 
 # ── registry baseline (account migration, #1846) ──────────────────────────
@@ -605,7 +603,7 @@ def test_signal_entries_registered_after_1847_sub_pr_9() -> None:
     본 단언은 #1847 sub-PR 9 가 signal migration 을 완료한 시점부터
     lock 된다. 1 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_signal_success_output_drift` 가
+    (Family B) 와 :func:`test_signal_connect_contract_is_stream` 이
     책임진다.
     """
     expected_signal_paths = {
