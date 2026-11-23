@@ -519,7 +519,7 @@ class TestDuplicateValidatedEvent:
 
     @pytest.mark.parametrize("order_type", ["limit", "market"])
     async def test_priced_buy_published_once(self, treasury, eventbus, order_type):
-        await treasury.allocate("bot1", 1_000_000.0)
+        await treasury.allocate("bot1", 2_000_000.0)
         approved, rejected = self._collect(eventbus)
 
         await eventbus.publish(self._validated(order_type, 50_000.0))
@@ -555,8 +555,15 @@ class TestDuplicateValidatedEvent:
         assert len(approved) == 1
         assert rejected == []
 
-    async def test_market_buy_duplicate_during_quote_wait(self, db, eventbus):
-        """기준가 조회를 기다리는 사이 같은 id가 먼저 예약해도 거부 0건·승인 1건."""
+    @pytest.mark.parametrize("allocation", [1_000_000.0, 150_000.0])
+    async def test_market_buy_duplicate_during_quote_wait(
+        self, db, eventbus, allocation
+    ):
+        """기준가 조회를 기다리는 사이 같은 id가 먼저 예약해도 거부 0건·승인 1건.
+
+        ``150_000`` 은 둘째 예약이 가용 예산을 넘는 경우다 — 중복 판정이 예산
+        판정보다 먼저여야 거부가 나가지 않는다.
+        """
         import asyncio
 
         gate = asyncio.Event()
@@ -580,7 +587,7 @@ class TestDuplicateValidatedEvent:
         )
         await t.initialize()
         await t.set_account_balance(10_000_000.0)
-        await t.allocate("bot1", 1_000_000.0)
+        await t.allocate("bot1", allocation)
         approved, rejected = self._collect(eventbus)
 
         first = asyncio.create_task(eventbus.publish(self._validated("market", None)))
