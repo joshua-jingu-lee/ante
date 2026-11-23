@@ -887,8 +887,12 @@ def _row_to_account(row: dict[str, Any]) -> Account:
         else (broker_config_raw or {})
     )
 
-    buffer_raw = row.get("market_order_reserve_buffer_rate", "0")
-    buffer_value = Decimal("0") if buffer_raw is None else Decimal(str(buffer_raw))
+    buffer_raw = row.get("market_order_reserve_buffer_rate")
+    buffer_value = (
+        (Decimal("0") if row["broker_type"] == "test" else Decimal("0.005"))
+        if buffer_raw is None
+        else Decimal(str(buffer_raw))
+    )
 
     tz_value, tz_invalid = _load_persisted_timezone(row["timezone"], row["account_id"])
 
