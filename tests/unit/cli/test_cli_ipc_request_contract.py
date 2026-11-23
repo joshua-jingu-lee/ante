@@ -55,7 +55,7 @@ ROWS: tuple[Row, ...] = (
         ("--id", "m1", "--type", "agent", "--org", "o", "--name", "n"),
     ),
     *_rows("member set-emoji", ("m1", "X")),
-    *_rows("member update-scopes", ("m1", "--scopes", "a,b")),
+    *_rows("member update-scopes", ("m1", "--scopes", "a,b"), ("m1", "--scopes", "")),
     *_rows("member suspend", ("m1",)),
     *_rows("member reactivate", ("m1",)),
     *_rows("member revoke", ("m1", "--yes")),
@@ -301,3 +301,14 @@ def test_sent_args_pass_the_command_request_model(sent: list[Sent]) -> None:
         except ValidationError:
             rejected.append(item.row.row_id)
     assert rejected == [item.row.row_id for item in sent]
+
+
+def test_an_empty_scopes_option_sends_an_explicit_empty_list(
+    sent: list[Sent],
+) -> None:
+    args = [
+        item.args
+        for item in sent
+        if item.row.path == ("member", "update-scopes") and "" in item.row.argv
+    ]
+    assert args == [{"member_id": "m1", "scopes": []}]
