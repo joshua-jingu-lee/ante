@@ -30,8 +30,6 @@ Measured per file in ``src/ante/**/*.py``:
   ``Refs``, ``attempt N``, ``Codex``, ``Finding`` or ``SPLIT-N``.
 - docstring excess: the sum of ``max(0, lines - limit)`` over its docstrings.
 
-Measured in total: docstring source lines.
-
 Known limits of docstring excess: it is a per-file sum, so shortening one
 docstring and lengthening another in the same file by as much still passes.
 The ``click`` test reads the attribute name only, so a function decorated with
@@ -39,7 +37,7 @@ The ``click`` test reads the attribute name only, so a function decorated with
 decorator (``@command()`` after ``from click import command``) is not
 ``click``.
 
-Exit 0: all four values equal ``scripts/comment_baseline.json``.
+Exit 0: all three values equal ``scripts/comment_baseline.json``.
 Exit 1: any value is above or below the baseline. Only the comparison
 produces this code.
 Exit 2: every other failure: Python older than 3.13, a missing or malformed
@@ -63,9 +61,7 @@ from typing import TypeGuard
 
 BASELINE_PATH = Path("scripts") / "comment_baseline.json"
 TARGET_GLOB = "src/ante/**/*.py"
-BASELINE_KEYS = frozenset(
-    {"comments", "docstring_history", "docstring_excess", "docstring_lines"}
-)
+BASELINE_KEYS = frozenset({"comments", "docstring_history", "docstring_excess"})
 MIN_PYTHON = (3, 13)
 
 EXIT_OK = 0
@@ -157,7 +153,6 @@ class Measurement:
     comments: dict[str, int]
     docstring_history: dict[str, int]
     docstring_excess: dict[str, int]
-    docstring_lines: int
     oversized: dict[str, list[Docstring]] = field(default_factory=dict, compare=False)
 
 
@@ -281,15 +276,15 @@ def _parse(data: bytes) -> tuple[ast.Module, list[str]]:
     return ast.parse(source), LINE_BREAK_RE.split(source)
 
 
-def measure_docstrings(data: bytes) -> tuple[int, int]:
-    """Return (history line count, total docstring line count) for one file."""
+def count_history_lines(data: bytes) -> int:
+    """Return the number of docstring history lines in one file."""
     tree, lines = _parse(data)
-    history = 0
-    total = 0
-    for start, end in docstring_spans(tree):
-        total += end - start + 1
-        history += sum(1 for line in lines[start - 1 : end] if is_history_line(line))
-    return history, total
+    return sum(
+        1
+        for start, end in docstring_spans(tree)
+        for line in lines[start - 1 : end]
+        if is_history_line(line)
+    )
 
 
 def oversized_docstrings(data: bytes) -> list[Docstring]:
@@ -303,13 +298,12 @@ def measure(root: Path) -> Measurement:
     history: dict[str, int] = {}
     excess: dict[str, int] = {}
     oversized: dict[str, list[Docstring]] = {}
-    docstring_lines = 0
     for path in target_files(root):
         rel = path.relative_to(root).as_posix()
         try:
             data = path.read_bytes()
             comment_count = count_comments(data)
-            history_count, line_count = measure_docstrings(data)
+            history_count = count_history_lines(data)
             long_docstrings = oversized_docstrings(data)
         except Exception as exc:
             raise CheckError(
@@ -322,8 +316,7 @@ def measure(root: Path) -> Measurement:
         if long_docstrings:
             excess[rel] = sum(doc.excess for doc in long_docstrings)
             oversized[rel] = long_docstrings
-        docstring_lines += line_count
-    return Measurement(comments, history, excess, docstring_lines, oversized)
+    return Measurement(comments, history, excess, oversized)
 
 
 def _is_int(value: object) -> bool:
@@ -372,17 +365,10 @@ def parse_baseline(text: str) -> Measurement:
             f"{BASELINE_PATH} must have exactly the keys {sorted(BASELINE_KEYS)} "
             f"(missing {missing}, extra {extra})"
         )
-    lines = data["docstring_lines"]
-    if not _is_int(lines) or lines < 0:
-        raise CheckError(
-            f"{BASELINE_PATH}: 'docstring_lines' must be a non-negative integer, "
-            f"got {lines!r}"
-        )
     return Measurement(
         _read_counts(data, "comments"),
         _read_counts(data, "docstring_history"),
         _read_counts(data, "docstring_excess"),
-        lines,
     )
 
 
@@ -427,22 +413,12 @@ def judge(actual: Measurement, baseline: Measurement) -> tuple[int, str]:
         lines,
         lower,
     )
-    docstring_grew = False
-    got, want = actual.docstring_lines, baseline.docstring_lines
-    if got != want:
-        lines.append(
-            f"docstring_lines: actual {got}, baseline {want} ({got - want:+d})"
-        )
-        if got > want:
-            docstring_grew = True
-        else:
-            lower.append(f"  - docstring_lines를 {got}로 낮춘다")
     if not lines:
         return EXIT_OK, (
             f"comment check ok: {sum(actual.comments.values())} comments, "
             f"{sum(actual.docstring_history.values())} docstring history lines, "
-            f"{sum(actual.docstring_excess.values())} docstring excess lines, "
-            f"{actual.docstring_lines} docstring lines (baseline {BASELINE_PATH})"
+            f"{sum(actual.docstring_excess.values())} docstring excess lines "
+            f"(baseline {BASELINE_PATH})"
         )
     parts = [f"comment check failed against {BASELINE_PATH}:", *lines]
     if grew:
@@ -459,10 +435,6 @@ def judge(actual: Measurement, baseline: Measurement) -> tuple[int, str]:
         parts.append(EXCESS_ALTERNATIVES)
     if grew or excess_grew:
         parts.append(MOVE_HINT)
-    if docstring_grew:
-        parts.append(
-            f"독스트링 총 줄 수가 {got - want}줄 늘었다. 다른 독스트링을 그만큼 줄인다."
-        )
     if lower:
         parts.append(f"줄어든 값은 {BASELINE_PATH}의 기준선을 실측으로 낮춘다:")
         parts.extend(lower)

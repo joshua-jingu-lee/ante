@@ -158,9 +158,29 @@ jobs:
           ANTE_DB_ENCRYPTION_KEY: "sm4fkbGXHVNKjw2OvQIrQX5g9qdRGqNKST8pFixdNPk="
         run: pytest tests/integration/ -x --tb=short -q
 
+      # 시나리오마다 실행 기록(JSON)을 남기고, 실패해도 잡의 요약에 표로 쓰고
+      # 아티팩트 e2e-records로 올린다 (#2823). 기록에는 출력 원문·토큰·로컬
+      # 절대 경로가 없다.
       - name: Run e2e scenarios
         timeout-minutes: 10
+        env:
+          ANTE_E2E_RECORD_DIR: ${{ runner.temp }}/e2e-records
         run: pytest tests/e2e/ -x --tb=short -q -rA
+
+      - name: Summarize e2e records
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: >-
+          python scripts/render_e2e_records.py "$RUNNER_TEMP/e2e-records"
+          >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: e2e-records
+          path: ${{ runner.temp }}/e2e-records/
+          if-no-files-found: ignore
+          retention-days: 3
 
   docker-build:
     runs-on: ubuntu-latest

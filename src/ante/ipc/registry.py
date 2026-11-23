@@ -1070,22 +1070,7 @@ def _broker_reconcile_envelope(
 async def _handle_broker_reconcile(
     svc: ServiceRegistry, request: BrokerReconcileRequest, actor: str
 ) -> dict[str, Any]:
-    """``broker.reconcile`` — **account-level** 대사.
-
-    account_id 만으로 동작한다(bot_id 불요). 서버 BrokerAdapter 가 계좌
-    총합을 직접 조회하며(caller-supplied broker_positions 무시), ``fix``
-    플래그를 준수한다. 잘못된 ``correct_position`` 이 실거래 포지션을
-    손상시키지 않도록 **correction 은 봇이 정확히 1개인 계좌에서만** 기존
-    ``reconcile`` 로직에 위임하고, 그 외(2+봇·0봇)는 detect-only 다.
-
-    봇 count 분기 (status 무관 — 수동 IPC 는 user-initiated 라 봇 상태와
-    무관하게 단일봇 귀속이 자명):
-        - 정확히 1봇: ``reconciler.reconcile(bot_id, ..., dry_run=not fix)`` —
-          기존 self-check/skip_external_buy/external-buy 분류 그대로.
-          fix=True 면 보정, fix=False 면 detect-only.
-        - 2+봇: ``reconciler.detect_account_level(...)`` (correct_position 미호출).
-        - 0봇 + broker_positions 비어있지 않음: account-level detect/alert.
-    """
+    """``broker.reconcile`` account-level 대사(보정은 봇이 정확히 1개인 계좌만)."""
     account_id = request.account_id
     fix = request.fix
 
