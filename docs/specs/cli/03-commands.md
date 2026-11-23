@@ -126,7 +126,7 @@ allowlist 후보에서 제거한다.
 | `ante broker order-history --account <account_id> [--from <날짜>] [--to <날짜>]` | `runtime IPC` | 서버 BrokerAdapter 주문/체결 이력 live 조회 (`--account` 필수, read-only) |
 | `ante broker reconcile --account <account_id> [--fix]` | `runtime IPC` | 서버 PositionReconciler (`--account` 필수) |
 | `ante data list/schema/storage/validate/info/delete ...` | `offline` | canonical data root 또는 명시 data path 대상 |
-| `ante backtest run <strategy_path> ...` | `offline` | 서버와 분리된 백테스트 실행 |
+| `ante backtest run <strategy_path> ...` | `external process` | `python -m ante.backtest.runner` subprocess 격리 실행 (D-004) |
 | `ante backtest history <strategy_name> [--limit N]` | `offline` | BacktestRunStore 조회 |
 | `ante report schema/submit/list/view/performance ...` | `offline` | ReportStore/PerformanceFeedback 직접 호출 |
 | `ante feed init/status/config/inject/run ...` | `offline` | canonical data root의 feed 작업 |
