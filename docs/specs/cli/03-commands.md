@@ -124,7 +124,7 @@ allowlist 후보에서 제거한다.
 | `ante broker balance --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 조회 (`--account` 필수) |
 | `ante broker positions --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 조회 (`--account` 필수) |
 | `ante broker order-history --account <account_id> [--from <날짜>] [--to <날짜>]` | `runtime IPC` | 서버 BrokerAdapter 주문/체결 이력 live 조회 (`--account` 필수, read-only) |
-| `ante broker reconcile --account <account_id> [--fix]` | `runtime IPC` | 서버 PositionReconciler (`--account` 필수) |
+| `ante broker reconcile --account <account_id> [--fix]` | `runtime IPC` | 서버 PositionReconciler (`--account` 필수). 가상 계좌는 `ACCOUNT_RECONCILE_NOT_APPLICABLE`로 거부 |
 | `ante data list/schema/storage/validate/info/delete ...` | `offline` | canonical data root 또는 명시 data path 대상 |
 | `ante backtest run <strategy_path> ...` | `offline` | 서버와 분리된 백테스트 실행 |
 | `ante backtest history <strategy_name> [--limit N]` | `offline` | BacktestRunStore 조회 |
