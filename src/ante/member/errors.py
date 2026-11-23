@@ -32,12 +32,8 @@ class MemberNotFoundError(MemberError, ValueError):
 class MemberStateConflictError(MemberError, ValueError):
     """멤버 state flow 위반.
 
-    ``suspend`` 메서드가 이미 SUSPENDED 인 멤버 (혹은 ACTIVE 가 아닌 상태)
-    를 재정지하려 할 때, ``reactivate`` 메서드가 이미 ACTIVE 인 멤버 (혹은
-    SUSPENDED 가 아닌 상태) 를 재활성화하려 할 때 raise 한다.
-
-    state-conflict 는 권한 부족이 아닌 상태 흐름 위반이다. ``revoke`` 의
-    재폐기도 같다. 세 메서드의 state 체크는 모두 인라인 typed raise 다.
+    대상 멤버의 현재 상태가 요청한 작업을 허용하지 않을 때 raise 한다.
+    state-conflict 는 권한 부족이 아닌 상태 흐름 위반이다.
     """
 
     code: str = "MEMBER_STATE_CONFLICT"
