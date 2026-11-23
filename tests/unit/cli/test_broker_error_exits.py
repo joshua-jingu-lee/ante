@@ -7,9 +7,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import errno
+import functools
 import json
 from collections.abc import Iterator
 from contextlib import ExitStack
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -26,6 +30,7 @@ from ante.contracts.ipc_client_errors import (
     IPCRemoteError,
     IPCServerNotRunningError,
 )
+from ante.ipc.client import IPCClient
 from ante.member.models import Member, MemberRole, MemberType
 
 _MASTER = Member(
@@ -500,3 +505,83 @@ def test_reconcile_fix_ipc_send_failure_without_a_message(mode: str) -> None:
 
     assert harness.direct_calls == []
     _assert_error(mode, result, "EXECUTION_ERROR", "", "Error: EXECUTION_ERROR: ")
+
+
+async def _never_connects(path: str) -> tuple[object, object]:
+    await asyncio.Event().wait()
+    raise AssertionError("unreachable")
+
+
+async def _denied(path: str) -> tuple[object, object]:
+    raise PermissionError(errno.EACCES, "권한 거부")
+
+
+_CONNECT_FAILURES = {
+    "timeout": (_never_connects, "IPC_TIMEOUT", _TIMEOUT),
+    "eacces": (_denied, "EXECUTION_ERROR", "[Errno 13] 권한 거부"),
+}
+
+
+def _invoke_live_daemon(
+    tmp_path: Path, situation: str, args: list[str], fallback: str, target: Any
+) -> Result:
+    sock = tmp_path / "t.sock"
+    sock.touch()
+    connect = _CONNECT_FAILURES[situation][0]
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch("ante.cli.main.authenticate_member", side_effect=_set_master)
+        )
+        stack.enter_context(
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value=str(sock),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "ante.cli.commands.ipc_helpers.IPCClient",
+                new=functools.partial(IPCClient, timeout=0.05),
+            )
+        )
+        stack.enter_context(
+            patch("ante.ipc.client.asyncio.open_unix_connection", connect)
+        )
+        stack.enter_context(patch(fallback, new=target))
+        return CliRunner(mix_stderr=False).invoke(
+            cli, ["--config-dir", str(tmp_path), "--format", "json", *args]
+        )
+
+
+@pytest.mark.parametrize("situation", list(_CONNECT_FAILURES))
+def test_live_daemon_connect_failure_never_reaches_the_broker(
+    tmp_path: Path, situation: str
+) -> None:
+    get_broker = AsyncMock(side_effect=AssertionError("direct connection"))
+
+    result = _invoke_live_daemon(
+        tmp_path, situation, _COMMANDS["status"], _GET_BROKER, get_broker
+    )
+
+    get_broker.assert_not_awaited()
+    _, code, message = _CONNECT_FAILURES[situation]
+    _assert_error("json", result, code, message, "")
+
+
+@pytest.mark.parametrize("situation", list(_CONNECT_FAILURES))
+def test_live_daemon_connect_failure_never_reads_the_bot_snapshot(
+    tmp_path: Path, situation: str
+) -> None:
+    snapshot = MagicMock(side_effect=AssertionError("snapshot"))
+
+    result = _invoke_live_daemon(
+        tmp_path,
+        situation,
+        ["bot", "list"],
+        "ante.cli.commands.bot._create_services",
+        snapshot,
+    )
+
+    snapshot.assert_not_called()
+    _, code, message = _CONNECT_FAILURES[situation]
+    _assert_error("json", result, code, message, "")
