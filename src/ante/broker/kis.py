@@ -1330,10 +1330,11 @@ class KISDomesticAdapter(KISBaseAdapter):
         before 단일 쿼리로 처리하며, 그 완전성은 bounded known-limitation 이다.
         """
         now = clock.now(UTC)
-        start_date = from_date or (now - timedelta(days=7)).strftime("%Y%m%d")
-        end_date = to_date or now.strftime("%Y%m%d")
+        today = business_date_kst(now)
+        start_date = from_date or business_date_kst(now - timedelta(days=7))
+        end_date = to_date or today
 
-        cutoff = _ccld_three_month_cutoff(business_date_kst())
+        cutoff = _ccld_three_month_cutoff(today)
         is_inner = start_date >= cutoff
         if is_inner:
             tr_id = _CCLD_TR_ID_INNER_PAPER if self.is_paper else _CCLD_TR_ID_INNER_LIVE
