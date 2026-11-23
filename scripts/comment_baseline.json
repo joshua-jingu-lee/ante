@@ -7,16 +7,9 @@
     "src/ante/cli/commands/config.py": 21,
     "src/ante/cli/commands/member.py": 25,
     "src/ante/cli/middleware.py": 57,
-    "src/ante/gateway/gateway.py": 11,
-    "src/ante/gateway/stop_order.py": 12,
-    "src/ante/gateway/stream_integration.py": 15,
     "src/ante/ipc/registry.py": 15,
-    "src/ante/ipc/server.py": 4,
     "src/ante/main.py": 130,
-    "src/ante/trade/fill_applier.py": 17,
-    "src/ante/trade/order_tracker.py": 1,
-    "src/ante/trade/performance.py": 12,
-    "src/ante/trade/reconciler.py": 6
+    "src/ante/trade/fill_applier.py": 17
   },
-  "docstring_lines": 6309
+  "docstring_lines": 6249
 }

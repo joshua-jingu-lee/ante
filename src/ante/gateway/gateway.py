@@ -366,11 +366,7 @@ class APIGateway:
         return await broker.cancel_order(record.broker_order_id)
 
     async def _on_order_approved(self, event: object) -> None:
-        """Treasury 자금 확보 완료 → 증권사에 주문 제출.
-
-        event.account_id로 올바른 BrokerAdapter를 라우팅한다.
-        stop/stop_limit 주문은 StopOrderManager로 라우팅한다.
-        """
+        """증권사에 주문 제출(stop 계열은 StopOrderManager로, non-LIVE·virtual 제외)."""
         from ante.eventbus.events import (
             OrderApprovedEvent,
             OrderFailedEvent,
@@ -554,13 +550,7 @@ class APIGateway:
         )
 
         def _is_finite_number(x: object) -> bool:
-            """비-bool 유한 숫자 여부 — 예외 무전파(terminal 보장).
-
-            비숫자·bool·NaN/Inf 는 False. float 로 표현 불가한 큰 정수
-            (``math.isfinite`` 가 ``OverflowError`` raise — P2-2 동형)도
-            예외를 삼켜 False 로 본다(핸들러 예외로 terminal update 가 소실되지
-            않도록 fail-closed).
-            """
+            """비-bool 유한 숫자 여부 — 예외 무전파(float 범위 밖 큰 정수도 False)."""
             if isinstance(x, bool) or not isinstance(x, (int, float)):
                 return False
             try:
@@ -569,8 +559,7 @@ class APIGateway:
                 return False
 
         def _safe_repr(x: object) -> str:
-            """로그용 안전 repr — 거대 정수 repr 시 ValueError(int→str 4300자
-            한도) 등을 삼키고 타입명으로 대체(로깅이 terminal 거부를 깨지 않도록)."""
+            """로그용 안전 repr — repr 실패(ValueError 등)는 타입명으로 대체."""
             try:
                 r = repr(x)
             except (ValueError, OverflowError):
