@@ -319,9 +319,9 @@ def _with(path: str, old: str, new: str) -> dict[str, str]:
 def test_control_extra_status_assignment_is_caught():
     sources = _with(
         _MANAGER,
-        "        deleted = _transition_status(bot, BotStatus.DELETED)\n",
-        "        deleted = _transition_status(bot, BotStatus.DELETED)\n"
-        "        bot.status = BotStatus.DELETED\n",
+        "            deleted = _transition_status(bot, BotStatus.DELETED)\n",
+        "            deleted = _transition_status(bot, BotStatus.DELETED)\n"
+        "            bot.status = BotStatus.DELETED\n",
     )
     found = status_assignments(sources)
     assert len(found) == 5

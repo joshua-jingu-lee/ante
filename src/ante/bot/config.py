@@ -48,7 +48,6 @@ BOT_STATUS_TRANSITIONS: dict[BotStatus, set[BotStatus]] = {
         BotStatus.DELETED,
     },
     BotStatus.DELETED: {
-        BotStatus.RUNNING,
         BotStatus.STOPPED,
         BotStatus.ERROR,
         BotStatus.DELETED,

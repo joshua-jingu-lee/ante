@@ -22,7 +22,7 @@
 기대값은 모두 리터럴(상태 문자열, 예외 종류와 전체 메시지, 이벤트 이름과
 건수)이다.
 
-뒤쪽은 전이표가 리터럴로 적은 24쌍과 같은지, 전이 함수가 6×6=36쌍 전부에서
+뒤쪽은 전이표가 리터럴로 적은 23쌍과 같은지, 전이 함수가 6×6=36쌍 전부에서
 표대로 바꾸거나 거부하는지 본다.
 """
 
@@ -675,7 +675,6 @@ BOT_ALLOWED_PAIRS = {
     ("error", "stopped"),
     ("error", "error"),
     ("error", "deleted"),
-    ("deleted", "running"),
     ("deleted", "stopped"),
     ("deleted", "error"),
     ("deleted", "deleted"),
@@ -684,7 +683,7 @@ BOT_ALLOWED_PAIRS = {
 BOT_ALL_PAIRS = [(c, t) for c in BOT_STATUSES for t in BOT_STATUSES]
 
 
-def test_bot_transition_table_equals_the_24_literal_pairs():
+def test_bot_transition_table_equals_the_23_literal_pairs():
     assert sorted(str(k) for k in BOT_STATUS_TRANSITIONS) == sorted(BOT_STATUSES)
     assert all(type(v) is set for v in BOT_STATUS_TRANSITIONS.values())
     pairs = {
@@ -693,7 +692,7 @@ def test_bot_transition_table_equals_the_24_literal_pairs():
         for target in targets
     }
     assert pairs == BOT_ALLOWED_PAIRS
-    assert len(BOT_ALLOWED_PAIRS) == 24
+    assert len(BOT_ALLOWED_PAIRS) == 23
     assert len(BOT_ALL_PAIRS) == 36
 
 
