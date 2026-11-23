@@ -752,3 +752,27 @@ class TestSwitchRacingDelete:
         assert recreated._bound_strategy_id == b
         assert recreated.config.interval_seconds == 60
         assert await _db_strategy_ids(db) == (b, b)
+
+    async def test_bot_left_by_failed_delete_accepts_switch_update_and_delete(
+        self, manager, ctx, db, orders, strategies, monkeypatch, signal_keys
+    ):
+        a, b = strategies
+        bot = await _running_on_a(manager, ctx, db, orders, a)
+
+        async def _fail_revoke(bot_id):
+            raise RuntimeError("revoke down")
+
+        monkeypatch.setattr(signal_keys, "revoke", _fail_revoke)
+        with pytest.raises(RuntimeError, match="revoke down"):
+            await manager.delete_bot("bot1")
+        monkeypatch.undo()
+        assert manager.get_bot("bot1") is bot
+
+        await manager.assign_strategy("bot1", b)
+        await manager.update_bot("bot1", interval_seconds=60)
+        await manager.delete_bot("bot1")
+
+        assert bot._bound_strategy_id == b
+        assert bot.config.interval_seconds == 60
+        assert bot.status == BotStatus.DELETED
+        assert manager.get_bot("bot1") is None

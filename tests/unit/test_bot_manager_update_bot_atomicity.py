@@ -935,3 +935,27 @@ class TestUpdateBotRacingDelete:
         budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.allocated == pytest.approx(200_000.0)
+
+    async def test_bot_left_by_failed_delete_accepts_budget_update_and_delete(
+        self, eventbus, db, ctx, monkeypatch
+    ) -> None:
+        manager, treasury = await _manager_with_treasury(eventbus, db, ctx)
+
+        async def _fail_release(bot_id):
+            raise RuntimeError("release down")
+
+        monkeypatch.setattr(treasury, "release_budget", _fail_release)
+        with pytest.raises(RuntimeError, match="release down"):
+            await manager.delete_bot("bot1")
+        monkeypatch.undo()
+        assert manager.get_bot("bot1") is not None
+
+        await manager.update_bot("bot1", budget=200_000.0)
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.allocated == pytest.approx(200_000.0)
+
+        await manager.delete_bot("bot1")
+        assert manager.get_bot("bot1") is None
+        assert treasury.get_budget("bot1") is None
+        assert treasury.unallocated == pytest.approx(1_000_000.0)
