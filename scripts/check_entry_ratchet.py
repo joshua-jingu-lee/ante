@@ -77,12 +77,6 @@ counted as exits.
 
 Output keys:
 
-- ``raw_legacy_contracts`` (set): the paths of the ``CliCommandContract(...)``
-  calls in ``src/ante/contracts/cli_registry.py`` whose
-  ``output=OutputContract(...)`` has ``envelope="raw_legacy"``. A path is its
-  segments joined by one space (``"account list"``). An
-  ``OutputContract(...)`` with keyword arguments only and no ``envelope=`` is
-  ``standard``.
 - ``cli_direct_output`` (count per file in ``src/ante/cli/commands/**/*.py``):
   calls whose attribute name is ``output``, ``success`` or ``table``, on any
   receiver; calls of a bare name ``print``, ``echo`` or ``secho``;
@@ -93,7 +87,7 @@ Output keys:
 Known limits of the output keys: calls through ``import click as ck`` and
 ``from sys import stdout`` are not counted.
 
-Exit 0: all nine keys equal ``scripts/entry_ratchet_baseline.json`` and every
+Exit 0: all eight keys equal ``scripts/entry_ratchet_baseline.json`` and every
 ``NON_ERROR_EXITS`` entry has exactly its listed exits.
 Exit 1: a count differs from the baseline in either direction, a set differs,
 or a ``NON_ERROR_EXITS`` entry has other exits. Only these
@@ -102,11 +96,7 @@ Exit 2: every other failure: a missing or malformed baseline, a source file
 that cannot be read or parsed, a missing hook function or registry, a missing
 ``register_all_handlers``, no registration in it, a second positional argument
 that is not the name of a top-level function of the module, a handler with
-fewer than two parameters, a missing CLI contract registry or no contract in
-it, a contract whose ``path=`` is not a tuple of string literals, whose
-``output=`` is not an ``OutputContract(...)`` call, has a positional or ``**``
-argument, or whose ``envelope=`` is not a string literal, or any unexpected
-exception.
+fewer than two parameters, or any unexpected exception.
 """
 
 from __future__ import annotations
@@ -128,7 +118,6 @@ HOOK_FUNCTION = "main"
 REGISTRY_PATH = "src/ante/contracts/error_registry.py"
 IPC_REGISTRY_PATH = "src/ante/ipc/registry.py"
 IPC_REGISTER_FUNCTION = "register_all_handlers"
-CLI_CONTRACTS_PATH = "src/ante/contracts/cli_registry.py"
 COMMANDS_GLOB = "src/ante/cli/commands/**/*.py"
 
 CLI_ERROR_CALLS = "cli_error_calls"
@@ -138,12 +127,11 @@ UNREGISTERED_CODES = "unregistered_codes"
 IPC_HANDLERS_WITHOUT_MODEL = "ipc_handlers_without_model"
 IPC_ARGS_READS = "ipc_args_reads"
 CLI_DIRECT_IPC_SEND = "cli_direct_ipc_send"
-RAW_LEGACY_CONTRACTS = "raw_legacy_contracts"
 CLI_DIRECT_OUTPUT = "cli_direct_output"
 ERROR_COUNT_KEYS = (CLI_ERROR_CALLS, CLI_EXITS, IPC_ERROR_CODE_READS)
 REQUEST_COUNT_KEYS = (IPC_ARGS_READS, CLI_DIRECT_IPC_SEND)
 COUNT_KEYS = (*ERROR_COUNT_KEYS, *REQUEST_COUNT_KEYS, CLI_DIRECT_OUTPUT)
-SET_KEYS = (UNREGISTERED_CODES, IPC_HANDLERS_WITHOUT_MODEL, RAW_LEGACY_CONTRACTS)
+SET_KEYS = (UNREGISTERED_CODES, IPC_HANDLERS_WITHOUT_MODEL)
 FILE_COUNT_KEYS = frozenset((*ERROR_COUNT_KEYS, CLI_DIRECT_IPC_SEND, CLI_DIRECT_OUTPUT))
 
 # (file, top-level function) -> the sorted ``ast.unparse`` sources of the exits
@@ -163,7 +151,6 @@ BASELINE_ORDER = (
     UNREGISTERED_CODES,
     IPC_HANDLERS_WITHOUT_MODEL,
     *REQUEST_COUNT_KEYS,
-    RAW_LEGACY_CONTRACTS,
     CLI_DIRECT_OUTPUT,
 )
 BASELINE_KEYS = frozenset(BASELINE_ORDER)
@@ -175,9 +162,6 @@ EXIT_ERROR = 2
 CODE_ATTRS = frozenset({"code", "ipc_error_code"})
 EXIT_NAMES = frozenset({"SystemExit", "Exit"})
 LOGGER_PREFIX = "log"
-CONTRACT_CALL = "CliCommandContract"
-OUTPUT_CALL = "OutputContract"
-RAW_LEGACY = "raw_legacy"
 OUTPUT_ATTRS = frozenset({"output", "success", "table"})
 PRINT_NAMES = frozenset({"print", "echo", "secho"})
 CLICK_ATTRS = frozenset({"echo", "secho"})
@@ -213,7 +197,6 @@ class Measurement:
     ipc_handlers_without_model: frozenset[str]
     ipc_args_reads: dict[str, int]
     cli_direct_ipc_send: dict[str, int]
-    raw_legacy_contracts: frozenset[str]
     cli_direct_output: dict[str, int]
     non_error_exit_mismatches: tuple[str, ...] = field(default=(), compare=False)
 
@@ -593,64 +576,6 @@ def registered_codes(tree: ast.Module) -> set[str]:
     return codes
 
 
-def _keyword(node: ast.Call, name: str) -> ast.expr | None:
-    for keyword in node.keywords:
-        if keyword.arg == name:
-            return keyword.value
-    return None
-
-
-def _contract_path(node: ast.Call) -> str:
-    value = _keyword(node, "path")
-    segments = (
-        [_string(element) for element in value.elts]
-        if isinstance(value, ast.Tuple)
-        else [None]
-    )
-    if not segments or None in segments:
-        raise CheckError(
-            f"{CLI_CONTRACTS_PATH}:{node.lineno}: {CONTRACT_CALL}: "
-            "path is not a tuple of string literals"
-        )
-    return " ".join(str(segment) for segment in segments)
-
-
-def _contract_envelope(node: ast.Call, path: str) -> str:
-    where = f"{CLI_CONTRACTS_PATH}:{node.lineno}: {CONTRACT_CALL}({path!r})"
-    output = _keyword(node, "output")
-    if not (
-        isinstance(output, ast.Call) and _terminal_name(output.func) == OUTPUT_CALL
-    ):
-        raise CheckError(f"{where}: output is not an {OUTPUT_CALL}(...) call")
-    if output.args or any(keyword.arg is None for keyword in output.keywords):
-        raise CheckError(f"{where}: {OUTPUT_CALL}(...) has a positional or ** argument")
-    value = _keyword(output, "envelope")
-    if value is None:
-        return "standard"
-    envelope = _string(value)
-    if envelope is None:
-        raise CheckError(f"{where}: envelope is not a string literal")
-    return envelope
-
-
-def raw_legacy_paths(tree: ast.Module) -> frozenset[str]:
-    """Return the paths of the contracts whose envelope is ``raw_legacy``."""
-    found = 0
-    paths: set[str] = set()
-    for node in ast.walk(tree):
-        if not (
-            isinstance(node, ast.Call) and _terminal_name(node.func) == CONTRACT_CALL
-        ):
-            continue
-        found += 1
-        path = _contract_path(node)
-        if _contract_envelope(node, path) == RAW_LEGACY:
-            paths.add(path)
-    if not found:
-        raise CheckError(f"no {CONTRACT_CALL}(...) found in {CLI_CONTRACTS_PATH}")
-    return frozenset(paths)
-
-
 def is_direct_output(node: ast.AST, sys_names: set[str]) -> bool:
     if isinstance(node, ast.Attribute):
         return node.attr == "is_json"
@@ -696,15 +621,12 @@ def measure(root: Path) -> Measurement:
         raise CheckError(
             f"{IPC_REGISTER_FUNCTION} not found: {IPC_REGISTRY_PATH} is missing"
         )
-    if CLI_CONTRACTS_PATH not in trees:
-        raise CheckError(f"CLI contract registry not found: {CLI_CONTRACTS_PATH}")
     registered = registered_codes(trees[REGISTRY_PATH])
     if not registered:
         raise CheckError(f"no ErrorSpec(code=...) found in {REGISTRY_PATH}")
     hook = hook_nodes(trees[HOOK_PATH])
     allowed_exits, exit_mismatches = non_error_exit_nodes(trees)
     without_model, args_reads = measure_ipc(trees[IPC_REGISTRY_PATH])
-    raw_legacy = raw_legacy_paths(trees[CLI_CONTRACTS_PATH])
     counts: dict[str, dict[str, int]] = {key: {} for key in COUNT_KEYS}
     cli_paths = {
         path.relative_to(root).as_posix() for path in target_files(root, CLI_GLOB)
@@ -740,7 +662,6 @@ def measure(root: Path) -> Measurement:
         without_model,
         args_reads,
         counts[CLI_DIRECT_IPC_SEND],
-        raw_legacy,
         counts[CLI_DIRECT_OUTPUT],
         exit_mismatches,
     )
@@ -809,7 +730,6 @@ def parse_baseline(text: str) -> Measurement:
         _read_set(data, IPC_HANDLERS_WITHOUT_MODEL),
         _read_counts(data, IPC_ARGS_READS),
         _read_counts(data, CLI_DIRECT_IPC_SEND),
-        _read_set(data, RAW_LEGACY_CONTRACTS),
         _read_counts(data, CLI_DIRECT_OUTPUT),
     )
 
