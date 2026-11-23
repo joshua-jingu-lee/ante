@@ -50,7 +50,7 @@ def _resolve_token() -> str:
     try:
         with open(token_file) as f:
             token = f.read().strip()
-    except (FileNotFoundError, PermissionError):
+    except (FileNotFoundError, PermissionError, UnicodeDecodeError):
         pass
 
     return token

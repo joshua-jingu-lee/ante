@@ -682,3 +682,60 @@ class TestMemberRevokeStateConflictTypedCode:
         payload = _parse_json_last(second_revoke.stdout)
         assert payload.get("status") == "error", payload
         assert payload.get("code") == "MEMBER_STATE_CONFLICT", payload
+
+
+class TestMemberInactiveUpdateScopesRotateTokenStateConflict:
+    """#2877 — 정지된 멤버의 ``update-scopes``·``rotate-token``
+    → exit 1, code=``MEMBER_STATE_CONFLICT`` (``EXECUTION_ERROR`` 아님).
+    """
+
+    @pytest.mark.parametrize(
+        ("member_id", "action_args"),
+        [
+            ("agent-grp-q-4", ["member", "rotate-token", "agent-grp-q-4"]),
+            (
+                "agent-grp-q-5",
+                ["member", "update-scopes", "agent-grp-q-5", "--scopes", "bot:read"],
+            ),
+        ],
+    )
+    def test_suspended_member_emits_typed_state_conflict(
+        self,
+        initialized_config: tuple[Path, str, str],
+        member_id: str,
+        action_args: list[str],
+    ) -> None:
+        config_dir, token, key = initialized_config
+
+        register_result = _run_cli(
+            config_dir,
+            ["member", "register", "--id", member_id, "--type", "agent"],
+            token=token,
+            encryption_key=key,
+        )
+        assert register_result.returncode == 0, (
+            f"register 실패: exit={register_result.returncode}\n"
+            f"stdout={register_result.stdout}\nstderr={register_result.stderr}"
+        )
+
+        suspend_result = _run_cli(
+            config_dir,
+            ["member", "suspend", member_id],
+            token=token,
+            encryption_key=key,
+        )
+        assert suspend_result.returncode == 0, (
+            f"suspend 실패: exit={suspend_result.returncode}\n"
+            f"stdout={suspend_result.stdout}\nstderr={suspend_result.stderr}"
+        )
+
+        result = _run_cli(config_dir, action_args, token=token, encryption_key=key)
+        assert result.returncode == 1, (
+            f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
+        )
+        assert "Traceback" not in result.stderr, (
+            f"stderr 에 traceback 노출: {result.stderr!r}"
+        )
+        payload = _parse_json_last(result.stdout)
+        assert payload.get("status") == "error", payload
+        assert payload.get("code") == "MEMBER_STATE_CONFLICT", payload

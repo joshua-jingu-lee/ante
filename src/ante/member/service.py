@@ -870,5 +870,8 @@ class MemberService:
     def _assert_active(member: Member, action: str) -> None:
         """활성 상태 검증."""
         if member.status != MemberStatus.ACTIVE:
-            msg = f"비활성 멤버는 {action}할 수 없습니다 (현재: {member.status})"
-            raise PermissionError(msg)
+            raise MemberStateConflictError(
+                member.member_id,
+                current_status=str(member.status),
+                requested_action=action,
+            )

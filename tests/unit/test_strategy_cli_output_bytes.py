@@ -446,7 +446,7 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("list_empty", "text"): ("{'message': '등록된 전략 없음', 'strategies': []}\n"),
+    ("list_empty", "text"): ("등록된 전략 없음\n"),
     ("list_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'
@@ -457,7 +457,7 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("list_no_table", "text"): ("{'message': '등록된 전략 없음', 'strategies': []}\n"),
+    ("list_no_table", "text"): ("등록된 전략 없음\n"),
     ("list_no_table", "json"): (
         "{\n"
         '  "status": "ok",\n'
@@ -759,7 +759,7 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("summary_empty", "text"): ("{'message': '성과 집계 없음', 'items': []}\n"),
+    ("summary_empty", "text"): ("성과 집계 없음\n"),
     ("summary_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'
