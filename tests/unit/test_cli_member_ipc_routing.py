@@ -438,11 +438,13 @@ class TestSecretMissingFromResultFails:
         client.send.assert_awaited_once()
         assert result.exit_code == 1, result.output
         for text in absent:
-            assert text not in result.stdout
+            assert text not in result.output
         if mode == "json":
-            payload = json.loads(result.stdout)
-            assert (payload["status"], payload["code"]) == ("error", "UNKNOWN")
-            assert "data" not in payload
+            payload = json.loads(result.output)
+            assert payload == {
+                "status": "error",
+                "code": "UNKNOWN",
+                "message": "IPC 응답이 계약과 다릅니다",
+            }
         else:
-            assert result.stdout == ""
-            assert "UNKNOWN" in result.stderr
+            assert result.output == "Error: UNKNOWN: IPC 응답이 계약과 다릅니다\n"
