@@ -359,6 +359,13 @@ def member_list_invalid_roles(
     )
 
 
+def _parse_scope_csv(scopes: str) -> list[str]:
+    """정확히 빈 문자열만 빈 목록으로, 그 밖의 빈 조각은 ``""`` 원소로 남긴다."""
+    if scopes == "":
+        return []
+    return [s.strip() for s in scopes.split(",")]
+
+
 @member.command("register")
 @click.option("--id", "member_id", required=True, help="멤버 ID")
 @click.option(
@@ -385,7 +392,7 @@ def member_register(
 ) -> CommandResult:
     """멤버 등록 (토큰 발급)."""
     actor = get_member_id(ctx)
-    scope_list = [s.strip() for s in scopes.split(",") if s.strip()] if scopes else []
+    scope_list = _parse_scope_csv(scopes)
 
     async def _run_register() -> tuple[dict[str, Any], str]:
         from ante.cli.cold_path import is_active_runtime
@@ -496,7 +503,7 @@ def member_update_scopes(
 ) -> CommandResult:
     """멤버 권한 범위 변경."""
     actor = get_member_id(ctx)
-    scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
+    scope_list = _parse_scope_csv(scopes)
 
     async def _run_update_scopes() -> dict[str, Any]:
         from ante.cli.cold_path import is_active_runtime
