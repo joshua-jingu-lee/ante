@@ -1440,6 +1440,72 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
             assert period_end in later["date"].to_list()
         assert stored_ok is True
 
+    async def test_backfill_inner_merge_failure_retried_next_run(
+        self, tmp_path: Path
+    ) -> None:
+        """내부 분기의 merge 실패는 다음 run에 그 분기부터 다시 수집된다(#2578)."""
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],
+            ("2015", "11012"): [_raw_item("2015", "11012")],
+            ("2015", "11014"): [_raw_item("2015", "11014")],
+            ("2015", "11011"): [_raw_item("2015", "11011")],
+        }
+        norm_results = {
+            ("2015", "11013"): _stored_df_quarter("2015", 3),
+            ("2015", "11012"): _stored_df_quarter("2015", 6),
+            ("2015", "11014"): _stored_df_quarter("2015", 9),
+            ("2015", "11011"): _stored_df_quarter("2015", 12),
+        }
+        collector, checkpoint, store, source, _config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+        blocker = _merge_fail_partition(store, "005930", "2015-06")
+
+        await collector._collect_quarters(
+            {"00126380": "005930"}, store, checkpoint, 2015, 2015, None
+        )
+
+        assert checkpoint.get_last_date() == "2015-Q1"
+        assert source.fetched == [
+            ("2015", "11013"),
+            ("2015", "11012"),
+            ("2015", "11014"),
+            ("2015", "11011"),
+        ]
+        assert any(w.get("type") == "store_merge" for w in store.drain_warnings())
+
+        blocker.unlink()
+        source.fetched.clear()
+        checkpoint2 = Checkpoint(tmp_path / ".feed", "dart", "fundamental")
+        await collector._collect_quarters(
+            {"00126380": "005930"},
+            store,
+            checkpoint2,
+            2015,
+            2015,
+            checkpoint2.get_last_date(),
+        )
+
+        assert source.fetched == [
+            ("2015", "11012"),
+            ("2015", "11014"),
+            ("2015", "11011"),
+        ]
+        assert checkpoint2.get_last_date() == "2015-Q4"
+        assert store.pending_merge_failure_count() == 0
+        part_dir = store.base_path / "fundamental" / "KRX" / "005930"
+        stored_dates: set[date] = set()
+        for month in ("2015-03", "2015-06", "2015-09", "2015-12"):
+            frame = pl.read_parquet(part_dir / f"{month}.parquet")
+            assert frame.height == 1
+            stored_dates.update(frame["date"].to_list())
+        assert stored_dates == {
+            date(2015, 3, 31),
+            date(2015, 6, 30),
+            date(2015, 9, 30),
+            date(2015, 12, 31),
+        }
+
     async def test_backfill_clean_recollect_quarter_still_advances(
         self, tmp_path: Path
     ) -> None:
