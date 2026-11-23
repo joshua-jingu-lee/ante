@@ -887,6 +887,82 @@ class TestIpcSendTypedExceptions:
             AsyncMock(return_value={"status": "ok", "result": {"n": 1}}),
         )
         assert asyncio.run(ipc_helpers.ipc_send("bot.list", {})) == {"n": 1}
+        assert asyncio.run(ipc_helpers.ipc_send("bot.list", {}, required=("n",))) == {
+            "n": 1
+        }
+
+    @pytest.mark.parametrize(
+        ("response", "required", "message"),
+        [
+            pytest.param(
+                {"status": "ok"}, (), "IPC 응답이 계약과 다릅니다", id="no-result"
+            ),
+            pytest.param(
+                {"id": "x", "status": "ok", "data": {"secret": "s3cr3t"}},
+                (),
+                "IPC 응답이 계약과 다릅니다",
+                id="data-not-result",
+            ),
+            pytest.param(
+                {"status": "ok", "result": None},
+                (),
+                "IPC 응답이 계약과 다릅니다",
+                id="result-null",
+            ),
+            pytest.param(
+                {"status": "ok", "result": [1]},
+                (),
+                "IPC 응답이 계약과 다릅니다",
+                id="result-list",
+            ),
+            pytest.param([], (), "IPC 응답이 계약과 다릅니다", id="list"),
+            pytest.param(None, (), "IPC 응답이 계약과 다릅니다", id="null"),
+            pytest.param(
+                {"status": "weird", "result": {}},
+                (),
+                "IPC 응답이 계약과 다릅니다",
+                id="unknown-status",
+            ),
+            pytest.param(
+                {"status": "error", "error": "x"},
+                (),
+                "알 수 없는 오류",
+                id="error-not-object",
+            ),
+            pytest.param(
+                {"status": "ok", "result": {"other": "s3cr3t"}},
+                ("k",),
+                "IPC 응답이 계약과 다릅니다",
+                id="missing-required",
+            ),
+        ],
+    )
+    def test_malformed_response_is_unknown_remote_error(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        response: Any,
+        required: tuple[str, ...],
+        message: str,
+    ) -> None:
+        from ante.cli.commands import ipc_helpers
+
+        monkeypatch.setattr(
+            ipc_helpers, "get_socket_path", lambda config_dir=None: "/x.sock"
+        )
+        monkeypatch.setattr(
+            ipc_helpers.IPCClient, "send", AsyncMock(return_value=response)
+        )
+        with pytest.raises(Exception) as info:
+            asyncio.run(ipc_helpers.ipc_send("bot.list", {}, required=required))
+        exc = info.value
+        assert (type(exc), exc.code, exc.message, str(exc)) == (  # type: ignore[attr-defined]
+            IPCRemoteError,
+            "UNKNOWN",
+            message,
+            message,
+        )
+        assert "s3cr3t" not in str(exc)
+        assert "weird" not in str(exc)
 
     @pytest.mark.parametrize(
         ("side_effect", "code", "message"),
