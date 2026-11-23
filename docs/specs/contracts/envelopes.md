@@ -87,9 +87,12 @@ CLI 커맨드가 `--format json` 모드에서 실패한 경우 출력하는 형�
 {
   "status": "error",
   "code":   "<STABLE_ERROR_CODE>",
-  "message": "<사람이 읽는 에러 메시지>"
+  "message": "<사람이 읽는 에러 메시지>",
+  "details": {"stage": "load"}
 }
 ```
+
+`details`는 선택 키다(상세가 있는 에러만 — 예시는 `strategy submit`의 로드 실패).
 
 | 필드 | 타입 | 필수 | 의미 |
 |------|------|------|------|
@@ -115,7 +118,7 @@ CLI 커맨드가 `--format json` 모드에서 실패한 경우 출력하는 형�
   |------|--------|-----------|
   | `strategy validate`의 검증 실패 | `STRATEGY_VALIDATION_FAILED` | `{errors, warnings}` |
   | `strategy submit`의 검증 실패 | `STRATEGY_VALIDATION_ERROR` | `{stage: "validate", errors}` |
-  | `strategy submit`의 로드·meta·등록 실패 | 그 예외의 코드 | `{stage}` (`load`·`meta_validation`·`register`) |
+  | `strategy submit`의 `StrategyError` 계열 로드·meta·등록 실패 | 그 예외의 코드 | `{stage}` (`load`·`meta_validation`·`register`) |
 - `code` 값의 vocabulary(taxonomy, 도메인 prefix 등)는 본 SSOT 범위가 아니다 →
   [Non-Goals](#non-goals) 참조.
 - 구현 reference: `OutputFormatter.error()` (`src/ante/cli/formatter.py`).

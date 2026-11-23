@@ -23,10 +23,10 @@ class StrategyNotFoundError(StrategyError):
 class StrategyLoadError(StrategyError):
     """전략 파일 로드 실패.
 
-    클래스 레벨 ``code`` 는 IPC 서버와 CLI 가 쓰는 helper registry-first
+    클래스 레벨 ``code`` 는 IPC 서버와 CLI 진입점 훅이 쓰는 registry-first
     lookup(``error_spec_for_exception``) 이 동일 ``STRATEGY_LOAD_ERROR``
     안정 코드를 surface 하도록 정렬한다. CLI ``strategy submit`` 의 load 단계
-    envelope (``stage="load"`` / ``code="STRATEGY_LOAD_ERROR"``) 와 동일 SSOT.
+    에러 봉투(``details.stage="load"`` / ``code="STRATEGY_LOAD_ERROR"``)와 동일 SSOT.
     """
 
     code: str = "STRATEGY_LOAD_ERROR"
@@ -37,8 +37,8 @@ class StrategyValidationError(StrategyError):
 
     클래스 레벨 ``code`` 는 CLI ``strategy submit``/``validate`` /
     ``strategy list --status`` 의 ``STRATEGY_VALIDATION_ERROR`` surface 와
-    동일 안정 코드 SSOT. ``StrategyError`` 의 ``getattr(e, "code", ...)``
-    fallback 경로가 본 typed 코드를 envelope 에 노출한다.
+    동일 안정 코드 SSOT. 진입점 훅의 레지스트리 조회
+    (``error_spec_for_exception``)가 본 typed 코드를 envelope 에 노출한다.
     """
 
     code: str = "STRATEGY_VALIDATION_ERROR"

@@ -267,10 +267,10 @@ envelope `message`(CLI error의 `message`, IPC error의 `error.message`)는 사�
 - 본 SSOT는 redaction의 **정책 normative**만 lock 한다. redaction 구현 전면화
   (모든 callsite scrub, 자동 검증 test)는 후속 이슈 책임이다.
 
-## Reserved fields 정리
+## 보조 필드의 상태
 
-본 SSOT는 다음 필드를 envelope 또는 ErrorSpec에서 **reserved**(현재 1.0에서
-강제 도입하지 않으나 미래 의미를 lock)로 선언한다.
+본 SSOT는 envelope 또는 ErrorSpec의 다음 필드의 1.0 상태를 정리한다(reserved인지는
+행마다 적는다).
 
 | 필드 | 위치 | 1.0 상태 | 비고 |
 |------|------|----------|------|
