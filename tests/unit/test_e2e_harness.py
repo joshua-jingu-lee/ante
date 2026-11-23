@@ -291,6 +291,83 @@ class TestDaemonHarnessEnv:
         assert not env.root.exists()
 
 
+_MOCK_LIVE_PROBE = """
+    import json, os
+    from ante.account import presets, service
+    from ante.account.errors import InvalidBrokerTypeError
+    from ante.account.models import Account, TradingMode
+    account = Account(
+        account_id="probe", name="probe", exchange="TEST", currency="KRW",
+        trading_mode=TradingMode.LIVE, broker_type="mock",
+    )
+    try:
+        service._reject_virtual_only_broker_in_live(account)
+        rejected = False
+    except InvalidBrokerTypeError:
+        rejected = True
+    print(json.dumps({
+        "pid": os.getpid(),
+        "rejected": rejected,
+        "presets": sorted(presets.VIRTUAL_ONLY_BROKER_TYPES),
+        "service": sorted(service.VIRTUAL_ONLY_BROKER_TYPES),
+    }))
+"""
+
+
+class TestMockLiveInjection:
+    """하네스의 환경으로 띄운 하위 프로세스에서 ``(mock, live)`` 판정이 바뀌는가."""
+
+    @pytest.fixture
+    def env(self) -> Iterator[DaemonHarness]:
+        env = DaemonHarness.create()
+        try:
+            yield env
+        finally:
+            env.cleanup()
+
+    def _probe(self, env: DaemonHarness) -> tuple[dict[str, object], str]:
+        proc = subprocess.run(
+            [sys.executable, "-c", textwrap.dedent(_MOCK_LIVE_PROBE)],
+            env=env.env(),
+            cwd=env.work_dir,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+        return json.loads(proc.stdout), proc.stderr
+
+    def test_flag_is_off_by_default(self, env: DaemonHarness) -> None:
+        child = env.env()
+        assert harness.MOCK_LIVE_ENV not in child
+        assert harness.MOCK_LIVE_MARKER_ENV not in child
+        env.allow_mock_live = True
+        child = env.env()
+        assert child[harness.MOCK_LIVE_ENV] == "1"
+        assert Path(child[harness.MOCK_LIVE_MARKER_ENV]).is_relative_to(env.root)
+        assert child["PYTHONPATH"].count(os.pathsep) == 1
+
+    def test_without_flag_product_still_rejects(self, env: DaemonHarness) -> None:
+        result, stderr = self._probe(env)
+        assert result["rejected"] is True
+        assert result["service"] == ["mock"]
+        assert env.mock_live_pids() == set()
+        assert "sitecustomize" not in stderr
+
+    def test_with_flag_judgment_opens_only_mock(self, env: DaemonHarness) -> None:
+        from ante.account.presets import VIRTUAL_ONLY_BROKER_TYPES
+
+        env.allow_mock_live = True
+        result, stderr = self._probe(env)
+        assert result["rejected"] is False
+        expected = sorted(VIRTUAL_ONLY_BROKER_TYPES - {"mock"})
+        assert result["presets"] == expected
+        assert result["service"] == expected
+        assert env.mock_live_pids() == {result["pid"]}
+        assert "sitecustomize" not in stderr
+        assert "Warning" not in stderr
+
+
 _FAKE_DAEMON = """
     import os, pathlib, subprocess, sys, time
     run = pathlib.Path(sys.argv[1])
