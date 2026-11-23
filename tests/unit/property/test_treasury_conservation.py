@@ -10,9 +10,11 @@
   unallocated + Σ(available + reserved) + Σ(spent - returned)``.
   F1과 F2를 더한 항등식이라 따로 실패하지 않는다. 체결은 ``account_balance``를
   바꾸지 않으므로 계좌 현금의 보존을 증명하지 않는다
-- D: DB의 ``bot_budgets``·``treasury_state``가 메모리 값과 같다
+- D: DB의 ``bot_budgets``·``treasury_state``·``treasury_reservations``가 메모리 값과
+  같다
 - E: 이벤트 핸들러 예외 0건(실제 ``EventBus``는 예외를 로그로만 남긴다)
-- F5(재시작 기계): 같은 DB로 새 ``Treasury``를 올리면 다섯 값과 미배분이 같다
+- F5(재시작 기계): 같은 DB로 새 ``Treasury``를 올리면 다섯 값과 미배분, 주문별 예약
+  표가 같다(#2770)
 
 거부는 연산의 정상 결과다. 다만 거부는 문서화된 Treasury 예외(``TreasuryError``)로만
 와야 한다. 그 밖의 예외는 실패다.
@@ -131,8 +133,6 @@ class TreasuryMachine(RuleBasedStateMachine):
         self.keyed_fills: list[OrderFilledEvent] = []
         # 예산 레코드가 있는 봇(모델). 배분 성공으로 생기고 예산 해제로 없어진다.
         self.funded: set[str] = set()
-        # 재시작이 예약 표에서 지운 잔여 예약의 봇별 합(#2770). F3은 이 몫을 더해 본다.
-        self.leaked: dict[str, float] = dict.fromkeys(BOTS, 0.0)
         self.steps = 0
         self.last_restart = 0
         self._start()
@@ -181,6 +181,13 @@ class TreasuryMachine(RuleBasedStateMachine):
             for b in self.treasury.list_budgets()
         }
 
+    def _reservation_table(self) -> dict[str, tuple[str, float]]:
+        return {
+            order_id: (bot, amount)
+            for bot in BOTS
+            for order_id, amount in self.treasury.get_reservations(bot).items()
+        }
+
     def teardown(self) -> None:
         try:
             self._run(self._db.close())
@@ -226,7 +233,6 @@ class TreasuryMachine(RuleBasedStateMachine):
         if delete:
             self._run(self.treasury.release_budget(bot))
             self.funded.discard(bot)
-            self.leaked[bot] = 0.0
         else:
             self._publish(BotStoppedEvent(account_id=ACCOUNT_ID, bot_id=bot))
         self._close_bot_orders(bot)
@@ -383,9 +389,8 @@ class TreasuryMachine(RuleBasedStateMachine):
                 continue
             assert all(v >= 0 for v in table.values()), f"F3: {bot} {table}"
             assert budget.reserved >= 0, f"F3: {budget}"
-            leaked = self.leaked[bot]
-            assert _close(budget.reserved, sum(table.values()) + leaked), (
-                f"F3: {bot} reserved={budget.reserved} table={table} leaked={leaked}"
+            assert _close(budget.reserved, sum(table.values())), (
+                f"F3: {bot} reserved={budget.reserved} table={table}"
             )
 
     @invariant()
@@ -413,6 +418,17 @@ class TreasuryMachine(RuleBasedStateMachine):
         )
         balance = float(state["account_balance"]) if state else 0.0
         assert balance == self.treasury.account_balance, "D: treasury_state != 메모리"
+        rows = self._run(
+            self._db.fetch_all(
+                "SELECT order_id, bot_id, remaining FROM treasury_reservations "
+                "WHERE account_id = ?",
+                (ACCOUNT_ID,),
+            )
+        )
+        reserved = {r["order_id"]: (r["bot_id"], float(r["remaining"])) for r in rows}
+        assert reserved == self._reservation_table(), (
+            "D: treasury_reservations != 메모리"
+        )
 
     @invariant()
     def e_no_handler_errors(self) -> None:
@@ -424,10 +440,8 @@ class TreasuryMachine(RuleBasedStateMachine):
 class TreasuryRestartMachine(TreasuryMachine):
     """``TreasuryMachine``에 재시작을 더한다(F5).
 
-    재시작은 주문별 예약 표를 되살리지 않는다(#2770). 그래서 재시작 직전 표에 있던
-    잔여 예약의 합을 봇별 ``leaked``에 쌓고 F3을 ``reserved == Σ 표 + leaked``로 본다
-    (예산을 해제하면 0). 지금 코드에서 그 몫은 취소·체결·봇 정지로 줄지 않는다.
-    그 결함 자체는 아래 ``test_restart_restores_reservations``가 잠근다.
+    재시작은 주문별 예약 표를 ``treasury_reservations``에서 되살린다(#2770). 그래서
+    재시작 뒤에도 F3은 ``reserved == Σ 표``로 그대로 본다.
     """
 
     # 인자 없는 규칙은 hypothesis가 자주 고른다. 전제가 없으면 걸음의 2할이
@@ -438,8 +452,7 @@ class TreasuryRestartMachine(TreasuryMachine):
         before = self._budget_values()
         unallocated = self.treasury.unallocated
         balance = self.treasury.account_balance
-        for bot in BOTS:
-            self.leaked[bot] += sum(self.treasury.get_reservations(bot).values())
+        table = self._reservation_table()
         self._start()
         self.last_restart = self.steps
         after = self._budget_values()
@@ -448,6 +461,7 @@ class TreasuryRestartMachine(TreasuryMachine):
             assert all(map(_close, after[bot], values)), f"F5: {bot}"
         assert _close(self.treasury.unallocated, unallocated), "F5: unallocated"
         assert self.treasury.account_balance == balance, "F5: account_balance"
+        assert self._reservation_table() == table, "F5: 주문별 예약 표"
 
 
 TestTreasuryMachine = TreasuryMachine.TestCase
@@ -456,17 +470,12 @@ TestTreasuryRestartMachine = TreasuryRestartMachine.TestCase
 TestTreasuryRestartMachine.settings = settings()
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="#2770")
 async def test_restart_restores_reservations(tmp_path: Path) -> None:
-    """재시작 뒤에도 미종결 주문의 예약이 예약 표에 남는다(F3).
+    """재시작 뒤에도 미종결 주문의 예약이 예약 표에 남는다(F3, #2770).
 
-    ``TreasuryRestartMachine``에서 F3을 건너뛰지 않으면 hypothesis가 찾는 최소
-    순서를 손으로 옮겼다: 배분 → 예약 → 재시작. 지금은 ``load_from_db``가 예약 표를
-    비운 뒤 되살리지 않는다. ``reserved``는 101로 복원되는데 표가 비어, 뒤따르는
-    취소가 예약을 돌려주지 못한다.
-
-    xfail은 마지막 단언의 ``AssertionError``만 받는다. 준비 단계의 이상은
-    ``pytest.fail``(``Failed``)로 내 xfail에 흡수되지 않게 한다.
+    #2770 전에 ``TreasuryRestartMachine``이 F3에서 찾은 최소 순서를 손으로 옮겼다:
+    배분 → 예약 → 재시작. 재시작 뒤 ``reserved``가 101이면 표에도 101이 있어야
+    뒤따르는 취소가 예약을 돌려준다.
     """
     db = Database(str(tmp_path / "treasury.db"))
     await db.connect()

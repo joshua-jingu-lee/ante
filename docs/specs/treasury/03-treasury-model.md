@@ -77,3 +77,20 @@ fallback한다. 단일 full-fill엔 pop-once가 정확하다.
 
 소스: `src/ante/treasury/treasury.py` (`_on_order_filled` buy 분기 · `_settle_buy_fill`),
 `src/ante/trade/order_tracker.py`
+
+### 재시작 뒤의 예약 (#2770)
+
+주문별 잔여 예약(`remaining_reserved`)은 Treasury 소유 테이블 `treasury_reservations`에
+계좌별로 영속되고, `initialize()`가 `bot_budgets`와 함께 복원한다. 재시작 뒤에도 미종결
+매수 주문의 취소·실패·체결·봇 중지가 재시작 전과 같은 잔여 예약을 정산한다.
+
+- 예약·체결 정산·취소/실패 회수·봇 중지 회수는 예약 표의 변경을 그 행에 쓰는 일과
+  `bot_budgets` 저장을 한 트랜잭션으로 한다. 트랜잭션이 실패하면 메모리의 예산과 예약
+  표를 연산 전으로 되돌린다.
+- 잔여 예약이 0이 된 항목이나 예산이 없는 봇의 항목도 회수 때 행을 지운다.
+- 봇 삭제(`release_budget()`)는 `bot_budgets` 행과 그 봇의 예약 행을 한 트랜잭션에서
+  지운다.
+- 이 테이블이 생기기 전에 걸린 예약은 행이 없어 주문별로 귀속되지 않는다. 부팅 때 봇의
+  `reserved`와 그 봇 행의 합이 다르면 경고 로그를 남기고 값은 바꾸지 않는다(회수하지
+  않는다).
+- EOD 만료는 Treasury에 통지되지 않아 만료된 주문의 예약과 그 행은 남는다(#2842).
