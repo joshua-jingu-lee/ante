@@ -173,6 +173,52 @@ async def test_required_services_missing_attribute_returns_service_not_configure
         await server.stop()
 
 
+class _ReverseOrderFrozenset(frozenset):
+    """원소를 이름의 역순으로 내는 집합 — 순회 순서에 기대는 코드를 드러낸다."""
+
+    def __iter__(self) -> Any:
+        return iter(sorted(frozenset.__iter__(self), reverse=True))
+
+
+@pytest.mark.asyncio
+async def test_required_services_missing_reports_first_by_name(
+    socket_path: str,
+) -> None:
+    """서비스가 둘 이상 빠지면 순회 순서와 무관하게 이름순 첫 서비스를 보고한다."""
+    cmd_registry = CommandRegistry()
+    called = False
+
+    async def handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
+        nonlocal called
+        called = True
+        return {"ok": True}
+
+    cmd_registry.register(
+        "test.needs_two",
+        handler,
+        is_mutating=False,
+        required_services=_ReverseOrderFrozenset({"account", "audit_logger"}),
+        request_model=NoArgsRequest,
+    )
+    svc_registry = _make_service_registry(account=None)
+    assert svc_registry.audit_logger is None
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {"id": "1", "command": "test.needs_two", "args": {}, "actor": "t"}
+        )
+        assert response["status"] == "error", response
+        assert response["error"]["code"] == "SERVICE_NOT_CONFIGURED", response
+        assert (
+            response["error"]["message"] == "의존 서비스가 구성되지 않았습니다: account"
+        )
+        assert called is False
+    finally:
+        await server.stop()
+
+
 # ── 요청 모델의 계좌 ID 필드 (account_id_policy 의 대체, #2683 ⑦) ──────────
 
 

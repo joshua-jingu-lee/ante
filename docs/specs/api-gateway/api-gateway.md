@@ -197,8 +197,8 @@ StrategyContext에 주입되어 전략이 데이터를 조회할 때 사용.
 | 클래스 | 메서드 | 설명 |
 |--------|--------|------|
 | `LiveDataProvider` | `get_current_price(symbol) → float` | 현재가 조회 (APIGateway 캐시 활용, account_id 기반 라우팅) |
-| `LiveDataProvider` | `get_ohlcv(symbol, timeframe, limit) → list[dict]` | OHLCV 데이터 조회 (추후 DataPipeline 연동 시 확장, 현재 빈 리스트 반환) |
-| `LiveDataProvider` | `get_indicator(symbol, indicator, params) → dict[str, Any]` | 기술 지표 계산 (추후 구현, 현재 빈 dict 반환) |
+| `LiveDataProvider` | `get_ohlcv(symbol, timeframe, limit) → DataFrame` | OHLCV 데이터 조회. ParquetStore가 주입된 경우 먼저 읽고, 비었거나 읽기에 실패하면 APIGateway로 내려간다. APIGateway도 빈 결과를 내면 빈 DataFrame |
+| `LiveDataProvider` | `get_indicator(symbol, indicator, params) → dict[str, Any]` | 기술 지표 계산. `get_ohlcv`로 OHLCV를 읽어 IndicatorCalculator로 계산한다. OHLCV가 비면 `{}` |
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조
 
@@ -279,6 +279,8 @@ KRX는 네이티브 스탑 주문을 지원하지 않으므로, 실시간 시세
 | 등록 (`StopOrderManager.register`) | `StopOrderRegisteredEvent` | `"stop_registered"` | dict에 `stop_order_id`, `stop_price`, `limit_price` 포함. 전략은 이 시점에 후속 취소에 쓸 식별자를 획득(식별자 획득 자체는 유효). 단, **stop 주문 자체의 정정(`modify`)은 미지원**(아직 broker에 접수되지 않아 `broker_order_id`/OrderTracker record가 없음)이라 취소만 가능. broker-level 정정 v1(price-only, #2391)은 이미 접수된 `open` 일반 주문에만 적용된다(고급=#2393). |
 | 발동 (`_trigger_order`) | `StopOrderTriggeredEvent` (+ 별도 `OrderRequestEvent`) | `"stop_triggered"` | 변환된 일반 주문은 자체 라이프사이클(`OrderSubmittedEvent` 등)을 별도로 통보한다. `StopOrderTriggeredEvent`는 stop 식별 단위(`stop_order_id`, `trigger_price`, `converted_order_type`)를 보존한다. |
 | 만료 (`_expire_order`) | `StopOrderExpiredEvent` | `"stop_expired"` | `reason` 허용 값: `"session_ended"` (세션 종료) / `"manager_stopped"` (매니저 stop). |
+
+한 스탑 주문의 종결(발동·만료·취소)은 한 번만 일어난다. 먼저 종결된 처리가 이기고, 이미 종결된 주문에 대한 뒤의 발동·만료는 이벤트를 발행하지 않는다(#2874).
 
 **dict shape 호환**:
 

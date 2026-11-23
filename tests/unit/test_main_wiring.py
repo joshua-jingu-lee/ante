@@ -263,6 +263,7 @@ async def assemble(
             if inspect.isawaitable(prepared):
                 await prepared
         await main_module._init_gateway(s)
+        await main_module._restore_bots(s)
         await main_module._init_ipc(s)
         return asm
 
@@ -764,6 +765,59 @@ async def test_market_buy_reserve_uses_price_of_own_account(
     assert [e.reserved_amount for e in approved] == [1000.0]
     assert ("005930", "kv-a") in asked
     assert all(account_id == "kv-a" for _, account_id in asked)
+
+
+# ── 부팅 때 봇 복원 (#2813) ───────────────────────────────────────────────────
+
+_RESTORE_SOURCE = """
+from ante.strategy import Strategy, StrategyMeta
+
+
+class Restored(Strategy):
+    meta = StrategyMeta(
+        name="restored", version="1.0.0", description="x", exchange="TEST"
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+
+
+async def _seed_bot_row(asm: _Assembly) -> None:
+    from ante.strategy import StrategyMeta
+    from ante.strategy.registry import StrategyRegistry
+
+    source = asm.config_dir / "restored.py"
+    source.write_text(_RESTORE_SOURCE, encoding="utf-8")
+    registry = StrategyRegistry(asm.s.db)
+    await registry.initialize()
+    record = await registry.register(
+        source, StrategyMeta(name="restored", version="1.0.0", description="x")
+    )
+    await asm.s.db.execute(
+        "INSERT INTO bots (bot_id, name, strategy_id, account_id, config_json,"
+        " status) VALUES ('b1', 'b1', ?, 'test', '{}', 'running')",
+        (record.strategy_id,),
+    )
+
+
+async def test_bots_in_db_are_restored_as_created_before_ipc(
+    assemble: AssembleFn,
+) -> None:
+    """조립 경로가 DB의 봇을 IPC 앞에서 ``created`` 로 복원한다."""
+    asm = await assemble([], before_gateway=_seed_bot_row)
+
+    client = IPCClient(str(asm.s.config.runtime_socket_path()), timeout=5.0)
+    response = await client.send("bot.info", {"bot_id": "b1"})
+
+    assert response["status"] == "ok", response
+    assert response["result"]["bot"]["status"] == "created"
+    assert asm.s.bot_manager.get_bot("b1").strategy is None
+
+
+async def test_restore_step_is_noop_without_bot_manager() -> None:
+    """봇 관리자가 없으면 복원 단계는 아무것도 하지 않는다."""
+    await main_module._restore_bots(main_module.Services())
 
 
 # ── _init_core·_init_ipc 의 경로 ─────────────────────────────────────────────

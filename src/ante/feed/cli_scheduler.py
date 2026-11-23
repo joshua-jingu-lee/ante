@@ -62,6 +62,13 @@ def _validate_schedule_times(
         raise ValueError("; ".join(errors))
 
 
+def validate_schedule(config: dict[str, Any], daily_at: str, backfill_at: str) -> None:
+    """스케줄 시각과 ``guard.blocked_hours`` 를 검증한다(실패 시 ValueError)."""
+    guard = config.get("guard") if isinstance(config, dict) else None
+    blocked_hours = guard.get("blocked_hours") if isinstance(guard, dict) else None
+    _validate_schedule_times(daily_at, backfill_at, blocked_hours)
+
+
 async def run_scheduler_loop(
     orchestrator: Any,
     data_path: str,
@@ -72,14 +79,12 @@ async def run_scheduler_loop(
     """스케줄 루프: daily_at / backfill_at 시각에 수집을 실행한다.
 
     진입 시 ``daily_at`` / ``backfill_at`` (및 config 의 ``blocked_hours``)
-    형식을 1회 fail-fast 검증한다. 모든 ``feed start`` 경로가
-    거치는 단일 chokepoint 이므로, non-padded("9:00") 등으로 인한 조용한
-    미실행을 진입 시점에 ``ValueError`` 로 차단한다. 루프 내부에서는 재검증
-    하지 않는다.
+    형식을 1회 fail-fast 검증한다. ``feed start`` 는 루프 전에 같은 검증을
+    먼저 하고, 이 검증은 직접 호출자를 위한 방어로 남아 non-padded("9:00")
+    등으로 인한 조용한 미실행을 진입 시점에 ``ValueError`` 로 차단한다. 루프
+    내부에서는 재검증하지 않는다.
     """
-    guard = config.get("guard") if isinstance(config, dict) else None
-    blocked_hours = guard.get("blocked_hours") if isinstance(guard, dict) else None
-    _validate_schedule_times(daily_at, backfill_at, blocked_hours)
+    validate_schedule(config, daily_at, backfill_at)
 
     stop_event = _setup_signal_handlers()
 

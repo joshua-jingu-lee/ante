@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -2253,3 +2254,93 @@ class TestCollectorBusinessValidationPostNormalize:
         assert biz.passed is True
         assert biz.errors == []
         assert any("low > " in w for w in biz.warnings)
+
+
+# ── JSON이 아닌 응답의 RETRY_ONCE 분류 (#2710) ─────────────────
+
+
+def _non_json_outcomes() -> list[object]:
+    """JSON이 아닌 응답에서 _do_request가 내는 결과들."""
+    return [
+        json.JSONDecodeError("Expecting value", "<OpenAPI_ServiceResponse>", 0),
+        UnicodeDecodeError("utf-8", b"\xff\xfe", 0, 1, "invalid start byte"),
+        None,
+        [],
+    ]
+
+
+class TestNonJsonResponseRetryOnce:
+    """#2710: 해석할 수 없는 응답은 resultCode=99처럼 1회 재시도 뒤 실패한다."""
+
+    @pytest.mark.parametrize(
+        "outcome", _non_json_outcomes(), ids=["json", "unicode", "none", "list"]
+    )
+    async def test_non_json_retries_once_then_fails(
+        self, rate_limiter: RateLimiter, outcome: object
+    ) -> None:
+        """max_retries=3이어도 2회 호출 뒤 DataGoKrError(하위형 아님)로 끝난다."""
+        source = DataGoKrSource(
+            api_key="test-api-key", rate_limiter=rate_limiter, max_retries=3
+        )
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DataGoKrError, match="최종 실패") as exc_info:
+                    await source.fetch_by_date("2024-03-01")
+
+        assert exc_info.type is DataGoKrError
+        assert call_count == 2
+
+    @pytest.mark.parametrize(
+        "outcome", _non_json_outcomes(), ids=["json", "unicode", "none", "list"]
+    )
+    async def test_non_json_then_success_returns_items(
+        self, source: DataGoKrSource, outcome: object
+    ) -> None:
+        """첫 응답이 해석 불가여도 재시도에서 정상이면 결과를 돌려준다."""
+        items = [_make_item()]
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return outcome
+            return _make_response(items)
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                result = await source.fetch_by_date("2024-03-01")
+
+        assert len(result) == 1
+        assert call_count == 2
+
+    async def test_programming_value_error_is_not_retried(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        """디코드 실패가 아닌 ValueError는 재시도로 덮지 않고 그대로 낸다."""
+        source = DataGoKrSource(
+            api_key="test-api-key", rate_limiter=rate_limiter, max_retries=3
+        )
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("programming error")
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with pytest.raises(ValueError, match="programming error"):
+                await source.fetch_by_date("2024-03-01")
+
+        assert call_count == 1

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import ExitStack, asynccontextmanager
 from pathlib import Path
@@ -427,6 +428,25 @@ def test_account_create_credential_file_unreadable(mode: str, tmp_path: Path) ->
     _assert_no_secret(result, str(tmp_path), "Errno")
 
 
+_UNDECODABLE = b"fake-sec\xff\xfe-tail\n"
+_DECODE_TRACES = ("0xff", "0xfe", "codec", "position", "fake-sec")
+
+
+@pytest.mark.parametrize("mode", _MODES)
+def test_account_create_credential_file_undecodable(mode: str, tmp_path: Path) -> None:
+    secret_file = tmp_path / "cred.bin"
+    secret_file.write_bytes(_UNDECODABLE)
+    result = _invoke(
+        ["--format", mode, *_CREATE, "--credential-file", f"app_key={secret_file}"],
+        patch(_ACTIVE, return_value=False),
+    )
+    message = "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: " + _FILE_FAILED.format(
+        1, "app_key", "을 읽을 수 없습니다."
+    )
+    _assert_plain(mode, result, "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND", message)
+    _assert_no_secret(result, *_DECODE_TRACES, str(tmp_path))
+
+
 @pytest.mark.parametrize("mode", _MODES)
 def test_account_create_credential_file_empty(mode: str, tmp_path: Path) -> None:
     empty = tmp_path / "cred.txt"
@@ -691,6 +711,12 @@ def test_account_delete_requires_confirmation(mode: str) -> None:
             "계좌 삭제 실패",
             id="runtime",
         ),
+        pytest.param(
+            sqlite3.OperationalError("database is locked"),
+            "EXECUTION_ERROR",
+            "database is locked",
+            id="bots-lookup-locked",
+        ),
     ],
 )
 def test_account_delete_service_error(
@@ -771,6 +797,37 @@ def test_account_set_credentials_input_exit(
     )
     _assert_exit(mode, result, code, f"{code}: {message}", f"Error: {code}: {message}")
     _assert_no_secret(result, _SECRET, _ENV_SLOT)
+    service.update.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", _MODES)
+def test_account_set_credentials_credential_file_undecodable(
+    mode: str, tmp_path: Path
+) -> None:
+    secret_file = tmp_path / "cred.bin"
+    secret_file.write_bytes(_UNDECODABLE)
+    service = _account_service(
+        get=[_account()],
+        update=AssertionError("갱신에 닿으면 안 된다"),
+    )
+    result = _invoke(
+        [
+            "--format",
+            mode,
+            "account",
+            "set-credentials",
+            _ACCOUNT,
+            "--credential-file",
+            f"app_key={secret_file}",
+        ],
+        patch(_ACTIVE, return_value=False),
+        _service_cm(_ACCOUNT_CM, service),
+    )
+    message = "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: " + _FILE_FAILED.format(
+        1, "app_key", "을 읽을 수 없습니다."
+    )
+    _assert_plain(mode, result, "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND", message)
+    _assert_no_secret(result, *_DECODE_TRACES, str(tmp_path))
     service.update.assert_not_called()
 
 
@@ -991,6 +1048,27 @@ def test_member_secret_file_unreadable(
     message = f"{file_opt} 파일을 읽을 수 없습니다."
     _assert_coded(mode, result, "MEMBER_PASSWORD_FILE_NOT_FOUND", message)
     _assert_no_secret(result, _RECOVERY, str(tmp_path), "Errno")
+
+
+@pytest.mark.parametrize("mode", _MODES)
+@pytest.mark.parametrize(("args", "env_opt", "file_opt", "missing"), _SECRET_COMMANDS)
+def test_member_secret_file_undecodable(
+    mode: str,
+    args: list[str],
+    env_opt: str,
+    file_opt: str,
+    missing: str,
+    tmp_path: Path,
+) -> None:
+    secret_file = tmp_path / "pw.bin"
+    secret_file.write_bytes(_UNDECODABLE)
+    result = _invoke(
+        ["--format", mode, *args, file_opt, str(secret_file)],
+        _send(AssertionError("IPC 금지")),
+    )
+    message = f"{file_opt} 파일을 읽을 수 없습니다."
+    _assert_coded(mode, result, "MEMBER_PASSWORD_FILE_NOT_FOUND", message)
+    _assert_no_secret(result, _RECOVERY, *_DECODE_TRACES, str(tmp_path))
 
 
 @pytest.mark.parametrize("mode", _MODES)

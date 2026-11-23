@@ -364,10 +364,10 @@ def test_control_bot_status_value_elsewhere_is_caught():
 def test_control_extra_transition_call_is_caught():
     sources = _with(
         _MANAGER,
-        "        bot = self._get_bot(bot_id)\n"
+        "        self._require_registered(bot)\n"
         "        if bot.status == BotStatus.RUNNING:\n"
         "            raise BotStateConflict(\n",
-        "        bot = self._get_bot(bot_id)\n"
+        "        self._require_registered(bot)\n"
         "        _transition_status(bot, BotStatus.RUNNING)\n"
         "        if bot.status == BotStatus.RUNNING:\n"
         "            raise BotStateConflict(\n",
