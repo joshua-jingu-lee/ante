@@ -9,12 +9,15 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+import warnings
+import zlib
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -38,6 +41,14 @@ NETGUARD_DIR = Path(__file__).resolve().parent / "netguard"
 NETGUARD_LOG_ENV = "ANTE_E2E_NETGUARD_LOG"
 NETGUARD_MARKER_ENV = "ANTE_E2E_NETGUARD_MARKER"
 
+RECORD_DIR_ENV = "ANTE_E2E_RECORD_DIR"
+RECORD_VERSION = 1
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ANTE_CLI_PREFIX = ("-m", "ante", "--format", "json")
+RESPONSE_STATUS = re.compile(r"[a-z_]{1,32}")
+RESPONSE_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+ABSOLUTE_INSIDE = re.compile(r"(?:^|[\s=:,;])/")
+
 
 class HarnessError(AssertionError):
     """하네스가 시나리오를 더 진행할 수 없을 때."""
@@ -49,6 +60,10 @@ class CliCallError(HarnessError):
 
 class E2ETimeoutError(Exception):
     """테스트별 제한 시간이 지났을 때."""
+
+
+class RecordWarning(UserWarning):
+    """실행 기록을 쓰지 못했거나 버렸을 때. 시나리오의 결과는 바꾸지 않는다."""
 
 
 @dataclass(frozen=True)
@@ -81,23 +96,37 @@ def run_json_command(
     expect_failure: bool = False,
     timeout: float = CLI_TIMEOUT_SECONDS,
 ) -> CliResult:
-    """명령을 실행하고 stdout을 JSON 하나로 읽어 성공과 실패를 판정한다."""
-    proc = subprocess.run(
-        list(argv),
-        env=env,
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=timeout,
-        check=False,
-    )
+    """명령을 실행하고 stdout을 JSON 하나로 읽어 성공과 실패를 판정한다.
+
+    ``env``의 설정 디렉터리가 기록 중인 하네스의 것이면 호출을 그 기록에 남긴다.
+    """
+    recorder = _RECORDERS.get(env.get("ANTE_CONFIG_DIR", ""))
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            list(argv),
+            env=env,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        if recorder is not None:
+            elapsed = time.monotonic() - started
+            recorder.record_cli(argv, None, None, elapsed, expect_failure)
+        raise
     try:
         payload: Any = json.loads(proc.stdout)
         parsed = True
     except json.JSONDecodeError:
         payload = None
         parsed = False
+    if recorder is not None:
+        elapsed = time.monotonic() - started
+        recorder.record_cli(argv, proc.returncode, payload, elapsed, expect_failure)
     result = CliResult(tuple(argv), proc.returncode, payload, proc.stdout, proc.stderr)
     if expect_failure:
         if not result.failed:
@@ -115,6 +144,150 @@ def _describe(headline: str, result: CliResult) -> str:
         f"{headline}\n argv: {list(result.argv)}\n returncode: {result.returncode}\n"
         f" stdout:\n{result.stdout}\n stderr:\n{result.stderr[-4000:]}"
     )
+
+
+def _response_field(payload: Any, key: str, pattern: re.Pattern[str]) -> str | None:
+    """응답의 ``status``·``code``만, 정해진 모양의 짧은 값일 때만 뽑는다."""
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get(key)
+    if isinstance(value, str) and pattern.fullmatch(value):
+        return value
+    return None
+
+
+class RunRecorder:
+    """시나리오 하나의 실행 기록. 출력 원문·로그·예외 텍스트는 받지 않는다."""
+
+    def __init__(self, root: Path, record_dir: Path) -> None:
+        self.record_dir = record_dir
+        self.steps: list[dict[str, Any]] = []
+        self.net_attempts: int | None = None
+        roots = {str(root), str(root.resolve())}
+        self._roots = sorted(roots, key=len, reverse=True)
+        self._repo = str(REPO_ROOT)
+
+    def sanitize(self, value: str) -> str:
+        """임시 루트는 ``<root>``, 저장소 안은 상대 경로, 남은 절대 경로는 ``<path>``.
+
+        루트를 바꾼 뒤에도 문자열의 처음이나 구분자 뒤에 ``/``가 남으면 통째로
+        ``<path>``다(``--x=/a``도 막는다).
+        """
+        for root in self._roots:
+            value = value.replace(root, "<root>")
+        value = value.replace(self._repo + "/", "")
+        if value == self._repo or ABSOLUTE_INSIDE.search(value):
+            return "<path>"
+        return value
+
+    def command_args(self, argv: Sequence[str]) -> list[str]:
+        """인터프리터와 ``-m ante --format json`` 접두를 뺀 명령의 인자."""
+        args = [str(a) for a in argv[1:]]
+        if tuple(args[: len(ANTE_CLI_PREFIX)]) == ANTE_CLI_PREFIX:
+            args = args[len(ANTE_CLI_PREFIX) :]
+        return [self.sanitize(a) for a in args]
+
+    def record_cli(
+        self,
+        argv: Sequence[str],
+        returncode: int | None,
+        payload: Any,
+        seconds: float,
+        expect_failure: bool,
+    ) -> None:
+        failed = returncode is None or is_failure(returncode, payload)
+        self.steps.append(
+            {
+                "kind": "cli",
+                "args": self.command_args(argv),
+                "returncode": returncode,
+                "status": _response_field(payload, "status", RESPONSE_STATUS),
+                "code": _response_field(payload, "code", RESPONSE_CODE),
+                "expect_failure": expect_failure,
+                "failed": failed,
+                "count": 1,
+                "seconds": seconds,
+            }
+        )
+
+    def begin_start(self) -> dict[str, Any]:
+        """데몬 시작 항목. 준비되면 부른 쪽이 ``ok``와 ``ready_seconds``를 채운다."""
+        step: dict[str, Any] = {"kind": "start", "ok": False, "ready_seconds": None}
+        self.steps.append(step)
+        return step
+
+    def build(self, nodeid: str, outcome: str, seconds: float) -> dict[str, Any]:
+        """연속으로 같은 (인자, 종료 코드, status, code) 호출은 한 행으로 접는다."""
+        fold_key = ("args", "returncode", "status", "code")
+        folded: list[dict[str, Any]] = []
+        for step in self.steps:
+            last = folded[-1] if folded else None
+            if (
+                last is not None
+                and step["kind"] == "cli"
+                and last["kind"] == "cli"
+                and all(step[k] == last[k] for k in fold_key)
+            ):
+                last["count"] += 1
+                last["seconds"] += step["seconds"]
+                continue
+            folded.append(dict(step))
+        for step in folded:
+            for key in ("seconds", "ready_seconds"):
+                if isinstance(step.get(key), float):
+                    step[key] = round(step[key], 3)
+        return {
+            "version": RECORD_VERSION,
+            "nodeid": self.sanitize(nodeid),
+            "outcome": outcome,
+            "seconds": round(seconds, 3),
+            "net_attempts": self.net_attempts,
+            "steps": folded,
+        }
+
+
+_RECORDERS: dict[str, RunRecorder] = {}
+
+
+def _all_strings(value: Any) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield str(key)
+            yield from _all_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _all_strings(item)
+
+
+def record_file_name(nodeid: str) -> str:
+    """nodeid에서 만든 파일 이름. 영숫자와 ``._-``만 쓰고 해시로 겹침을 막는다."""
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", nodeid).strip("._")[:120]
+    return f"{stem}-{zlib.crc32(nodeid.encode('utf-8')):08x}.json"
+
+
+def save_record(env: DaemonHarness, nodeid: str, outcome: str, seconds: float) -> None:
+    """기록 중인 하네스면 기록 파일을 쓴다. 쓰지 못하거나 버리면 경고만 낸다."""
+    recorder = env.recorder
+    if recorder is None:
+        return
+    try:
+        record = recorder.build(nodeid, outcome, seconds)
+        text = json.dumps(record, ensure_ascii=False, indent=2) + "\n"
+        if env.token and env.token in text:
+            reason = "토큰 값이 들어 있어 버렸다"
+        elif any(s.startswith("/") for s in _all_strings(record)):
+            reason = "절대 경로가 남아 버렸다"
+        else:
+            recorder.record_dir.mkdir(parents=True, exist_ok=True)
+            (recorder.record_dir / record_file_name(nodeid)).write_text(
+                text, encoding="utf-8"
+            )
+            return
+    except Exception as exc:
+        reason = f"쓰지 못했다({type(exc).__name__})"
+    warnings.warn(RecordWarning(f"e2e 기록: {reason}: {nodeid}"), stacklevel=2)
 
 
 @contextmanager
@@ -258,6 +431,7 @@ class DaemonHarness:
         self.daemon_pid: int | None = None
         self._log_file: IO[bytes] | None = None
         self._final_diagnostics: str | None = None
+        self.recorder: RunRecorder | None = None
 
     @classmethod
     def create(cls) -> DaemonHarness:
@@ -280,6 +454,10 @@ class DaemonHarness:
         except BaseException:
             shutil.rmtree(root)
             raise
+        record_dir = os.environ.get(RECORD_DIR_ENV)
+        if record_dir:
+            harness.recorder = RunRecorder(root, Path(record_dir))
+            _RECORDERS[str(harness.config_dir)] = harness.recorder
         return harness
 
     def env(self) -> dict[str, str]:
@@ -329,6 +507,7 @@ class DaemonHarness:
             raise HarnessError("이전 데몬의 래퍼가 아직 끝나지 않았다")
         self._close_log()
         self._log_file = open(self.daemon_log_path, "ab" if append_log else "wb")
+        step = self.recorder.begin_start() if self.recorder is not None else None
         started = time.monotonic()
         self.proc = subprocess.Popen(
             self.cli_argv("system", "start"),
@@ -358,7 +537,11 @@ class DaemonHarness:
             time.sleep(POLL_SECONDS)
         self.daemon_pid = int(self.pid_path.read_text().strip())
         self.cli("bot", "list")
-        return time.monotonic() - started
+        ready = time.monotonic() - started
+        if step is not None:
+            step["ok"] = True
+            step["ready_seconds"] = ready
+        return ready
 
     def stop(self) -> int:
         """``system stop`` 뒤 래퍼가 끝나기를 기다려 그 종료 코드를 돌려준다."""
@@ -430,8 +613,17 @@ class DaemonHarness:
                 proc.wait(timeout=GROUP_KILL_SECONDS)
         finally:
             self._close_log()
+            _RECORDERS.pop(str(self.config_dir), None)
             if self.root.exists():
                 try:
+                    if self.recorder is not None:
+                        self.recorder.net_attempts = self._count_net_attempts()
                     self._final_diagnostics = self.diagnostics()
                 finally:
                     shutil.rmtree(self.root)
+
+    def _count_net_attempts(self) -> int | None:
+        try:
+            return len(self.net_attempts())
+        except (OSError, ValueError):
+            return None

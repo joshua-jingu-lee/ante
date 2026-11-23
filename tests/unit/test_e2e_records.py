@@ -260,6 +260,7 @@ class TestRecordGuards:
         assert name != harness.record_file_name("tests/e2e/test_a.py::test_b[x]")
 
 
+INNER_ARGS = ("-p", "no:cacheprovider", "-p", "no:asyncio")
 _INNER_CONFTEST = "from tests.e2e.conftest import *  # noqa: F403\n"
 
 _INNER_TEST = """
@@ -291,7 +292,7 @@ class TestScenarioOutcome:
     ) -> None:
         pytester.makeconftest(_INNER_CONFTEST)
         pytester.makepyfile(test_inner=_INNER_TEST)
-        result = pytester.runpytest_inprocess("-p", "no:cacheprovider")
+        result = pytester.runpytest_inprocess(*INNER_ARGS)
         result.assert_outcomes(passed=1, failed=1)
         records = {
             r["nodeid"]: r
@@ -313,9 +314,9 @@ class TestScenarioOutcome:
         record_dir.write_text("not a directory")
         pytester.makeconftest(_INNER_CONFTEST)
         pytester.makepyfile(test_inner=_INNER_TEST)
-        result = pytester.runpytest_inprocess("-p", "no:cacheprovider")
+        result = pytester.runpytest_inprocess(*INNER_ARGS)
         outcomes = result.parseoutcomes()
         assert outcomes.get("passed") == 1
         assert outcomes.get("failed") == 1
         assert "errors" not in outcomes
-        assert outcomes.get("warnings", 0) >= 2
+        result.stdout.fnmatch_lines(["*RecordWarning*쓰지 못했다*"])
