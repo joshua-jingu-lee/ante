@@ -6,9 +6,7 @@
 
 ### 생성자
 
-```python
-AccountService(db: Database, eventbus: EventBus)
-```
+정의: `ante.account.service.AccountService` (코드가 정본이다).
 
 ### 퍼블릭 메서드
 
