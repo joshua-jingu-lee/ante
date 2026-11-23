@@ -181,6 +181,7 @@ strategy.on_stop()
 | `slippage` | `float` | 슬리피지 금액 |
 | `reason` | `str` | Signal의 reason (기본값: `""`) |
 | `exchange` | `str` | 거래소 (기본값: `"KRX"`) |
+| `order_type` | `str` | 체결된 주문의 유형 `"market"` / `"limit"` — 스톱은 라이브의 스톱 변환과 같은 규칙(`stop` → `"market"`, `stop_limit` → `"limit"`) (기본값: `"market"`) |
 
 ### 성과 지표 계산 (metrics.py)
 
