@@ -40,6 +40,8 @@ WAIT_INTERVAL_SECONDS = 0.5
 NETGUARD_DIR = Path(__file__).resolve().parent / "netguard"
 NETGUARD_LOG_ENV = "ANTE_E2E_NETGUARD_LOG"
 NETGUARD_MARKER_ENV = "ANTE_E2E_NETGUARD_MARKER"
+MOCK_LIVE_ENV = "ANTE_E2E_ALLOW_MOCK_LIVE"
+MOCK_LIVE_MARKER_ENV = "ANTE_E2E_MOCK_LIVE_MARKER"
 
 RECORD_DIR_ENV = "ANTE_E2E_RECORD_DIR"
 RECORD_VERSION = 1
@@ -499,6 +501,8 @@ class DaemonHarness:
         self.daemon_log_path = self.logs_dir / "daemon.log"
         self.net_log_path = root / "net-attempts.jsonl"
         self.net_marker_path = root / "netguard-pids"
+        self.mock_live_marker_path = root / "mock-live-pids"
+        self.allow_mock_live = False
         self.token: str | None = None
         self.proc: subprocess.Popen[bytes] | None = None
         self._spawned: list[subprocess.Popen[bytes]] = []
@@ -535,7 +539,10 @@ class DaemonHarness:
         return harness
 
     def env(self) -> dict[str, str]:
-        """하위 프로세스의 환경. ``os.environ``을 복사하지 않는다."""
+        """하위 프로세스의 환경. ``os.environ``을 복사하지 않는다.
+
+        ``allow_mock_live``이면 ``(mock, live)`` 계좌를 여는 테스트 주입을 켠다.
+        """
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": str(self.home_dir),
@@ -548,6 +555,9 @@ class DaemonHarness:
             NETGUARD_LOG_ENV: str(self.net_log_path),
             NETGUARD_MARKER_ENV: str(self.net_marker_path),
         }
+        if self.allow_mock_live:
+            env[MOCK_LIVE_ENV] = "1"
+            env[MOCK_LIVE_MARKER_ENV] = str(self.mock_live_marker_path)
         if self.token is not None:
             env["ANTE_MEMBER_TOKEN"] = self.token
         return env
@@ -652,6 +662,13 @@ class DaemonHarness:
         if not self.net_marker_path.exists():
             return set()
         text = self.net_marker_path.read_text(encoding="utf-8")
+        return {int(line) for line in text.split()}
+
+    def mock_live_pids(self) -> set[int]:
+        """``(mock, live)`` 주입이 판정을 바꾼 하위 프로세스의 pid."""
+        if not self.mock_live_marker_path.exists():
+            return set()
+        text = self.mock_live_marker_path.read_text(encoding="utf-8")
         return {int(line) for line in text.split()}
 
     def net_attempts(self) -> list[dict[str, Any]]:

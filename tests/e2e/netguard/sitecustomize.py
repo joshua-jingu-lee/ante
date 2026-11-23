@@ -11,6 +11,7 @@ from typing import Any
 
 LOG_ENV = "ANTE_E2E_NETGUARD_LOG"
 MARKER_ENV = "ANTE_E2E_NETGUARD_MARKER"
+MOCK_LIVE_ENV = "ANTE_E2E_ALLOW_MOCK_LIVE"
 
 _log_path = os.environ.get(LOG_ENV)
 _marker_path = os.environ.get(MARKER_ENV)
@@ -72,3 +73,6 @@ socket.socket.connect_ex = _guarded_connect_ex  # type: ignore[method-assign]
 socket.getaddrinfo = _guarded_getaddrinfo
 socket.create_connection = _guarded_create_connection
 _append(_marker_path, str(os.getpid()))
+
+if os.environ.get(MOCK_LIVE_ENV) == "1":
+    import mock_live  # noqa: F401
