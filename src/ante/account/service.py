@@ -33,6 +33,7 @@ from ante.account.presets import BROKER_PRESETS, VIRTUAL_ONLY_BROKER_TYPES
 from ante.account.scoping import require_account_id, validate_new_account_id
 from ante.account.timezone import validate_iana_timezone
 from ante.core import clock
+from ante.core.database import OperationalError
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
 
 if TYPE_CHECKING:
@@ -690,8 +691,10 @@ class AccountService:
                 "SELECT COUNT(*) AS cnt FROM bots WHERE account_id = ? AND status != ?",
                 (account_id, "deleted"),
             )
-        except Exception:
-            return 0
+        except OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return 0
+            raise
 
         if row is None:
             return 0
@@ -884,8 +887,12 @@ def _row_to_account(row: dict[str, Any]) -> Account:
         else (broker_config_raw or {})
     )
 
-    buffer_raw = row.get("market_order_reserve_buffer_rate", "0")
-    buffer_value = Decimal("0") if buffer_raw is None else Decimal(str(buffer_raw))
+    buffer_raw = row.get("market_order_reserve_buffer_rate")
+    buffer_value = (
+        (Decimal("0") if row["broker_type"] == "test" else Decimal("0.005"))
+        if buffer_raw is None
+        else Decimal(str(buffer_raw))
+    )
 
     tz_value, tz_invalid = _load_persisted_timezone(row["timezone"], row["account_id"])
 

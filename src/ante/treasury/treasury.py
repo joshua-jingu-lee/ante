@@ -544,17 +544,22 @@ class Treasury:
         """봇의 예산을 목표 금액으로 변경.
 
         현재 할당액과 목표 금액의 차이를 계산하여 allocate/deallocate를 호출한다.
-        미할당 잔액이 부족하면 InsufficientFundsError를 발생시킨다.
 
         Raises:
-            InsufficientFundsError: 증액 시 미할당 잔액 부족.
+            TreasuryInvalidAmountError: 목표 금액이 NaN/±Inf.
             ValueError: 목표 금액이 음수인 경우.
+            InsufficientFundsError: 증액 시 미할당 잔액 부족, 감액 시 가용 예산 초과.
+            BotNotStoppedError: 봇이 운용 중.
         """
         from ante.treasury.exceptions import (
             InsufficientFundsError,
-            TreasuryError,
+            TreasuryDeallocateExceedsAvailableError,
+            TreasuryInsufficientUnallocatedError,
+            TreasuryInvalidAmountError,
         )
 
+        if not math.isfinite(target_amount):
+            raise TreasuryInvalidAmountError(target_amount, operation="update_budget")
         if target_amount < 0:
             raise ValueError(f"목표 금액은 0 이상이어야 합니다: {target_amount}")
 
@@ -572,7 +577,7 @@ class Treasury:
                 )
             try:
                 await self.allocate(bot_id, diff)
-            except TreasuryError as exc:
+            except TreasuryInsufficientUnallocatedError as exc:
                 raise InsufficientFundsError(
                     f"예산 할당 실패: bot_id={bot_id}, amount={diff} ({exc})"
                 ) from exc
@@ -580,7 +585,7 @@ class Treasury:
             decrease = abs(diff)
             try:
                 await self.deallocate(bot_id, decrease)
-            except TreasuryError as exc:
+            except TreasuryDeallocateExceedsAvailableError as exc:
                 available = budget.available if budget else 0.0
                 raise InsufficientFundsError(
                     f"예산 회수 실패: 회수 요청 {decrease:,.0f}, "

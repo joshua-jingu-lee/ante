@@ -325,11 +325,17 @@ class TestSuspendReactivateRevoke:
         assert m.token_hash == ""
 
     async def test_revoke_already_revoked_fails(self, service):
+        from ante.member.errors import MemberStateConflictError
+
         await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         await service.revoke("agent-01", revoked_by="owner")
-        with pytest.raises(PermissionError, match="active, suspended 상태에서만"):
+        with pytest.raises(MemberStateConflictError) as excinfo:
             await service.revoke("agent-01", revoked_by="owner")
+        assert type(excinfo.value) is MemberStateConflictError
+        assert excinfo.value.code == "MEMBER_STATE_CONFLICT"
+        assert excinfo.value.current_status == "revoked"
+        assert excinfo.value.requested_action == "revoke"
 
     async def test_revoke_master_fails(self, service):
         await service.bootstrap_master("owner", "pass123")
@@ -527,6 +533,68 @@ class TestScopes:
         # DB에 반영 확인
         fetched = await service.get("agent-01")
         assert fetched.scopes == ["strategy:write", "data:read"]
+
+
+class TestInactiveMemberStateConflict:
+    """#2877 — 비활성 멤버의 권한 변경·토큰 회전은 상태 충돌이다."""
+
+    @pytest.mark.parametrize("target", ["suspended", "revoked"])
+    async def test_update_scopes_inactive_raises_state_conflict(self, service, target):
+        from ante.member.errors import MemberStateConflictError
+
+        await service.bootstrap_master("owner", "pass123")
+        await service.register(
+            "agent-01",
+            MemberType.AGENT,
+            registered_by="owner",
+            scopes=["data:read"],
+        )
+        if target == "suspended":
+            await service.suspend("agent-01", suspended_by="owner")
+        else:
+            await service.revoke("agent-01", revoked_by="owner")
+
+        with pytest.raises(MemberStateConflictError) as exc_info:
+            await service.update_scopes(
+                "agent-01", ["strategy:write"], updated_by="owner"
+            )
+        exc = exc_info.value
+        assert type(exc) is MemberStateConflictError
+        assert exc.code == "MEMBER_STATE_CONFLICT"
+        assert exc.current_status == target
+        assert exc.requested_action == "update_scopes"
+        fetched = await service.get("agent-01")
+        assert fetched.scopes == ["data:read"]
+
+    @pytest.mark.parametrize("target", ["suspended", "revoked"])
+    async def test_rotate_token_inactive_raises_state_conflict(
+        self, service, db, target
+    ):
+        from ante.member.errors import MemberStateConflictError
+
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
+        if target == "suspended":
+            await service.suspend("agent-01", suspended_by="owner")
+        else:
+            await service.revoke("agent-01", revoked_by="owner")
+        before = await db.fetch_one(
+            "SELECT token_hash, token_expires_at FROM members WHERE member_id = ?",
+            ("agent-01",),
+        )
+
+        with pytest.raises(MemberStateConflictError) as exc_info:
+            await service.rotate_token("agent-01", rotated_by="owner")
+        exc = exc_info.value
+        assert type(exc) is MemberStateConflictError
+        assert exc.code == "MEMBER_STATE_CONFLICT"
+        assert exc.current_status == target
+        assert exc.requested_action == "rotate_token"
+        after = await db.fetch_one(
+            "SELECT token_hash, token_expires_at FROM members WHERE member_id = ?",
+            ("agent-01",),
+        )
+        assert dict(after) == dict(before)
 
 
 class TestMasterPermissionCheck:

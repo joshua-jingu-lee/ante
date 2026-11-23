@@ -382,7 +382,6 @@ class TestRuleOutputBytes:
             {
                 "account_id": "acct-001",
                 "rule_type": "max_position_count",
-                "enabled": True,
                 "params": {"max_count": 20},
             },
             actor="test-master",

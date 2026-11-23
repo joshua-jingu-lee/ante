@@ -960,3 +960,154 @@ class TestValidateCredentials:
             valid, detail = await source.validate_credentials()
         assert valid is None
         assert detail is not None
+
+
+# -- JSON이 아닌 응답의 RETRY_ONCE 분류 (#2710) ---------------------------
+
+
+def _non_json_outcomes() -> list[object]:
+    """JSON이 아닌 응답에서 _do_request가 내는 결과들."""
+    return [
+        json.JSONDecodeError("Expecting value", "<html>점검 중</html>", 0),
+        UnicodeDecodeError("utf-8", b"\xff\xfe", 0, 1, "invalid start byte"),
+        None,
+        [],
+    ]
+
+
+class TestNonJsonResponseRetryOnce:
+    """#2710: 해석할 수 없는 응답은 status=900처럼 1회 재시도 뒤 실패한다."""
+
+    @pytest.mark.parametrize(
+        "outcome", _non_json_outcomes(), ids=["json", "unicode", "none", "list"]
+    )
+    async def test_non_json_retries_once_then_fails(
+        self, rate_limiter: RateLimiter, outcome: object
+    ) -> None:
+        """max_retries=3이어도 2회 호출 뒤 DARTError(하위형 아님)로 끝난다."""
+        source = DARTSource(
+            api_key="test-dart-api-key-0123456789abcdef01",
+            rate_limiter=rate_limiter,
+            max_retries=3,
+        )
+        call_count = 0
+
+        async def mock_request(session, url, params):
+            nonlocal call_count
+            call_count += 1
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError, match="최종 실패") as exc_info:
+                    await source.fetch_financial(["00126380"], "2024", "11011")
+
+        assert exc_info.type is DARTError
+        assert call_count == 2
+
+    @pytest.mark.parametrize(
+        "outcome", _non_json_outcomes(), ids=["json", "unicode", "none", "list"]
+    )
+    async def test_non_json_then_success_returns_items(
+        self, source: DARTSource, outcome: object
+    ) -> None:
+        """첫 응답이 해석 불가여도 재시도에서 정상이면 결과를 돌려준다."""
+        item = _make_financial_item()
+        call_count = 0
+
+        async def mock_request(session, url, params):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return outcome
+            return _make_financial_response([item])
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                result = await source.fetch_financial(["00126380"], "2024", "11011")
+
+        assert result == [item]
+        assert call_count == 2
+
+    async def test_programming_value_error_is_not_retried(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        """디코드 실패가 아닌 ValueError는 재시도로 덮지 않고 그대로 낸다."""
+        source = DARTSource(
+            api_key="test-dart-api-key-0123456789abcdef01",
+            rate_limiter=rate_limiter,
+            max_retries=3,
+        )
+        call_count = 0
+
+        async def mock_request(session, url, params):
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("programming error")
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with pytest.raises(ValueError, match="programming error"):
+                await source.fetch_financial(["00126380"], "2024", "11011")
+
+        assert call_count == 1
+
+
+class _FakeBodyResponse:
+    """_download_corp_code_zip의 session.get(...) 응답 모킹(본문 지정)."""
+
+    def __init__(self, body: str | None, content_type: str) -> None:
+        self._body = body
+        self.content_type = content_type
+
+    async def __aenter__(self) -> _FakeBodyResponse:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def text(self) -> str:
+        if self._body is None:
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        return self._body
+
+
+class TestCorpCodeNonObjectBody:
+    """#2710: 회사 코드 다운로드도 해석할 수 없는 본문을 900으로 분류한다."""
+
+    @pytest.mark.parametrize(
+        ("body", "content_type"),
+        [
+            ("[]", "application/json"),
+            ("null", "application/json"),
+            ("42", "application/json"),
+            (None, "text/html"),
+        ],
+        ids=["list", "null", "number", "undecodable"],
+    )
+    async def test_unparseable_body_retries_once_then_fails(
+        self, rate_limiter: RateLimiter, body: str | None, content_type: str
+    ) -> None:
+        """max_retries=3이어도 2회 호출 뒤 DARTError(하위형 아님)로 끝난다."""
+        source = DARTSource(
+            api_key="test-dart-api-key-0123456789abcdef01",
+            rate_limiter=rate_limiter,
+            max_retries=3,
+        )
+        call_count = 0
+
+        def fake_get(url, params=None):
+            nonlocal call_count
+            call_count += 1
+            return _FakeBodyResponse(body, content_type)
+
+        with patch("aiohttp.ClientSession.get", side_effect=fake_get):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError, match="최종 실패") as exc_info:
+                    await source.fetch_corp_codes()
+
+        assert exc_info.type is DARTError
+        assert call_count == 2

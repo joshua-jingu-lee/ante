@@ -537,8 +537,7 @@ class BotManager:
         was_running = bot.status == BotStatus.RUNNING
 
         if was_running:
-            await bot.stop()
-            self._remove_strategy_rules(bot.config.strategy_id)
+            await self._stop_and_remove_rules(bot)
 
         await self._rebind_and_save(bot, strategy_id, strategy_cls)
 
@@ -581,6 +580,7 @@ class BotManager:
         running 상태이면 예외를 발생시킨다.
         """
         bot = self._get_bot(bot_id)
+        self._require_registered(bot)
         if bot.status == BotStatus.RUNNING:
             raise BotError(f"이미 실행 중인 봇입니다: {bot_id}")
 
@@ -605,6 +605,7 @@ class BotManager:
         된다.
         """
         bot = self._get_bot(bot_id)
+        self._require_registered(bot)
         if bot.status == BotStatus.RUNNING:
             raise BotStateConflict(
                 f"이미 실행 중인 봇입니다: {bot_id} (상태: {bot.status.value})"
@@ -631,8 +632,7 @@ class BotManager:
             )
         if suppress_notification:
             self._suppress_notification_bot_ids.add(bot_id)
-        await bot.stop()
-        self._remove_strategy_rules(bot.config.strategy_id)
+        await self._stop_and_remove_rules(bot)
 
     async def delete_bot(
         self,
@@ -713,6 +713,7 @@ class BotManager:
                     (deleted.value, bot_id),
                 )
                 logger.info("봇 삭제 (soft delete): %s", bot_id)
+            self._cancel_restart_tasks(bot_id)
         finally:
             self._deleting_bots.discard(bot)
 
@@ -820,10 +821,21 @@ class BotManager:
             raise BotNotFoundError(bot_id)
         return bot
 
+    def _is_registered(self, bot: Bot) -> bool:
+        """삭제 중이 아니고 목록에 그대로 있는 봇인지 돌려준다."""
+        return bot not in self._deleting_bots and self._bots.get(bot.bot_id) is bot
+
     def _require_registered(self, bot: Bot) -> None:
         """삭제 중이거나 목록에서 빠진 봇이면 ``BotNotFoundError``를 올린다."""
-        if bot in self._deleting_bots or self._bots.get(bot.bot_id) is not bot:
+        if not self._is_registered(bot):
             raise BotNotFoundError(bot.bot_id)
+
+    def _cancel_restart_tasks(self, bot_id: str) -> None:
+        """봇의 예약된 재시작·카운터 리셋 태스크를 취소하고 목록에서 뺀다."""
+        for tasks in (self._restart_tasks, self._restart_reset_tasks):
+            task = tasks.pop(bot_id, None)
+            if task is not None:
+                task.cancel()
 
     async def _prepare_strategy(
         self, bot_id: str, *, account_id: str, strategy_id: str
@@ -933,6 +945,13 @@ class BotManager:
             return
         self._rule_engine.remove_strategy_rules(strategy_id)
 
+    async def _stop_and_remove_rules(self, bot: Bot) -> None:
+        """봇을 중지하고, 중지가 예외를 내도 전략별 룰을 제거한다."""
+        try:
+            await bot.stop()
+        finally:
+            self._remove_strategy_rules(bot.config.strategy_id)
+
     async def _on_bot_stop_request(self, event: object) -> None:
         """BotStopEvent 수신 시 해당 봇 중지."""
         from ante.eventbus.events import BotStopEvent
@@ -955,7 +974,14 @@ class BotManager:
         stopped = []
         for bot in list(self._bots.values()):
             if bot.config.account_id == account_id and bot.status == BotStatus.RUNNING:
-                await bot.stop()
+                try:
+                    await bot.stop()
+                except Exception:
+                    logger.exception(
+                        "계좌 정지 — 봇 중지 중 예외: account=%s, bot=%s",
+                        account_id,
+                        bot.bot_id,
+                    )
                 stopped.append(bot.bot_id)
         if stopped:
             logger.warning(
@@ -1068,7 +1094,7 @@ class BotManager:
         except asyncio.CancelledError:
             raise
 
-        if bot.status != BotStatus.ERROR:
+        if bot.status != BotStatus.ERROR or not self._is_registered(bot):
             return
 
         try:
