@@ -658,9 +658,12 @@ class MemberService:
         await self._assert_master(revoked_by, "revoke")
         member = await self._get_or_raise(member_id)
         self._assert_not_master(member, "revoke")
-        self._assert_status(
-            member, (MemberStatus.ACTIVE, MemberStatus.SUSPENDED), "revoke"
-        )
+        if member.status not in (MemberStatus.ACTIVE, MemberStatus.SUSPENDED):
+            raise MemberStateConflictError(
+                member_id,
+                current_status=str(member.status),
+                requested_action="revoke",
+            )
 
         now = _now()
         status = _transition_status(member, MemberStatus.REVOKED, "revoke")
@@ -868,18 +871,4 @@ class MemberService:
         """활성 상태 검증."""
         if member.status != MemberStatus.ACTIVE:
             msg = f"비활성 멤버는 {action}할 수 없습니다 (현재: {member.status})"
-            raise PermissionError(msg)
-
-    @staticmethod
-    def _assert_status(
-        member: Member, expected: str | tuple[str, ...], action: str
-    ) -> None:
-        """특정 상태 검증. 단일 또는 복수 상태를 허용한다."""
-        statuses = (expected,) if isinstance(expected, str) else expected
-        if member.status not in statuses:
-            allowed = ", ".join(statuses)
-            msg = (
-                f"{action}은(는) {allowed} 상태에서만 "
-                f"가능합니다 (현재: {member.status})"
-            )
             raise PermissionError(msg)
