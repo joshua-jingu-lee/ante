@@ -25,8 +25,8 @@
 기대값은 모두 리터럴(상태 문자열, 예외 종류와 전체 메시지, 건수)이다.
 
 뒤쪽 49쌍 동작 테스트는 7×7 쌍마다 그 다음 상태를 쓸 수 있는 모든 공개 쓰기를
-시도해, 쓰기가 그 행을 실제로 바꾼 쌍의 집합이 리터럴 38쌍과 같은지 본다. 맨 뒤는
-``OrderStatus`` 의 값이 DB 문자열과 같은지, 전이표가 리터럴 38쌍과 같은지 본다.
+시도해, 쓰기가 그 행을 실제로 바꾼 쌍의 집합이 리터럴 22쌍과 같은지 본다. 맨 뒤는
+``OrderStatus`` 의 값이 DB 문자열과 같은지, 전이표가 리터럴 22쌍과 같은지 본다.
 """
 
 from __future__ import annotations
@@ -283,7 +283,7 @@ async def test_record_fill_unknown_order_returns_empty(tracker):
 # ── mark_terminal ────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("prior", ["open", "partially_filled", "cancelled", "expired"])
+@pytest.mark.parametrize("prior", ["open", "partially_filled"])
 @pytest.mark.parametrize(
     "target", ["cancelled", "rejected", "failed", "expired", "filled"]
 )
@@ -301,6 +301,22 @@ async def test_mark_terminal_keeps_filled_row(db, tracker, small_filled):
     before = await _row(db)
     await tracker.mark_terminal("ord-1", "cancelled")
     assert await _row(db) == before
+
+
+@pytest.mark.parametrize("prior", ["cancelled", "rejected", "failed", "expired"])
+@pytest.mark.parametrize(
+    "target", ["cancelled", "rejected", "failed", "expired", "filled"]
+)
+async def test_mark_terminal_keeps_terminal_row(db, tracker, prior, target):
+    await _enter(tracker, prior)
+    await db.execute(
+        "UPDATE order_tracker SET terminal_at = ? WHERE order_id = ?",
+        (SENTINEL, "ord-1"),
+    )
+    before = await _row(db)
+    await tracker.mark_terminal("ord-1", target)
+    assert await _row(db) == before
+    assert _cached_ids(tracker) == []
 
 
 @pytest.mark.parametrize(
@@ -328,7 +344,7 @@ async def test_mark_terminal_evicts_only_that_order(tracker):
     assert _cached_ids(tracker) == [("ord-2", "open")]
 
 
-async def test_duplicate_terminal_event_rewrites_terminal_at(db, tracker):
+async def test_duplicate_terminal_event_keeps_terminal_at(db, tracker):
     await _enter(tracker, "cancelled")
     await db.execute(
         "UPDATE order_tracker SET terminal_at = ? WHERE order_id = ?",
@@ -338,8 +354,7 @@ async def test_duplicate_terminal_event_rewrites_terminal_at(db, tracker):
     row = await _row(db)
     assert row is not None
     assert row["status"] == "cancelled"
-    assert row["terminal_at"] != SENTINEL
-    assert row["terminal_at"] is not None
+    assert row["terminal_at"] == SENTINEL
 
 
 # ── expire_stale ─────────────────────────────────────────────────
@@ -696,28 +711,12 @@ EXPECTED_OBSERVED_PAIRS = {
     ("filled", "filled"),
     ("cancelled", "partially_filled"),
     ("cancelled", "filled"),
-    ("cancelled", "cancelled"),
-    ("cancelled", "rejected"),
-    ("cancelled", "failed"),
-    ("cancelled", "expired"),
     ("rejected", "partially_filled"),
     ("rejected", "filled"),
-    ("rejected", "cancelled"),
-    ("rejected", "rejected"),
-    ("rejected", "failed"),
-    ("rejected", "expired"),
     ("failed", "partially_filled"),
     ("failed", "filled"),
-    ("failed", "cancelled"),
-    ("failed", "rejected"),
-    ("failed", "failed"),
-    ("failed", "expired"),
     ("expired", "partially_filled"),
     ("expired", "filled"),
-    ("expired", "cancelled"),
-    ("expired", "rejected"),
-    ("expired", "failed"),
-    ("expired", "expired"),
 }
 
 EXPECTED_UNOBSERVED_PAIRS = {
@@ -732,6 +731,22 @@ EXPECTED_UNOBSERVED_PAIRS = {
     ("filled", "rejected"),
     ("filled", "failed"),
     ("filled", "expired"),
+    ("cancelled", "cancelled"),
+    ("cancelled", "rejected"),
+    ("cancelled", "failed"),
+    ("cancelled", "expired"),
+    ("rejected", "cancelled"),
+    ("rejected", "rejected"),
+    ("rejected", "failed"),
+    ("rejected", "expired"),
+    ("failed", "cancelled"),
+    ("failed", "rejected"),
+    ("failed", "failed"),
+    ("failed", "expired"),
+    ("expired", "cancelled"),
+    ("expired", "rejected"),
+    ("expired", "failed"),
+    ("expired", "expired"),
 }
 
 
@@ -831,10 +846,10 @@ async def test_order_status_writes_over_all_49_pairs(db, tracker):
                         observed.add((prior, target))
     assert len(pairs) == 49
     assert attempts == 87
-    assert len(observed) == 38
+    assert len(observed) == 22
     assert observed == EXPECTED_OBSERVED_PAIRS
     assert pairs - observed == EXPECTED_UNOBSERVED_PAIRS
-    assert len(pairs - observed) == 11
+    assert len(pairs - observed) == 27
 
 
 # ── enum과 전이표 ────────────────────────────────────────────────
@@ -865,7 +880,7 @@ def test_open_and_terminal_sets_are_unchanged():
     ]
 
 
-def test_order_transition_table_equals_the_38_literal_pairs():
+def test_order_transition_table_equals_the_22_literal_pairs():
     assert sorted(str(k) for k in ORDER_STATUS_TRANSITIONS) == sorted(ORDER_STATUSES)
     assert all(type(v) is set for v in ORDER_STATUS_TRANSITIONS.values())
     table = {
@@ -874,7 +889,7 @@ def test_order_transition_table_equals_the_38_literal_pairs():
         for target in targets
     }
     assert table == EXPECTED_OBSERVED_PAIRS
-    assert len(table) == 38
+    assert len(table) == 22
     every = {(a, b) for a in ORDER_STATUSES for b in ORDER_STATUSES}
     assert every - table == EXPECTED_UNOBSERVED_PAIRS
 

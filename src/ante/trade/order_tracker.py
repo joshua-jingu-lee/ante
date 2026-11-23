@@ -43,38 +43,10 @@ ORDER_STATUS_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
         OrderStatus.EXPIRED,
     },
     OrderStatus.FILLED: {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED},
-    OrderStatus.CANCELLED: {
-        OrderStatus.PARTIALLY_FILLED,
-        OrderStatus.FILLED,
-        OrderStatus.CANCELLED,
-        OrderStatus.REJECTED,
-        OrderStatus.FAILED,
-        OrderStatus.EXPIRED,
-    },
-    OrderStatus.REJECTED: {
-        OrderStatus.PARTIALLY_FILLED,
-        OrderStatus.FILLED,
-        OrderStatus.CANCELLED,
-        OrderStatus.REJECTED,
-        OrderStatus.FAILED,
-        OrderStatus.EXPIRED,
-    },
-    OrderStatus.FAILED: {
-        OrderStatus.PARTIALLY_FILLED,
-        OrderStatus.FILLED,
-        OrderStatus.CANCELLED,
-        OrderStatus.REJECTED,
-        OrderStatus.FAILED,
-        OrderStatus.EXPIRED,
-    },
-    OrderStatus.EXPIRED: {
-        OrderStatus.PARTIALLY_FILLED,
-        OrderStatus.FILLED,
-        OrderStatus.CANCELLED,
-        OrderStatus.REJECTED,
-        OrderStatus.FAILED,
-        OrderStatus.EXPIRED,
-    },
+    OrderStatus.CANCELLED: {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED},
+    OrderStatus.REJECTED: {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED},
+    OrderStatus.FAILED: {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED},
+    OrderStatus.EXPIRED: {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED},
 }
 
 OPEN_STATUSES: frozenset[OrderStatus] = frozenset(
@@ -437,11 +409,11 @@ class OrderTracker:
     async def mark_terminal(self, order_id: str, status: str) -> None:
         """주문을 종료 상태로 표기 (취소/거부/실패/만료).
 
-        이미 ``filled`` 인 주문은 덮어쓰지 않는다 (체결 완료가 우선).
+        이미 종결된 주문은 덮어쓰지 않는다 (첫 종결이 우선).
 
         DB write 후 ``_evict_open_cache`` 로 캐시에서 제거(terminal 은 open
         이 아니므로). **외부 ``Database.transaction()`` 안에서 호출 금지(자체 commit
-        소유)**. 이미 ``filled`` 였던 주문은 캐시에 없으므로 evict 가 no-op 이고,
+        소유)**. 이미 종결됐던 주문은 캐시에 없으므로 evict 가 no-op 이고,
         non-terminal 이었던 주문만 제거된다.
         """
         if status not in TERMINAL_STATUSES:
@@ -449,8 +421,8 @@ class OrderTracker:
         await self._db.execute(
             """UPDATE order_tracker
                   SET status = ?, terminal_at = datetime('now')
-                WHERE order_id = ? AND status != ?""",
-            (status, order_id, OrderStatus.FILLED),
+                WHERE order_id = ? AND status IN (?, ?)""",
+            (status, order_id, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED),
         )
         self._evict_open_cache(order_id)
 
