@@ -521,6 +521,49 @@ class TestFailureAfterStopRollsBack:
         assert (await _next_order(orders, 1)).symbol == "AAA"
 
 
+class _RecordingRules:
+    def __init__(self) -> None:
+        self.removed: list[str] = []
+        self.loaded: list[str] = []
+
+    def remove_strategy_rules(self, strategy_id: str) -> None:
+        self.removed.append(strategy_id)
+
+    def load_strategy_rules_from_config(self, strategy_id: str, configs) -> None:
+        self.loaded.append(strategy_id)
+
+
+class TestAssignWhenOldOnStopFails:
+    """옛 전략의 on_stop 이 실패하면 배정은 중단되고 봇은 정지한다 (#2697)."""
+
+    async def test_assign_stops_bot_removes_old_rules_and_raises(
+        self, manager, ctx, db, orders, strategies, tmp_path
+    ):
+        _, b = strategies
+        failing_source = _probe_source("ProbeF", "strat_f", "AAA").replace(
+            "        type(self).stops += 1\n",
+            "        type(self).stops += 1\n"
+            '        raise RuntimeError("on_stop failed")\n',
+        )
+        f = await _register(db, tmp_path, failing_source, "f")
+        rules = _RecordingRules()
+        manager._rule_engine = rules
+        bot = await _running_on_a(manager, ctx, db, orders, f)
+        old = bot.strategy
+
+        with pytest.raises(RuntimeError) as exc:
+            await manager.assign_strategy("bot1", b)
+
+        assert type(exc.value) is RuntimeError
+        assert str(exc.value) == "on_stop failed"
+        assert type(old).stops == 1
+        assert bot.status == BotStatus.STOPPED
+        _assert_bound(bot, f, "strat_f")
+        assert bot.strategy is old
+        assert rules.removed == [f]
+        assert await _db_strategy_ids(db) == (f, f)
+
+
 def _assert_bound(bot, strategy_id: str, name: str) -> None:
     assert bot.config.strategy_id == strategy_id
     assert bot._bound_strategy_id == strategy_id
@@ -776,3 +819,92 @@ class TestSwitchRacingDelete:
         assert bot.config.interval_seconds == 60
         assert bot.status == BotStatus.DELETED
         assert manager.get_bot("bot1") is None
+
+
+class TestStartRacingDelete:
+    """삭제가 진행되는 사이에 시작·재개가 봇을 다시 띄우지 않는다 (#2883)."""
+
+    @pytest.mark.parametrize("hard", [False, True])
+    @pytest.mark.parametrize(
+        ("path", "initial"),
+        [
+            ("start_bot", BotStatus.RUNNING),
+            ("start_bot", BotStatus.ERROR),
+            ("resume_bot", BotStatus.RUNNING),
+            ("resume_bot", BotStatus.ERROR),
+        ],
+    )
+    async def test_start_path_rejects_bot_being_deleted(
+        self,
+        manager,
+        ctx,
+        db,
+        orders,
+        eventbus,
+        strategies,
+        monkeypatch,
+        path,
+        initial,
+        hard,
+    ):
+        a, _ = strategies
+        if initial == BotStatus.RUNNING:
+            bot = await _running_on_a(manager, ctx, db, orders, a)
+        else:
+            bot = await _create(manager, ctx, db, a)
+            bot.status = BotStatus.ERROR
+        manager._restart_counts["bot1"] = 2
+        started = _started_events(eventbus)
+        seen_status: list[BotStatus] = []
+        raised: list[BaseException] = []
+
+        async def _start_during_delete(target):
+            seen_status.append(target.status)
+            try:
+                await getattr(manager, path)("bot1")
+            except Exception as exc:
+                raised.append(exc)
+
+        monkeypatch.setattr(manager, "_liquidate_positions", _start_during_delete)
+        generation = bot._generation
+        await manager.delete_bot("bot1", handle_positions="liquidate", hard=hard)
+
+        expected_seen = (
+            BotStatus.STOPPED if initial == BotStatus.RUNNING else BotStatus.ERROR
+        )
+        assert seen_status == [expected_seen]
+        assert [type(e) for e in raised] == [BotNotFoundError]
+        assert started == []
+        assert bot._generation == generation
+        assert bot._task is None or bot._task.done()
+        assert bot.status == BotStatus.DELETED
+        assert manager.get_bot("bot1") is None
+        assert manager._restart_counts.get("bot1") == 2
+        row = await _db_row(db)
+        if hard:
+            assert row is None
+        else:
+            assert row["status"] == "deleted"
+
+    @pytest.mark.parametrize("path", ["start_bot", "resume_bot"])
+    async def test_bot_left_by_failed_delete_accepts_start(
+        self, manager, ctx, db, orders, eventbus, strategies, monkeypatch, path
+    ):
+        a, _ = strategies
+        bot = await _running_on_a(manager, ctx, db, orders, a)
+
+        async def _fail_liquidate(target):
+            raise RuntimeError("liquidate down")
+
+        monkeypatch.setattr(manager, "_liquidate_positions", _fail_liquidate)
+        with pytest.raises(RuntimeError, match="liquidate down"):
+            await manager.delete_bot("bot1", handle_positions="liquidate")
+        monkeypatch.undo()
+        assert manager.get_bot("bot1") is bot
+        assert bot.status == BotStatus.STOPPED
+        started = _started_events(eventbus)
+
+        await getattr(manager, path)("bot1")
+
+        assert bot.status == BotStatus.RUNNING
+        assert len(started) == 1

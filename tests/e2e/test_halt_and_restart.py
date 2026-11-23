@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from tests.e2e.harness import DaemonHarness, wait_until
+from tests.e2e.harness import DaemonHarness, run_json_command, wait_until
 
 STRATEGY_PATH = Path(__file__).resolve().parent / "strategies" / "limit_buy_once.py"
 BOT_ID = "e2e-lifecycle"
@@ -129,6 +129,7 @@ def test_restart_preserves_budget_and_ledger(daemon: DaemonHarness) -> None:
     assert fills["total"] == 1, fills
     stopped = daemon.cli("bot", "stop", BOT_ID)
     assert stopped["data"]["bot"]["status"] == "stopped"
+    bot_before = daemon.cli("bot", "info", BOT_ID)["data"]
     before = _funds(daemon)
     assert before["budget"]["reserved"] == 0
     assert before["budget"]["spent"] > 0
@@ -143,4 +144,32 @@ def test_restart_preserves_budget_and_ledger(daemon: DaemonHarness) -> None:
     assert after == before
     assert after["budget"]["reserved"] == 0
     assert after["treasury"]["total_reserved"] == 0
+    _assert_bot_restored(daemon, bot_before)
     _stop_and_check_network(daemon)
+
+
+def _assert_bot_restored(daemon: DaemonHarness, before: dict[str, Any]) -> None:
+    restored = daemon.cli("bot", "info", BOT_ID)["data"]
+    assert restored["status"] == "created"
+    for key in ("strategy_id", "account_id", "name", "config"):
+        assert restored[key] == before[key], key
+    listed = daemon.cli("bot", "list")["data"]["bots"]
+    assert [b["bot_id"] for b in listed] == [BOT_ID]
+    duplicate = run_json_command(
+        daemon.cli_argv(
+            "bot",
+            "create",
+            "--name",
+            "dup",
+            "--strategy",
+            before["strategy_id"],
+            "--account",
+            "test",
+            "--id",
+            BOT_ID,
+        ),
+        env=daemon.env(),
+        cwd=daemon.work_dir,
+        expect_failure=True,
+    )
+    assert duplicate.payload["code"] == "BOT_ALREADY_EXISTS"

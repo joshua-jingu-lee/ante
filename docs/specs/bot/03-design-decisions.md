@@ -114,8 +114,17 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 | `change_strategy` | `bot_id: str, strategy_id: str` | `None` | 중지 상태 봇의 전략 ID와 실행 코드 교체(아래 「전략 교체」). RUNNING·STOPPING이면 `BotError` 발생 |
 | `resume_bot` | `bot_id: str` | `None` | STOPPED/ERROR 상태 봇 재시작. 에러 카운터 리셋 후 `start()` 호출. RUNNING이면 `BotError` 발생 |
 | `load_from_db` | — | `int` | DB에서 봇 설정을 읽어 메모리에 로드. deleted 제외. 반환값은 로드된 봇 수 |
+| `restore_bots` | — | `int` | 서버 부팅 때 DB의 봇을 메모리에 복원(아래 「부팅 복원」). 반환값은 복원된 봇 수 |
+
+**부팅 복원 (#2813)**: 서버 부팅 때 `restore_bots`가 `deleted`가 아닌 봇 행을 메모리에 읽어 들인다. `load_from_db`는 테스트용(가짜 전략, DB의 상태 그대로)이라 부팅에 쓰지 않는다.
+- 복원된 봇의 상태는 DB의 `status`와 관계없이 `created`다(시작하지 않은 봇 — 서버가 정지된 동안의 `running`·`stopping`은 stale이다).
+- 전략은 `create_bot`과 같은 순서로 준비한다(레지스트리 조회 → 등록된 파일에서 로드 → 계좌 exchange 검증 → 스냅샷 생성 → 스냅샷에서 로드). 삭제된 계좌의 행은 건너뛰고, 정지된 계좌의 행은 복원한다.
+- 한 행의 준비가 실패하면(전략 없음·로드 실패·계좌 없음·설정 손상 등) 그 행만 경고 로그를 남기고 건너뛴다. 건너뛴 행은 스냅샷·이벤트 구독·봇 목록에 흔적을 남기지 않는다. 그 밖의 예외는 부팅을 멈춘다.
+- 복원은 봇을 시작하지 않고, 전략별 룰 적재·시그널 키 발급·예산 변경·`bots` 행 쓰기를 하지 않는다. `auto_start`는 읽지 않는다(자동 시작은 후속 이슈).
 
 **전략 교체 (#2838)**: `assign_strategy`·`change_strategy`·`update_bot`(`strategy_id` 변경)은 봇 설정의 전략 ID와 봇이 실행하는 전략 클래스를 함께 바꾼다. 새 전략은 봇을 건드리기 전에 `create_bot`과 같은 순서로 준비한다 — 레지스트리 조회 → 등록된 파일에서 로드 → 계좌 exchange 호환 검증 → 스냅샷 생성 → 스냅샷에서 로드. 준비가 실패하면 봇의 상태·전략 ID·실행 코드·DB가 바뀌지 않고, 실행 중이던 봇은 옛 전략으로 계속 돈다. 중지한 뒤 DB 저장이 실패하면(`update_bot`은 예산 갱신이 실패해도) 전략 ID와 실행 코드를 옛 것으로 되돌리고 봇을 정지 상태로 둔다(옛 전략을 자동으로 다시 시작하지 않는다). 되돌리기 전에 봇이 그 사이 다시 시작됐으면 되돌리지 않고 원래 오류를 올린다. 이때 봇은 새 전략 ID와 그 실행 코드로 돌고, DB는 저장 실패면 옛 ID, 예산 갱신 실패면 새 ID로 남는다. 새 전략의 `on_start`가 실패하면 `start_bot`과 같이 예외를 올리고, 봇은 새 전략에 묶인 채 정지 상태로 남는다. 같은 봇의 포지션·가상 포트폴리오는 교체 뒤에도 그대로이며 새 전략이 `ctx`로 본다. 옛 전략의 미체결 주문은 봇 중지 동작을 그대로 따르며, 이 절은 그 처리를 정하지 않는다. `Bot.start`는 봇에 묶인 전략 ID와 `config.strategy_id`가 다르면 시작하지 않고 `BotError`를 낸다.
+
+**정지의 `on_stop` 실패 (#2697)**: `Bot.stop`은 전략의 `on_stop`이 예외를 내도 정지를 끝낸다 — 그 예외를 로그에 기록하고, 상태를 `stopped`로 바꾸고 `BotStoppedEvent`를 발행한 뒤, 그 예외를 그대로 호출자에게 올린다. `stop_bot`과 실행 중인 봇의 `assign_strategy`는 이때도 전략별 룰을 RuleEngine에서 제거하고 같은 예외를 올린다. `assign_strategy`는 전략을 바꾸지 않고, 봇은 옛 전략에 묶인 채 정지 상태로 남는다. 계좌 정지(`AccountSuspendedEvent`)는 한 봇의 `on_stop`이 실패해도 같은 계좌의 나머지 실행 중인 봇을 계속 멈춘다. 실행 루프의 자기 정지(연속 시그널 초과)도 `stopped`로 끝나고 `BotStoppedEvent`를 낸다. 자기 정지에서는 호출자가 없으므로 `on_stop`의 예외는 로그로만 남고, 실패를 알리는 별도의 오류 이벤트는 없다(직전의 시그널 초과 오류 이벤트는 그대로 나간다). 정지 자체가 취소될 때의 처리는 이 절이 정하지 않는다.
 
 **설계 근거**:
 
@@ -137,7 +146,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 
 4. **봇 설정 영속화 (SQLite)**
    - 봇 설정을 DB에 저장하여 이력 관리
-   - `auto_start` 플래그로 자동 재시작 여부 제어
+   - `auto_start` 플래그로 자동 재시작 여부 제어(설정 경로와 자동 시작은 후속 이슈 — 지금은 항상 0이고 부팅 복원이 읽지 않는다)
 
 ### 봇 유형별 차이: LIVE vs VIRTUAL (Account.trading_mode 기준)
 
@@ -162,7 +171,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 
 - `bots.account_id`: 소속 계좌 ID
 - `bots.config_json`: BotConfig 직렬화
-- `bots.auto_start`: 시스템 시작 시 자동 재시작
+- `bots.auto_start`: 시스템 시작 시 자동 재시작(후속 이슈 — 지금은 쓰는 코드가 없어 항상 0이고, 부팅 복원은 읽지 않는다)
 
 ### 봇 실행 흐름 (전체)
 

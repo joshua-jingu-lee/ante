@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 from enum import StrEnum
@@ -247,10 +248,7 @@ class DataGoKrSource:
             self._rate_limiter.increment_daily()
 
             try:
-                data = await asyncio.wait_for(
-                    self._do_request(session, params),
-                    timeout=REQUEST_TIMEOUT,
-                )
+                data, decode_error = await self._request_decoded(session, params)
             except (TimeoutError, aiohttp.ClientError) as exc:
                 if (
                     isinstance(exc, aiohttp.ClientResponseError)
@@ -274,7 +272,7 @@ class DataGoKrSource:
                 await asyncio.sleep(delay)
                 continue
 
-            result_code, result_msg = self._extract_result_code(data)
+            result_code, result_msg = self._response_code(data, decode_error)
             action = classify_error(result_code)
 
             if action == ErrorAction.OK:
@@ -316,6 +314,21 @@ class DataGoKrSource:
         logger.error(msg)
         raise DataGoKrError(msg) from last_error
 
+    async def _request_decoded(
+        self,
+        session: aiohttp.ClientSession,
+        params: dict[str, str],
+    ) -> tuple[Any, str | None]:
+        """요청해 응답을 돌려주고, 본문 디코드 실패는 (None, 사유)로 바꾼다."""
+        try:
+            data = await asyncio.wait_for(
+                self._do_request(session, params),
+                timeout=REQUEST_TIMEOUT,
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            return None, str(exc)[:200]
+        return data, None
+
     async def _do_request(
         self,
         session: aiohttp.ClientSession,
@@ -325,6 +338,13 @@ class DataGoKrSource:
         async with session.get(self._base_url, params=params) as resp:
             resp.raise_for_status()
             return cast("dict[str, Any]", await resp.json(content_type=None))
+
+    @classmethod
+    def _response_code(cls, data: Any, detail: str | None) -> tuple[str, str]:
+        """응답의 resultCode를 구하고, 해석할 수 없는 응답은 99로 둔다."""
+        if isinstance(data, dict):
+            return cls._extract_result_code(data)
+        return "99", detail or f"객체가 아닌 응답: {type(data).__name__}"
 
     @staticmethod
     def _extract_result_code(data: dict[str, Any]) -> tuple[str, str]:
