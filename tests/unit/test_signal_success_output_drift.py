@@ -13,9 +13,9 @@ callsite 의 envelope shape 사이의 drift 를 lock 한다.
 
 ``signal connect`` 는 bidirectional JSON Lines stream 채널을 stdin/stdout
 위로 수립한다 (long-running / streaming). ``fmt.success`` / ``fmt.output``
-단일 envelope dump 는 *발생하지 않는다*. validation 실패 분기 (``_fail``)
-만 JSON 모드에서 ``fmt.error(msg, code=...)`` envelope 을 dump 하고 즉시
-SystemExit 한다. success-output drift test 의 일반 envelope 매칭 scope 밖이며,
+단일 envelope dump 는 *발생하지 않는다*. 연결 실패는 IPC 예외로 올라가
+진입점 훅이 JSON 모드에서 error envelope 을 dump 한다 (#2762). success-output
+drift test 의 일반 envelope 매칭 scope 밖이며,
 본 모듈은 registry envelope 분류기 sanity 만 lock.
 
 #2338 마이그레이션: ``signal connect`` 가 데몬-위임 thin IPC relay 로 재작성
@@ -23,14 +23,14 @@ SystemExit 한다. success-output drift test 의 일반 envelope 매칭 scope �
 **Phase-B error frame** 으로 도착한다. 본 모듈의 invalid-key JSON drift lock
 도 in-process ``Database``/``SignalKeyManager`` patch 에서 IPC-layer mock
 (``asyncio.open_unix_connection`` + ``INVALID_SIGNAL_KEY`` Phase-B frame)으로
-repoint 한다 — relay 가 ``resp["error"]`` 를 ``_fail`` 로 flatten 해 동일한
-``fmt.error`` envelope 을 byte-identical 로 dump 함을 lock 한다.
+repoint 한다 — relay 가 ``resp["error"]`` 를 ``IPCRemoteError`` 로 올려 진입점
+훅이 동일한 error envelope 을 byte-identical 로 dump 함을 lock 한다 (#2762).
 
 3 시나리오 (registry sanity +1 + validation error envelope +1 + connect
 가 fmt.success 를 호출하지 않음 +1):
 
 0. registry sanity — signal 1 entry 의 envelope 분류기 범위 내.
-1. invalid key → ``fmt.error`` envelope (``{status: "error", code:
+1. invalid key → error envelope (``{status: "error", code:
    "INVALID_SIGNAL_KEY", message: ...}``) — JSON 모드 stdout, exit 1.
 2. signal.py source 가 ``fmt.success`` / ``fmt.output`` 을 호출하지 않음 —
    stream leaf 이므로 success envelope 부재가 정상 (raw_legacy 분류 의도와
@@ -149,15 +149,15 @@ def _load_json_payload(output: str) -> Any:
     return obj
 
 
-# ── 1. validation error envelope (invalid key) — fmt.error envelope ─────
+# ── 1. validation error envelope (invalid key) — 진입점 훅 envelope ─────
 
 
 def test_signal_connect_invalid_key_emits_error_envelope(tmp_path: Path) -> None:
-    """``signal connect`` invalid key: ``fmt.error`` JSON envelope 발화.
+    """``signal connect`` invalid key: 진입점 훅의 JSON error envelope 발화.
 
     #2338 데몬-위임 relay: invalid key 는 데몬 Phase-B error frame
     (``{status:error, error:{code:INVALID_SIGNAL_KEY, message:...}}``)으로
-    도착하고, relay 가 이를 ``_fail`` 로 flatten 해 JSON 모드 stdout 으로
+    도착하고, relay 가 이를 ``IPCRemoteError`` 로 올려 진입점 훅이 JSON 모드 stdout 으로
     ``{status:error, code, message}`` envelope 을 dump 하고 exit 1.
 
     본 시나리오는 success-output drift 의 일반 envelope 매칭 scope 밖이지만,
@@ -231,7 +231,7 @@ def test_signal_connect_invalid_key_emits_error_envelope(tmp_path: Path) -> None
     # invalid key 분기는 exit 1.
     assert result.exit_code == 1, result.stdout
 
-    # JSON envelope 는 stdout 에 dump 된다 (fmt.error).
+    # JSON envelope 는 진입점 훅이 stdout 에 dump 한다.
     payload_out = _load_json_payload(result.stdout)
     assert isinstance(payload_out, dict)
     assert payload_out.get("status") == "error"
@@ -268,9 +268,13 @@ def test_signal_connect_source_does_not_emit_fmt_success_or_output() -> None:
         "분류 (raw_legacy) 와 충돌한다. registry envelope 을 갱신하거나 "
         "callsite 를 다시 stream-only 로 되돌리라."
     )
-    # fmt.error 만 발화 (validation 실패 경로).
-    assert "fmt.error(" in body, (
-        "signal.py 가 ``fmt.error(`` 를 호출하지 않는다 — validation 실패 "
-        "envelope (test_signal_connect_invalid_key_emits_error_envelope) 도 "
-        "drift 했을 가능성. registry / callsite 정합을 확인하라."
+    # 실패 envelope 은 진입점 훅이 낸다 (#2762): signal.py 는 예외만 올린다.
+    assert "fmt.error(" not in body, (
+        "signal.py 가 ``fmt.error(`` 를 호출한다 — 연결 실패는 IPC 예외로 "
+        "올려 진입점 훅이 envelope 을 내야 한다 (#2762)."
+    )
+    assert 'raise IPCRemoteError(err["code"], err["message"])' in body, (
+        "signal.py 가 데몬 거부를 ``IPCRemoteError`` 로 올리지 않는다 — "
+        "test_signal_connect_invalid_key_emits_error_envelope 의 envelope 도 "
+        "drift 했을 가능성 (#2762)."
     )

@@ -29,6 +29,8 @@ from ante.bot.manager import BotManager
 from ante.bot.signal_channel_registry import SignalChannelRegistry
 from ante.cli.commands.signal import _run_connect
 from ante.cli.formatter import OutputFormatter
+from ante.contracts.helpers import error_spec_for_exception
+from ante.contracts.ipc_client_errors import IPCRemoteError
 from ante.core.database import Database
 from ante.core.registry import ServiceRegistry
 from ante.eventbus.bus import EventBus
@@ -236,9 +238,11 @@ async def test_cli_relay_invalid_key_rejected_no_bot_not_found(
     ctx = _make_ctx("text")
 
     try:
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(IPCRemoteError) as exc_info:
             await _drive_run_connect(ctx, socket_path, "sk_wrong")
     finally:
         await h.teardown()
 
-    assert exc_info.value.code == 1
+    assert type(exc_info.value) is IPCRemoteError
+    assert exc_info.value.code == "INVALID_SIGNAL_KEY"
+    assert error_spec_for_exception(exc_info.value).exit_code == 1
