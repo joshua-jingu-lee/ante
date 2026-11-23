@@ -499,8 +499,9 @@ def account_list(ctx: click.Context, status_filter: str | None) -> CommandResult
     rows = _run(_do_list())
 
     if not rows:
-        empty = {"message": "등록된 계좌가 없습니다.", "accounts": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "등록된 계좌가 없습니다."
+        empty = {"message": message, "accounts": []}
+        return CommandResult(data=empty, text=(message,))
 
     columns = ["account_id", "name", "exchange", "currency", "broker_type", "status"]
     return CommandResult(
@@ -660,8 +661,9 @@ def account_credentials(ctx: click.Context, account_id: str) -> CommandResult:
     masked = _run(_do_credentials())
 
     if not masked:
-        empty = {"message": "등록된 인증 정보가 없습니다.", "credentials": {}}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "등록된 인증 정보가 없습니다."
+        empty = {"message": message, "credentials": {}}
+        return CommandResult(data=empty, text=(message,))
 
     return CommandResult(
         data={"account_id": account_id, "credentials": masked},
@@ -741,7 +743,7 @@ def account_set_credentials(
                     )
                 msg = f"브로커 '{acct.broker_type}'에는 인증 정보가 필요하지 않습니다."
                 payload = {"message": msg}
-                return CommandResult(data=payload, text=(str(payload),))
+                return CommandResult(data=payload, text=(msg,))
 
             if not (credentials_direct or credentials_env or credentials_file):
                 required = list(preset.required_credentials)
