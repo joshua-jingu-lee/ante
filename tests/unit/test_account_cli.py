@@ -927,7 +927,7 @@ class TestAccountStateTransitions:
 
     def test_suspend(self) -> None:
         """계좌 정지 (IPC 전환)."""
-        mock_response = {"status": "ok", "data": {}}
+        mock_response = {"id": "t", "status": "ok", "result": {}}
 
         with patch(
             "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
@@ -948,7 +948,7 @@ class TestAccountStateTransitions:
 
     def test_activate(self) -> None:
         """계좌 활성화 (IPC 전환)."""
-        mock_response = {"status": "ok", "data": {}}
+        mock_response = {"id": "t", "status": "ok", "result": {}}
 
         with patch(
             "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
@@ -1610,7 +1610,7 @@ def _bytes_case_invoke(branch: str, mode: str, svc: AsyncMock) -> Any:
             patch("ante.cli.commands.ipc_helpers.IPCClient", autospec=True)
         )
         mock_client = AsyncMock()
-        mock_client.send.return_value = {"status": "ok", "data": {}}
+        mock_client.send.return_value = {"id": "t", "status": "ok", "result": {}}
         mock_cls.return_value = mock_client
         if branch == "set_credentials_not_required":
             stack.enter_context(patch("ante.account.presets.BROKER_PRESETS", {}))
