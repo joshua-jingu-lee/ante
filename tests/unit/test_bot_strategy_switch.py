@@ -16,7 +16,7 @@ import pytest
 
 from ante.account.models import Account, AccountStatus
 from ante.bot import BotConfig, BotManager, BotStatus
-from ante.bot.exceptions import BotError, BotNotAcceptingSignals
+from ante.bot.exceptions import BotError, BotNotAcceptingSignals, BotStateConflict
 from ante.bot.signal_key import SignalKeyManager
 from ante.core import Database
 from ante.eventbus import EventBus
@@ -514,3 +514,94 @@ class TestFailureAfterStopRollsBack:
         assert await _db_strategy_ids(db) == (a, a)
         await manager.start_bot("bot1")
         assert (await _next_order(orders, 1)).symbol == "AAA"
+
+
+def _assert_bound(bot, strategy_id: str, name: str) -> None:
+    assert bot.config.strategy_id == strategy_id
+    assert bot._bound_strategy_id == strategy_id
+    assert type(bot.strategy).meta.name == name
+
+
+class TestRollbackRacingStart:
+    """되돌리는 사이에 봇이 시작되면 되돌리지 않고 원래 오류를 올린다."""
+
+    async def test_assign_save_failure_while_started(
+        self, manager, ctx, db, orders, strategies, monkeypatch
+    ):
+        a, b = strategies
+        bot = await _running_on_a(manager, ctx, db, orders, a)
+
+        async def _start_then_fail(config):
+            await manager.start_bot("bot1")
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr(manager, "_save_bot_config", _start_then_fail)
+        with pytest.raises(RuntimeError, match="db down"):
+            await manager.assign_strategy("bot1", b)
+        monkeypatch.undo()
+
+        assert bot.status == BotStatus.RUNNING
+        _assert_bound(bot, b, "strat_b")
+        assert await _db_strategy_ids(db) == (a, a)
+
+    async def test_update_save_failure_while_started(
+        self, manager, ctx, db, orders, strategies, monkeypatch
+    ):
+        a, b = strategies
+        bot = await _running_on_a(manager, ctx, db, orders, a)
+        await manager.stop_bot("bot1")
+
+        async def _start_then_fail(config):
+            await manager.start_bot("bot1")
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr(manager, "_save_bot_config", _start_then_fail)
+        with pytest.raises(RuntimeError, match="db down"):
+            await manager.update_bot("bot1", strategy_id=b)
+        monkeypatch.undo()
+
+        assert bot.status == BotStatus.RUNNING
+        _assert_bound(bot, b, "strat_b")
+        assert await _db_strategy_ids(db) == (a, a)
+
+    async def test_update_budget_failure_while_started(
+        self, manager, ctx, db, orders, strategies
+    ):
+        a, b = strategies
+        bot = await _running_on_a(manager, ctx, db, orders, a)
+        await manager.stop_bot("bot1")
+
+        class _StartingTreasury:
+            def get(self, account_id):
+                return self
+
+            async def update_budget(self, bot_id, amount):
+                await manager.start_bot(bot_id)
+                raise RuntimeError("treasury down")
+
+        manager._treasury_manager = _StartingTreasury()
+        with pytest.raises(RuntimeError, match="treasury down"):
+            await manager.update_bot("bot1", strategy_id=b, budget=1000)
+
+        assert bot.status == BotStatus.RUNNING
+        _assert_bound(bot, b, "strat_b")
+        assert await _db_strategy_ids(db) == (b, b)
+
+
+class TestStoppingRefusesSwitch:
+    @pytest.mark.parametrize("path", ["assign_strategy", "change_strategy"])
+    async def test_stopping_bot_refuses_switch(
+        self, manager, ctx, db, orders, strategies, path
+    ):
+        a, b = strategies
+        bot = await _running_on_a(manager, ctx, db, orders, a)
+        await manager.stop_bot("bot1")
+        bot.status = BotStatus.STOPPING
+
+        with pytest.raises(BotStateConflict):
+            await getattr(manager, path)("bot1", b)
+
+        assert bot.config.strategy_id == a
+        assert bot._bound_strategy_id == a
+        assert type(bot.strategy).meta.name == "strat_a"
+        assert await _db_strategy_ids(db) == (a, a)

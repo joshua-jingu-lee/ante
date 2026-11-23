@@ -466,9 +466,14 @@ class BotManager:
             try:
                 await self._save_bot_config(new_config)
             except (Exception, asyncio.CancelledError):
-                if new_strategy_cls is not None and bot.config is new_config:
+                if (
+                    new_strategy_cls is not None
+                    and bot.config is new_config
+                    and self._restore_strategy(
+                        bot, old_config.strategy_id, old_strategy_cls
+                    )
+                ):
                     bot.config = old_config
-                    bot.rebind_strategy(old_config.strategy_id, old_strategy_cls)
                 raise
 
             if new_budget is not None:
@@ -489,28 +494,10 @@ class BotManager:
                     await treasury.update_budget(bot_id, new_budget)
                 except (Exception, asyncio.CancelledError):
                     if bot.config is new_config and bot.config == committed_snapshot:
-                        bot.config = old_config
-                        if new_strategy_cls is not None:
-                            bot.rebind_strategy(
-                                old_config.strategy_id, old_strategy_cls
-                            )
-                        if self._bots.get(bot_id) is bot:
-                            try:
-                                await self._save_bot_config(old_config)
-                            except Exception:
-                                logger.exception(
-                                    "update_bot rollback DB save failed for "
-                                    "bot_id=%s; memory was rolled back but DB "
-                                    "may diverge.",
-                                    bot_id,
-                                )
-                        else:
-                            logger.warning(
-                                "update_bot rollback DB save skipped for "
-                                "bot_id=%s: bot instance no longer in manager "
-                                "(delete/recreate race).",
-                                bot_id,
-                            )
+                        if new_strategy_cls is None or self._restore_strategy(
+                            bot, old_config.strategy_id, old_strategy_cls
+                        ):
+                            await self._rollback_update(bot, old_config)
                     elif bot.config is not new_config:
                         logger.warning(
                             "update_bot rollback skipped for bot_id=%s: "
@@ -875,9 +862,45 @@ class BotManager:
         try:
             await self._save_bot_config(bot.config)
         except (Exception, asyncio.CancelledError):
-            bot.rebind_strategy(old_strategy_id, old_strategy_cls)
-            bot.config.strategy_id = old_strategy_id
+            if self._restore_strategy(bot, old_strategy_id, old_strategy_cls):
+                bot.config.strategy_id = old_strategy_id
             raise
+
+    async def _rollback_update(self, bot: Bot, old_config: BotConfig) -> None:
+        """``update_bot``의 메모리 설정을 되돌리고 DB에도 옛 설정을 저장한다."""
+        bot.config = old_config
+        if self._bots.get(bot.bot_id) is not bot:
+            logger.warning(
+                "update_bot rollback DB save skipped for "
+                "bot_id=%s: bot instance no longer in manager "
+                "(delete/recreate race).",
+                bot.bot_id,
+            )
+            return
+        try:
+            await self._save_bot_config(old_config)
+        except Exception:
+            logger.exception(
+                "update_bot rollback DB save failed for "
+                "bot_id=%s; memory was rolled back but DB "
+                "may diverge.",
+                bot.bot_id,
+            )
+
+    def _restore_strategy(
+        self, bot: Bot, strategy_id: str, strategy_cls: type[Strategy]
+    ) -> bool:
+        """옛 전략으로 되돌린다. 그 사이 봇이 시작됐으면 되돌리지 않고 False."""
+        try:
+            bot.rebind_strategy(strategy_id, strategy_cls)
+        except BotStateConflict:
+            logger.warning(
+                "전략 되돌림 생략: 봇 %s가 그 사이 시작됨 (설정·실행 코드는 %s)",
+                bot.bot_id,
+                bot.config.strategy_id,
+            )
+            return False
+        return True
 
     def _load_strategy_rules(self, strategy_id: str) -> None:
         """설정에서 전략별 룰을 RuleEngine에 로드."""
