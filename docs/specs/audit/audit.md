@@ -18,9 +18,7 @@ Audit 모듈은 **멤버(사용자/에이전트) 액션의 감사 로그를 기�
 
 ### 생성자
 
-```python
-AuditLogger(db: Database)
-```
+정의: `ante.audit.logger.AuditLogger` (코드가 정본이다).
 
 ### 퍼블릭 메서드
 
