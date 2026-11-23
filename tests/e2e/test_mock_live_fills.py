@@ -66,7 +66,8 @@ class LimitBuyOnce(Strategy):
 '''
 BUDGET = 500_000
 SUBMIT_DEADLINE_SECONDS = 30.0
-POLL_MARGIN_SECONDS = 30.0
+POLL_MARGIN_SECONDS = 60.0
+MIN_FILL_WAIT_SECONDS = 10.0
 POLL_SETTLE_SECONDS = 10.0
 DELAY_POLLS = 2
 BALANCE_SYNC_DEADLINE_SECONDS = 20.0
@@ -157,9 +158,9 @@ def _reconcile(daemon: DaemonHarness, case: LiveCase) -> dict[str, Any]:
 
 
 def _fill_deadline(observed_at: float, polls: int) -> float:
-    """예약이 보인 시각부터 ``polls``번째 폴까지 남은 기한(초)."""
+    """예약이 보인 시각부터 ``polls``번째 폴까지 남은 기한(초, 하한 있음)."""
     deadline = observed_at + polls * DEFAULT_POLL_INTERVAL + POLL_MARGIN_SECONDS
-    return deadline - time.monotonic()
+    return max(deadline - time.monotonic(), MIN_FILL_WAIT_SECONDS)
 
 
 def test_mock_live_fill_modes(daemon: DaemonHarness) -> None:
