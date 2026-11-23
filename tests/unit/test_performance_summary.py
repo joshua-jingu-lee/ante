@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import json
+import re
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 from click.testing import CliRunner
 
 from ante.cli.main import cli
+from ante.core.database import OperationalError
 from ante.member.models import Member, MemberRole, MemberType
-from ante.trade.models import DailySummary, MonthlySummary
+from ante.trade.models import (
+    DailySummary,
+    MonthlySummary,
+    TradeRecord,
+    TradeStatus,
+)
 from ante.trade.performance import PerformanceTracker
 from tests.unit._async_test_utils import asyncio_run_returning
 
@@ -449,3 +458,111 @@ class TestSummaryStrategyIdFilter:
         query, params = db.fetch_all.call_args[0]
         assert "t.strategy_id = ?" not in query
         assert "strat-1" not in params
+
+
+_MISSING_TABLE = "no such table: trades"
+_RAISED_MESSAGES = [
+    pytest.param("database is locked", id="locked"),
+    pytest.param("disk I/O error", id="io"),
+    pytest.param("no such column: ph.pnl", id="no-column"),
+]
+
+
+async def _summary_daily(tracker: PerformanceTracker) -> object:
+    return await tracker.get_daily_summary()
+
+
+async def _summary_weekly(tracker: PerformanceTracker) -> object:
+    return await tracker.get_weekly_summary()
+
+
+async def _summary_monthly(tracker: PerformanceTracker) -> object:
+    return await tracker.get_monthly_summary()
+
+
+async def _filled_trades(tracker: PerformanceTracker) -> object:
+    return await tracker._get_filled_trades(account_id="acc-test")
+
+
+_FETCH_ALL_SITES = [
+    pytest.param(_summary_daily, id="daily"),
+    pytest.param(_summary_weekly, id="weekly"),
+    pytest.param(_summary_monthly, id="monthly"),
+    pytest.param(_filled_trades, id="filled-trades"),
+]
+
+
+def _sell_trade(commission: float) -> TradeRecord:
+    return TradeRecord(
+        trade_id=uuid4(),
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        symbol="005930",
+        side="sell",
+        quantity=10.0,
+        price=70000.0,
+        status=TradeStatus.FILLED,
+        commission=commission,
+        timestamp=datetime(2026, 3, 23, 11, 0, 0),
+        account_id="acc-test",
+    )
+
+
+class TestOperationalErrorOnlyMissingTableIsEmpty:
+    """테이블 없음만 빈 결과로 보고 그 밖의 OperationalError는 올린다 (#2660)."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("site", _FETCH_ALL_SITES)
+    async def test_missing_table_is_empty(self, site):
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(side_effect=OperationalError(_MISSING_TABLE))
+
+        assert await site(PerformanceTracker(db)) == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("message", _RAISED_MESSAGES)
+    @pytest.mark.parametrize("site", _FETCH_ALL_SITES)
+    async def test_other_operational_error_is_raised(self, site, message):
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(side_effect=OperationalError(message))
+
+        with pytest.raises(OperationalError, match=f"^{re.escape(message)}$"):
+            await site(PerformanceTracker(db))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("commission", "expected"),
+        [
+            pytest.param(150.0, -150.0, id="commission"),
+            pytest.param(0.0, 0.0, id="zero"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "message",
+        [
+            pytest.param(_MISSING_TABLE, id="trades"),
+            pytest.param("no such table: position_history", id="position-history"),
+        ],
+    )
+    async def test_pnl_missing_table_counts_commission_only(
+        self, message, commission, expected
+    ):
+        db = AsyncMock()
+        db.fetch_one = AsyncMock(side_effect=OperationalError(message))
+
+        pnl = await PerformanceTracker(db)._calculate_pnl_per_trade(
+            [_sell_trade(commission)], "bot-1"
+        )
+
+        assert pnl == [expected]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("message", _RAISED_MESSAGES)
+    async def test_pnl_other_operational_error_is_raised(self, message):
+        db = AsyncMock()
+        db.fetch_one = AsyncMock(side_effect=OperationalError(message))
+
+        with pytest.raises(OperationalError, match=f"^{re.escape(message)}$"):
+            await PerformanceTracker(db)._calculate_pnl_per_trade(
+                [_sell_trade(150.0)], "bot-1"
+            )
