@@ -298,6 +298,100 @@ def test_rename_doc_to_non_doc_requires_review(repo: Repo) -> None:
     assert "review\tR\tdocs/moved.md -> scripts/moved.md" in result.stdout
 
 
+# ── 독스트링 줄 수 ──────────────────────────────────────────────
+
+NO_DOC = "def f():\n    return 1\n"
+ONE_LINE = 'def f():\n    """One."""\n    return 1\n'
+TWO_LINES = 'def f():\n    """One.\n\n    Two."""\n    return 1\n'
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        pytest.param(NO_DOC, ONE_LINE, False, id="added"),
+        pytest.param(ONE_LINE, TWO_LINES, False, id="lengthened"),
+        pytest.param(TWO_LINES, ONE_LINE, True, id="shortened"),
+        pytest.param(ONE_LINE, NO_DOC, True, id="removed"),
+        pytest.param(ONE_LINE, ONE_LINE.replace("One", "Other"), True, id="same"),
+        pytest.param(
+            '"""M."""\n' + TWO_LINES,
+            '"""M.\n\nMore."""\n' + ONE_LINE,
+            True,
+            id="swap-in-file",
+        ),
+    ],
+)
+def test_docstring_lines_not_grown(old: str, new: str, expected: bool) -> None:
+    assert scope.docstring_lines_not_grown(old.encode(), new.encode()) is expected
+
+
+def test_docstring_lines_load_failure_is_not_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scope, "CHECK_COMMENTS_PATH", tmp_path / "missing.py")
+    assert not scope.docstring_lines_not_grown(ONE_LINE.encode(), ONE_LINE.encode())
+    assert "_check_review_scope_comments" not in sys.modules
+
+
+def test_docstring_added_to_existing_function_requires_review(repo: Repo) -> None:
+    _with_src(repo, NO_DOC)
+    repo.write("src/ante/m.py", ONE_LINE)
+    repo.commit("add docstring")
+    result = repo.check()
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "review\tM\tsrc/ante/m.py" in result.stdout
+
+
+def test_docstring_lengthened_requires_review(repo: Repo) -> None:
+    _with_src(repo, ONE_LINE)
+    repo.write("src/ante/m.py", TWO_LINES)
+    repo.commit("lengthen docstring")
+    result = repo.check()
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "review\tM\tsrc/ante/m.py" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        pytest.param(TWO_LINES, ONE_LINE, id="shortened"),
+        pytest.param(ONE_LINE, ONE_LINE.replace("One", "Other"), id="content-only"),
+    ],
+)
+def test_docstring_not_lengthened_is_ast_identical(
+    repo: Repo, old: str, new: str
+) -> None:
+    _with_src(repo, old)
+    repo.write("src/ante/m.py", new)
+    repo.commit("docstring")
+    result = repo.check()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ast-identical\tM\tsrc/ante/m.py" in result.stdout
+
+
+def test_docstring_counter_missing_requires_review(repo: Repo, tmp_path: Path) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    script = tools / "check_review_scope.py"
+    script.write_bytes(SCRIPT.read_bytes())
+    (tools / "check_comments.py").write_text(
+        "def parse_baseline(text):\n    raise ValueError(text)\n", encoding="utf-8"
+    )
+    _with_src(repo)
+    repo.write("src/ante/m.py", SRC.replace("  # trailing note", ""))
+    repo.commit("drop comment")
+    result = subprocess.run(
+        [sys.executable, str(script), "--base", repo.base, "--head", "HEAD"],
+        cwd=repo.root,
+        env=repo.env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "review\tM\tsrc/ante/m.py" in result.stdout
+
+
 # ── 경계 ──────────────────────────────────────────────
 
 
