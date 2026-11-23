@@ -130,7 +130,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 
 1. **봇 유형 차이는 StrategyContext 주입으로 해결**
    - LIVE 계좌 봇: 실제 계좌 연동 PortfolioView (Treasury + Trade 경유)
-   - VIRTUAL 계좌 봇: 가상 자금 PortfolioView (독립 인메모리)
+   - VIRTUAL 계좌 봇: 가상 자금 PortfolioView (Treasury(잔고) + Trade(포지션) 경유 — 실전과 같은 정본)
    - DataProvider는 동일 — VIRTUAL 계좌도 실시간 시세 데이터를 사용
    - Bot 클래스는 하나, 주입되는 의존성만 다름
    - ContextFactory가 Account의 trading_mode를 참조하여 적절한 의존성을 주입
@@ -152,13 +152,13 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 
 | 측면 | LIVE 계좌 봇 | VIRTUAL 계좌 봇 |
 |------|-------------|----------------|
-| PortfolioView | Treasury(잔고) + Trade(포지션) 경유 | VirtualPortfolioView, 가상 자금 인메모리 관리 |
+| PortfolioView | Treasury(잔고) + Trade(포지션) 경유 | VirtualPortfolioView, Treasury(잔고) + Trade(포지션) 경유 |
 | 주문 처리 | OrderRequestEvent → RuleEngine → BrokerAdapter → 실제 주문 | OrderRequestEvent → RuleEngine → VirtualExecutor → 가상 체결 |
 | 데이터 | 실시간 시세 (API Gateway 경유) | 실시간 시세 (동일) |
-| 자금 | Treasury에서 할당받은 실제 자금 | Account 레벨에서 설정된 가상 자금 |
+| 자금 | Treasury에서 할당받은 실제 자금 | Treasury에서 할당받은 가상 자금(봇 예산) |
 | 체결 | BrokerAdapter가 실제 체결 후 OrderFilledEvent 발행 | VirtualExecutor가 즉시 가상 체결 → FillApplier direct 적용 후 OrderFilledEvent 발행 |
 | 브로커 접근 | `AccountService.get_broker(account_id)` | — (VirtualExecutor 사용) |
-| 예산 접근 | `TreasuryManager.get(account_id)` | 가상 자금 관리 |
+| 예산 접근 | `TreasuryManager.get(account_id)` | `TreasuryManager.get(account_id)` |
 
 **근거**:
 - Bot 자체는 trading_mode를 모른다. Account의 trading_mode에 따라 ContextFactory가 실행 경로를 결정
