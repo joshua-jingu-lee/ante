@@ -2,14 +2,14 @@
 
 비교 대상은 stdout과 stderr를 합친 ``result.output`` 전체다. ``set-balance``는
 서버가 가동 중일 때의 IPC 분기와 정지했을 때의 직접 실행 분기를 각각
-고정한다. 시각이 출력에 들어가는 분기는 모듈의 ``datetime``을 고정한다.
+고정한다. 시각이 출력에 들어가는 분기는 ``manual_clock``으로 시계를 고정한다.
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
 from contextlib import ExitStack, asynccontextmanager
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -31,10 +31,15 @@ _MASTER = Member(
 )
 
 
-class _FixedDatetime(datetime):
-    @classmethod
-    def now(cls, tz: tzinfo | None = None) -> _FixedDatetime:
-        return cls(2026, 1, 5, 9, 30, tzinfo=UTC)
+_NOW = datetime(2026, 1, 5, 9, 30, tzinfo=UTC)
+
+pytestmark = pytest.mark.parametrize("manual_clock", [_NOW], indirect=True)
+
+
+@pytest.fixture(autouse=True)
+def _fixed_clock(manual_clock: Any) -> Any:
+    """모듈의 모든 테스트를 ``_NOW`` 고정 시계 위에서 돌린다."""
+    return manual_clock
 
 
 def _summary(**overrides: Any) -> dict[str, Any]:
@@ -335,7 +340,6 @@ def _invoke_case(
             ("ante.cli.commands.treasury._create_treasury", _create_treasury),
             ("ante.cli.commands.treasury._create_treasury_manager", _create_manager),
             ("ante.cli.commands.treasury.open_cli_db", _open_cli_db),
-            ("ante.cli.commands.treasury.datetime", _FixedDatetime),
             ("ante.cli.commands.ipc_helpers.ipc_send", ipc_send),
             (
                 "ante.cli.cold_path.is_active_runtime",

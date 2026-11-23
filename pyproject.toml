@@ -59,14 +59,14 @@ target-version = "py313"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP", "PGH003", "PGH004", "RUF100", "RUF102"]
+select = ["E", "F", "I", "N", "W", "UP", "PGH003", "PGH004", "RUF100", "RUF102", "TID251"]
 
 [tool.ruff.lint.per-file-ignores]
-"!src/**" = ["RUF100"]
+"!src/**" = ["RUF100", "TID251"]
 "src/ante/core/clock.py" = ["TID251"]
 
-# 시각 판독은 ante.core.clock만 한다 (#2768). TID251은 아직 기본 select에 없고
-# scripts/check_lint_ratchet.py가 src/의 위반 수를 래칫으로 잰다.
+# 시각 판독은 ante.core.clock만 한다 (#2768). TID251은 기본 select에 있고
+# src/ 밖(테스트·scripts 등)에는 적용하지 않는다.
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "datetime.datetime.now" = { msg = "ante.core.clock.now(tz)를 쓴다." }
 "datetime.datetime.utcnow" = { msg = "ante.core.clock.now(UTC)를 쓴다." }

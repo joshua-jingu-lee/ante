@@ -7,7 +7,7 @@ import logging
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import click
@@ -30,6 +30,7 @@ from ante.contracts.cli_errors import (
     TreasuryAllocateFailedError,
     TreasuryDeallocateFailedError,
 )
+from ante.core import clock
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -304,7 +305,7 @@ def set_balance(ctx: click.Context, amount: float, account_id: str) -> CommandRe
             return {
                 "account_id": account_id,
                 "total_balance": t.account_balance,
-                "updated_at": datetime.now(UTC).isoformat(),
+                "updated_at": clock.now(UTC).isoformat(),
             }
 
     result = _run(_run_set_balance())
@@ -427,7 +428,7 @@ def snapshot(
     account_id: str,
 ) -> CommandResult:
     """일별 자산 스냅샷 조회."""
-    from datetime import UTC, datetime
+    from datetime import UTC
 
     fmt = get_formatter(ctx)
 
@@ -451,17 +452,17 @@ def snapshot(
             if date_str:
                 return await t.get_daily_snapshot(date_str)
             if from_date or to_date:
-                today = datetime.now(UTC).strftime("%Y-%m-%d")
+                today = clock.now(UTC).strftime("%Y-%m-%d")
                 start = from_date or "2000-01-01"
                 end = to_date or today
                 return await t.get_snapshots(start, end)
-            today = datetime.now(UTC).strftime("%Y-%m-%d")
+            today = clock.now(UTC).strftime("%Y-%m-%d")
             return await t.get_daily_snapshot(today)
 
     result = _run(_run_snapshot())
 
     if result is None:
-        target = date_str or datetime.now(UTC).strftime("%Y-%m-%d")
+        target = date_str or clock.now(UTC).strftime("%Y-%m-%d")
         raise SnapshotNotFoundError(f"{target} 날짜의 스냅샷이 없습니다.")
 
     if isinstance(result, list):
@@ -494,7 +495,7 @@ def _portfolio_value_from_snapshot_or_summary(treasury_obj: Treasury) -> dict[st
             "daily_pnl": 0.0,
             "daily_return": 0.0,
             "unrealized_pnl": 0.0,
-            "updated_at": datetime.now(UTC).isoformat(),
+            "updated_at": clock.now(UTC).isoformat(),
         }
 
     return cast("dict[str, Any]", _run(_inner()))
@@ -540,7 +541,7 @@ def portfolio_value(ctx: click.Context, account_id: str | None) -> CommandResult
                             "daily_pnl": 0.0,
                             "daily_return": 0.0,
                             "unrealized_pnl": 0.0,
-                            "updated_at": datetime.now(UTC).isoformat(),
+                            "updated_at": clock.now(UTC).isoformat(),
                         }
                     )
             total_value = sum(float(v["total_value"]) for v in values)
@@ -553,7 +554,7 @@ def portfolio_value(ctx: click.Context, account_id: str | None) -> CommandResult
                 "daily_return": daily_return,
                 "unrealized_pnl": unrealized_pnl,
                 "accounts": values,
-                "updated_at": datetime.now(UTC).isoformat(),
+                "updated_at": clock.now(UTC).isoformat(),
             }
 
         if account_id is not None:
@@ -597,10 +598,8 @@ def portfolio_history(
         )
     reject_inverted_date_range(from_date, to_date, fmt)
 
-    end_date = to_date or datetime.now(UTC).strftime("%Y-%m-%d")
-    start_date = from_date or (datetime.now(UTC) - timedelta(days=30)).strftime(
-        "%Y-%m-%d"
-    )
+    end_date = to_date or clock.now(UTC).strftime("%Y-%m-%d")
+    start_date = from_date or (clock.now(UTC) - timedelta(days=30)).strftime("%Y-%m-%d")
 
     async def _run_history() -> dict[str, Any]:
         async def _collect_history(treasuries: list[Treasury]) -> dict[str, Any]:
