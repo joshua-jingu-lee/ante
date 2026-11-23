@@ -61,7 +61,8 @@ CLI 계약의 `envelope`이 `standard`인 커맨드가 `--format json` 모드에
   `standard`와 `raw_legacy` 둘이고(`EnvelopeForm`), 명령별 값의 정본은 계약이다.
 - 계약의 `envelope`이 `standard`인 명령의 성공 출력은 CLI success envelope이다. 명령이
   결과 값(`CommandResult`)을 돌려주면 진입점 훅이 그 값으로 envelope을 한 번
-  직렬화한다. 결과 값을 돌려주는데 계약이 없거나 `envelope`이 `standard`가 아니면 훅은
+  직렬화한다. 결과 값의 `text`(text 모드의 줄)는 줄의 tuple이거나 그것을 돌려주는
+  callable이며, envelope은 `text`를 쓰지 않고 callable은 text 모드에서만 불린다. 결과 값을 돌려주는데 계약이 없거나 `envelope`이 `standard`가 아니면 훅은
   envelope을 내지 않고 `TypeError`를 낸다.
 - `data` 배치: 결과 값의 payload가 객체면 그대로 `data`다. 배열이면
   `{<계약의 data_key>: 배열}`이다. 계약의 `data_key`가 없는데 payload가 배열이면 훅은

@@ -12,7 +12,6 @@ from ante.cli._data_path import resolve_data_path
 from ante.cli._validators import validate_positive_finite_amount
 from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import CommandResult, table_lines
-from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts.cli_errors import (
     CLI_ERRORS,
@@ -86,7 +85,6 @@ def run(
     )
 
     data_path = resolve_data_path(ctx, data_path)
-    fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
 
     for label, value in (("시작일", start), ("종료일", end)):
@@ -163,8 +161,20 @@ def run(
         )
         result_dict["run_id"] = run_id
 
-        if fmt.is_json:
-            return CommandResult(data=result_dict)
+        return CommandResult(
+            data=result_dict, text=lambda: _run_text_lines(result_dict, metrics)
+        )
+
+    except CLI_ERRORS:
+        raise
+    except Exception as e:
+        raise BacktestError(str(e)) from e
+
+
+def _run_text_lines(
+    result_dict: dict[str, Any], metrics: dict[str, Any]
+) -> tuple[str, ...]:
+    try:
         lines = [
             "Run ID: {run_id}\n"
             "Strategy: {strategy}\n"
@@ -175,12 +185,9 @@ def run(
         ]
         if metrics:
             lines += table_lines(_format_metrics(metrics), ["지표", "값"])
-        return CommandResult(data=result_dict, text=tuple(lines))
-
-    except CLI_ERRORS:
-        raise
     except Exception as e:
         raise BacktestError(str(e)) from e
+    return tuple(lines)
 
 
 async def _save_backtest_run(
@@ -227,7 +234,6 @@ def history(
     db_path: str | None,
 ) -> CommandResult:
     """전략별 백테스트 실행 이력 조회."""
-    fmt = get_formatter(ctx)
 
     async def _list() -> list[dict[str, Any]]:
         from ante.backtest.run_store import BacktestRunStore
@@ -247,9 +253,7 @@ def history(
         if not rows:
             message = f"'{strategy_name}' 백테스트 이력이 없습니다."
             empty: dict[str, Any] = {"message": message, "runs": []}
-            if fmt.is_json:
-                return CommandResult(data=empty)
-            return CommandResult(data=empty, text=(message.format(**empty),))
+            return CommandResult(data=empty, text=lambda: _history_empty_text(empty))
 
         columns = [
             "run_id",
@@ -264,6 +268,13 @@ def history(
             data={"strategy_name": strategy_name, "runs": rows},
             text=tuple(table_lines(rows, columns)),
         )
+    except Exception as e:
+        raise BacktestError(str(e)) from e
+
+
+def _history_empty_text(empty: dict[str, Any]) -> tuple[str, ...]:
+    try:
+        return (empty["message"].format(**empty),)
     except Exception as e:
         raise BacktestError(str(e)) from e
 

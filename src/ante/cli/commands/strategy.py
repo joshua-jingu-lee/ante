@@ -322,7 +322,6 @@ def strategy_set_status(
 @require_scope("strategy:read")
 def strategy_info(ctx: click.Context, name: str) -> CommandResult:
     """전략 상세 정보 조회 (메타데이터 + 파라미터)."""
-    fmt = get_formatter(ctx)
 
     async def _info() -> dict[str, Any] | None:
         async with _create_registry(ctx=ctx) as (registry, _):
@@ -379,9 +378,7 @@ def strategy_info(ctx: click.Context, name: str) -> CommandResult:
     if result is None:
         raise StrategyNotFoundError(f"전략을 찾을 수 없습니다: {name}")
 
-    if fmt.is_json:
-        return CommandResult(data=result)
-    return CommandResult(data=result, text=tuple(_info_text_lines(result)))
+    return CommandResult(data=result, text=lambda: tuple(_info_text_lines(result)))
 
 
 def _info_text_lines(result: dict[str, Any]) -> Iterator[str]:

@@ -64,19 +64,34 @@ def with_cli_details(
     return exc
 
 
+def _checked_lines(text: object) -> tuple[str, ...]:
+    if isinstance(text, str):
+        raise TypeError("CommandResult.text must be a tuple of lines, not a str")
+    if not isinstance(text, tuple):
+        raise TypeError("CommandResult.text must be None or a tuple of lines")
+    if text == ():
+        raise TypeError("CommandResult.text must be None or a non-empty tuple")
+    return text
+
+
 @dataclass(frozen=True)
 class CommandResult:
     data: dict[str, Any] | list[Any] = field(default_factory=dict, repr=False)
     message: str = ""
-    text: tuple[str, ...] | None = field(default=None, repr=False)
+    text: tuple[str, ...] | Callable[[], tuple[str, ...]] | None = field(
+        default=None, repr=False
+    )
 
     def __post_init__(self) -> None:
-        if isinstance(self.text, str):
-            raise TypeError("CommandResult.text must be a tuple of lines, not a str")
-        if self.text is not None and not isinstance(self.text, tuple):
-            raise TypeError("CommandResult.text must be None or a tuple of lines")
-        if self.text == ():
-            raise TypeError("CommandResult.text must be None or a non-empty tuple")
+        if self.text is not None and not callable(self.text):
+            _checked_lines(self.text)
+
+    def text_lines(self) -> tuple[str, ...] | None:
+        if self.text is None:
+            return None
+        if callable(self.text):
+            return _checked_lines(self.text())
+        return self.text
 
 
 def table_lines(rows: list[dict[str, Any]], columns: list[str]) -> list[str]:

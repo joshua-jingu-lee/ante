@@ -10,6 +10,7 @@ import click
 
 from ante.cli._validators import reject_inverted_date_range, validate_iso_date
 from ante.cli.db_context import open_cli_db
+from ante.cli.formatter import CommandResult, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -51,7 +52,7 @@ def audit_list(
     to_date: str | None,
     limit: int,
     offset: int,
-) -> None:
+) -> CommandResult:
     """감사 로그 목록 조회."""
     fmt = get_formatter(ctx)
 
@@ -81,13 +82,10 @@ def audit_list(
     result = _run(_run_list())
 
     if not result:
-        fmt.output({"message": "감사 로그가 없습니다.", "logs": []})
-        return
+        empty: dict[str, Any] = {"message": "감사 로그가 없습니다.", "logs": []}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    if fmt.is_json:
-        fmt.output({"logs": result})
-    else:
-        fmt.table(
-            result,
-            ["id", "member_id", "action", "resource", "created_at"],
-        )
+    columns = ["id", "member_id", "action", "resource", "created_at"]
+    return CommandResult(
+        data={"logs": result}, text=lambda: tuple(table_lines(result, columns))
+    )

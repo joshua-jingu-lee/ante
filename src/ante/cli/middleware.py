@@ -136,10 +136,11 @@ def _emit_command_result(ctx: click.Context, rv: object) -> None:
             raise TypeError(f"list data from {path!r} needs a contract data_key")
         data = {contract.output.data_key: data}
     fmt: OutputFormatter = ctx.obj["formatter"]
-    if fmt.is_json or rv.text is None:
+    lines = None if fmt.is_json else rv.text_lines()
+    if lines is None:
         fmt.success(rv.message, data)
         return
-    for line in rv.text:
+    for line in lines:
         click.echo(line)
 
 

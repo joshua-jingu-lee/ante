@@ -559,5 +559,5 @@ class TestCliViewEchoesBacktestRunId:
             ],
         )
         assert view_result.exit_code == 0, view_result.output
-        view_payload = json.loads(view_result.output)
+        view_payload = json.loads(view_result.output)["data"]
         assert view_payload["backtest_run_id"] == "run-view"

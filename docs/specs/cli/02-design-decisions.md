@@ -164,9 +164,10 @@ SSOT의 CLI success/error envelope을 적용하는 표면 메서드 시그니처
 CLI 계약(`src/ante/contracts/cli_registry.py`)의 `envelope`이 `standard`이고 leaf 콜백이
 `CommandResult`(`data`·`message`·`text`)를 돌려주는 명령은 스스로 출력하지 않고, 진입점 훅(루트
 `AuthenticatedGroup.invoke`)이 한 번 직렬화한다. JSON 모드는 `success(message, data)`이고,
-text 모드는 `text`의 줄을 차례로 내며 `text`가 `None`이면 `message`를 낸다. `text`는 줄의 튜플이고,
-튜플이 아니거나(`str` 포함) 빈 튜플이면 `CommandResult`를 만들 때 `TypeError`다. `data`와 `text`는
-비밀값을 실을 수 있어 `repr`에 나타나지 않는다. `data`가 배열이면
+text 모드는 `text`의 줄을 차례로 내며 `text`가 `None`이면 `message`를 낸다. `text`는 줄의 튜플이거나
+그 튜플을 돌려주는 callable이고, callable은 text 모드에서만 한 번 불린다. 줄이 튜플이 아니거나
+(`str` 포함) 빈 튜플이면 `TypeError`다(튜플은 `CommandResult`를 만들 때, callable은 불린 뒤).
+`data`와 `text`는 비밀값을 실을 수 있어 `repr`에 나타나지 않는다. `data`가 배열이면
 `{<계약의 data_key>: 배열}`로 넣는다. `CommandResult`를 돌려주는데 계약이 없거나 `standard`가
 아니면, 또는 배열 `data`에 계약의 `data_key`가 없으면 `TypeError`다. `CommandResult`를 돌려주지
 않는 명령은 위 메서드로 직접 출력하며, 훅은 그 반환값에 아무것도 하지 않는다. 표의 text 줄은

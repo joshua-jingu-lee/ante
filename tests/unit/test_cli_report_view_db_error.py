@@ -303,7 +303,7 @@ class TestReportViewFoundUnchanged:
             )
 
         assert result.exit_code == 0, result.output
-        payload = _load_json_payload(result.output)
+        payload = _load_json_payload(result.output)["data"]
         assert payload["report_id"] == "rpt-view-1"
         assert payload["status"] == "submitted"
         assert payload["total_trades"] == 42

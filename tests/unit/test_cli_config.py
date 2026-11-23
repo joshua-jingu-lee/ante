@@ -104,7 +104,7 @@ class TestConfigGet:
         ):
             result = runner.invoke(cli, ["--format", "json", "config", "get"])
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert "configs" in data
             assert len(data["configs"]) > 0
 
@@ -123,7 +123,7 @@ class TestConfigGet:
                 cli, ["--format", "json", "config", "get", "system.log_level"]
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["key"] == "system.log_level"
             assert data["value"] == "DEBUG"
             assert data["source"] == "dynamic"
@@ -194,7 +194,7 @@ class TestConfigSet:
                 ["--format", "json", "config", "set", "custom.flag", "true"],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["status"] == "success"
             assert "success" in result.output
             assert data["key"] == "custom.flag"

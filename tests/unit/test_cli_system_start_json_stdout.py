@@ -136,6 +136,7 @@ class TestSystemStartJsonStdoutIsolation:
         payload = json.loads(result.stdout)
         assert payload["status"] == "ok"
         assert payload["message"] == "시스템 시작 중..."
+        assert payload["data"] == {}
 
     def test_text_mode_preserves_inherited_child_streams(self, runner):
         """R2 (sanity) — text 모드: ``subprocess.run`` 호출에 stdout/stderr
