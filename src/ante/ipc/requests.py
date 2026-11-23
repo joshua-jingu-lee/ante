@@ -112,7 +112,7 @@ class AccountActivateRequest(IPCRequest):
 
 class MemberUpdateScopesRequest(IPCRequest):
     member_id: str
-    scopes: list[str] = []
+    scopes: list[str]
 
 
 class MemberRegisterRequest(IPCRequest):
