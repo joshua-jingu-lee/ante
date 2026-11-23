@@ -225,11 +225,11 @@ class DARTCollector:
                 )
                 rows_written += written
                 symbols.update(syms)
-                if status is QuarterStatus.HALT:
+                if status is QuarterStatus.HALT or store_merge_failed:
                     halt = True
-                elif status is QuarterStatus.OK:
+                if status is QuarterStatus.OK:
                     stored_ok = True
-                    if not halt and not store_merge_failed:
+                    if not halt:
                         checkpoint.save(quarter_key)
 
         logger.info(
