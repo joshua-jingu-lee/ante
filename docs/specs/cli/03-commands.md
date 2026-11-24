@@ -77,8 +77,8 @@ allowlist 후보에서 제거한다.
 | `ante system start [--config-dir <path>]` | `external process` | `python -m ante.main` 실행 |
 | `ante system stop` | `external process` | PID 기반 SIGTERM |
 | `ante system status` | `offline` | canonical DB/PID 상태 조회 |
-| `ante system halt` | `runtime IPC` | 서버 AccountService 전역 kill switch (모든 ACTIVE 계좌를 SUSPENDED로 전환) |
-| `ante system clear-halt` | `runtime IPC` | 서버 AccountService 전역 kill switch 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 봇 자동 재시작 아님) |
+| `ante system halt` | `runtime IPC` | 서버 AccountService 전역 kill switch (모든 ACTIVE 계좌를 SUSPENDED로 전환). 일부 계좌가 실패하면 나머지를 모두 시도한 뒤 `ACCOUNT_SUSPEND_ALL_FAILED`로 끝난다(종료 코드 1) |
+| `ante system clear-halt` | `runtime IPC` | 서버 AccountService 전역 kill switch 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 봇 자동 재시작 아님). 한 계좌가 실패하면 거기서 멈추고 `ACCOUNT_ACTIVATE_ALL_FAILED`로 끝난다(종료 코드 1) |
 | `ante account list [--status <status>]` | `offline` | runtime-safe 조회 |
 | `ante account info <account_id>` | `offline` | runtime-safe 조회 |
 | `ante account credentials <account_id>` | `offline` | 마스킹 조회 |

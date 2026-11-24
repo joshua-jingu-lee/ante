@@ -10,6 +10,7 @@ from ante.account.crypto import (
     EncryptionKeyMissingError,
 )
 from ante.account.errors import (
+    AccountActivateAllFailedError,
     AccountAlreadyExistsError,
     AccountAlreadySuspendedError,
     AccountDeletedError,
@@ -18,6 +19,7 @@ from ante.account.errors import (
     AccountNotFoundError,
     AccountReconcileNotApplicableError,
     AccountStructuralChangeRequiresStoppedServerError,
+    AccountSuspendAllFailedError,
     AccountSuspendedError,
     BrokerReconnectFailedError,
     InvalidAccountIdError,
@@ -277,6 +279,18 @@ _ACCOUNT_STRUCTURAL_CHANGE_SPEC: Final[ErrorSpec] = ErrorSpec(
 _ACCOUNT_HAS_ACTIVE_BOTS_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="ACCOUNT_HAS_ACTIVE_BOTS",
     category="state_conflict",
+)
+
+_ACCOUNT_SUSPEND_ALL_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_SUSPEND_ALL_FAILED",
+    category="internal",
+    description="일괄 정지에서 한 계좌 이상의 정지가 실패함(나머지 계좌는 모두 시도)",
+)
+
+_ACCOUNT_ACTIVATE_ALL_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_ACTIVATE_ALL_FAILED",
+    category="internal",
+    description="일괄 활성화가 한 계좌의 실패에서 멈춤(뒤의 계좌는 시도하지 않음)",
 )
 
 
@@ -1092,6 +1106,8 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     AccountStructuralChangeRequiresStoppedServerError: _ACCOUNT_STRUCTURAL_CHANGE_SPEC,
     AccountHasActiveBotsError: _ACCOUNT_HAS_ACTIVE_BOTS_SPEC,
     AccountReconcileNotApplicableError: _ACCOUNT_RECONCILE_NOT_APPLICABLE_SPEC,
+    AccountSuspendAllFailedError: _ACCOUNT_SUSPEND_ALL_FAILED_SPEC,
+    AccountActivateAllFailedError: _ACCOUNT_ACTIVATE_ALL_FAILED_SPEC,
     PermissionDeniedError: _MEMBER_PERMISSION_DENIED_SPEC,
     MemberNotFoundError: _MEMBER_NOT_FOUND_SPEC,
     MemberStateConflictError: _MEMBER_STATE_CONFLICT_SPEC,

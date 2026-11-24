@@ -8,6 +8,10 @@ if TYPE_CHECKING:
     from datetime import datetime
 
 
+ORDER_OUTCOME_UNKNOWN = "order_outcome_unknown"
+"""접수 여부를 알 수 없어 다시 보내지 않은 매수·매도 주문의 ``error_code``."""
+
+
 class BrokerError(Exception):
     """Broker 기본 예외.
 

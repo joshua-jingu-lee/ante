@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from ante.account.crypto import decrypt_credentials, encrypt_credentials
 from ante.account.errors import (
+    AccountActivateAllFailedError,
     AccountAlreadyExistsError,
     AccountDeletedException,
     AccountHasActiveBotsError,
@@ -18,6 +19,7 @@ from ante.account.errors import (
     AccountNotFoundError,
     AccountReconcileNotApplicableError,
     AccountStructuralChangeRequiresStoppedServerError,
+    AccountSuspendAllFailedError,
     BrokerReconnectFailedError,
     InvalidAccountIdError,
     InvalidBrokerConfigError,
@@ -755,13 +757,19 @@ class AccountService:
             - ``changed`` (bool): 실제 전환 여부
         """
         results: list[dict[str, Any]] = []
+        failed: list[str] = []
         for account_id in list(self._accounts.keys()):
             account = self._accounts[account_id]
             if account.status == AccountStatus.DELETED:
                 continue
             previous_status = account.status.value
             if account.status == AccountStatus.ACTIVE:
-                await self.suspend(account_id, reason, suspended_by)
+                try:
+                    await self.suspend(account_id, reason, suspended_by)
+                except Exception:
+                    logger.exception("전체 계좌 정지 중 계좌 정지 실패: %s", account_id)
+                    failed.append(account_id)
+                    continue
                 changed = True
             else:
                 changed = False
@@ -774,6 +782,16 @@ class AccountService:
                 }
             )
         changed_count = sum(1 for r in results if r["changed"])
+        if failed:
+            logger.error(
+                "전체 계좌 정지 일부 실패: 실패 %d개, 정지 %d개 (사유: %s)",
+                len(failed),
+                changed_count,
+                reason,
+            )
+            raise AccountSuspendAllFailedError(
+                failed_account_ids=tuple(failed), suspended_count=changed_count
+            )
         logger.info("전체 계좌 정지: %d개 (사유: %s)", changed_count, reason)
         return results
 
@@ -795,7 +813,16 @@ class AccountService:
                 continue
             previous_status = account.status.value
             if account.status == AccountStatus.SUSPENDED:
-                await self.activate(account_id, activated_by)
+                try:
+                    await self.activate(account_id, activated_by)
+                except Exception as exc:
+                    logger.exception(
+                        "전체 계좌 활성화 중 계좌 활성화 실패: %s", account_id
+                    )
+                    raise AccountActivateAllFailedError(
+                        failed_account_id=account_id,
+                        activated_count=sum(1 for r in results if r["changed"]),
+                    ) from exc
                 changed = True
             else:
                 changed = False

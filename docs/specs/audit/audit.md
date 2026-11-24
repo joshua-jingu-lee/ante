@@ -115,6 +115,8 @@ AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **CLI
 | `ante member regenerate-recovery-key` | `member.regenerate_recovery_key` | `member:{master_member_id}` |
 | `ante signal connect` | `signal.connect` | `bot:{bot_id}` |
 
+`system.halt`·`system.clear_halt`는 `ACCOUNT_SUSPEND_ALL_FAILED`·`ACCOUNT_ACTIVATE_ALL_FAILED`로 끝나도 같은 action·resource로 한 건을 남긴다(이미 상태가 바뀐 계좌가 있을 수 있다). detail은 `failed=<계좌 id,…>; changed=<수>; reason=<사유>`다.
+
 `ante bot start`/`ante bot stop`은 audit action(`bot.start`/`bot.stop`) 이름을
 사용한다. 봇 생애주기 변경은 단일 audit action namespace로 모인다.
 `ante bot status`는 read-only live 조회이므로 audit 대상이 아니다
