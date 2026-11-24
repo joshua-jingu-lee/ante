@@ -199,16 +199,14 @@ def sync(
     if "error" in result:
         raise InstrumentSyncFailedError(result["error"])
 
-    payload = {
-        "sync_result": result,
-        "message": (
-            f"동기화 완료: "
-            f"신규 {result['new']}건, "
-            f"갱신 {result['updated']}건, "
-            f"상폐 {result['delisted']}건"
-        ),
-    }
-    return CommandResult(data=payload, text=(str(payload),))
+    message = (
+        f"동기화 완료: "
+        f"신규 {result['new']}건, "
+        f"갱신 {result['updated']}건, "
+        f"상폐 {result['delisted']}건"
+    )
+    payload = {"sync_result": result, "message": message}
+    return CommandResult(data=payload, text=(message,))
 
 
 @instrument.command()

@@ -22,6 +22,7 @@ class BacktestTrade:
     slippage: float
     reason: str = ""
     exchange: str = "KRX"
+    order_type: str = "market"
 
 
 @dataclass
@@ -73,6 +74,7 @@ class BacktestResult:
                     "slippage": t.slippage,
                     "reason": t.reason,
                     "exchange": t.exchange,
+                    "order_type": t.order_type,
                 }
                 for t in self.trades
             ],

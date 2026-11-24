@@ -17,21 +17,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class _SingleBrokerAccountService:
-    """AccountService 미초기화 시 단일 브로커를 감싸는 폴백 래퍼.
-
-    모든 account_id에 대해 동일한 BrokerAdapter를 반환한다.
-    AccountService 통합 완료 후 제거 예정.
-    """
-
-    def __init__(self, broker: BrokerAdapter) -> None:
-        self._broker = broker
-
-    async def get_broker(self, account_id: str) -> BrokerAdapter:
-        """어떤 account_id든 동일 브로커 반환."""
-        return self._broker
-
-
 class APIGateway:
     """증권사 API 호출 중앙 관리.
 

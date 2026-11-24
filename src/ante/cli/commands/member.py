@@ -86,7 +86,7 @@ def _resolve_secret_non_interactive(
     path = Path(file_path)
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         raise MemberPasswordFileNotFoundError(
             f"{file_option_label} 파일을 읽을 수 없습니다."
         ) from e
@@ -162,8 +162,9 @@ def member_list(
 
     result = _run(_run_list())
     if not result:
-        empty: dict[str, Any] = {"message": "등록된 멤버가 없습니다.", "members": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "등록된 멤버가 없습니다."
+        empty: dict[str, Any] = {"message": message, "members": []}
+        return CommandResult(data=empty, text=(message,))
 
     lines = []
     for m in result:
