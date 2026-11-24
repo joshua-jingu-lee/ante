@@ -22,7 +22,7 @@
 | 단일회사 주요계정 | 순이익, 순자산 등 주요 재무데이터 | 1 |
 | 단일회사 전체 재무제표 | 상세 계정과목 (필요 시) | 2 |
 | 단일회사 주요 재무지표 | ROE, 부채비율 등 (2023 3Q 이후) | 2 |
-| 공시검색 | 공시일(rcept_dt) 기반 look-ahead bias 방지 | 1 |
+| 공시검색 | 공시일(rcept_dt) 조회. Phase 1의 접수일은 `fnlttMultiAcnt` 응답의 `rcept_no` 앞 8자리 | 2 |
 
 ---
 
@@ -61,7 +61,7 @@ GET https://opendart.fss.or.kr/api/corpCode.xml
 
 ## 2. 공시검색 (`list`)
 
-공시보고서를 조건 검색한다. Blind에서는 재무제표 공시의 **접수일자(rcept_dt)**를 확인하여 look-ahead bias를 방지하는 데 사용한다.
+공시보고서를 조건 검색한다. Blind에서는 Phase 2에서 쓴다. Phase 1은 이 API를 부르지 않고, `fnlttMultiAcnt` 응답 각 행의 접수번호 `rcept_no` 앞 8자리로 재무제표 공시의 접수일자를 얻는다.
 
 ### 엔드포인트
 
@@ -183,7 +183,7 @@ ROE = 당기순이익 / 자본총계
 부채비율 = 부채총계 / 자본총계
 ```
 
-> point-in-time 원칙: DART 공시일(`rcept_dt`)을 기준으로 반영 시점 결정.
+> point-in-time 원칙: 반영 시점은 접수일(`rcept_no` 앞 8자리)로 결정.
 > 분기 공시 시점까지는 이전 분기 수치 유지.
 
 ---
@@ -326,7 +326,7 @@ GET https://opendart.fss.or.kr/api/fnlttSinglIndx.xml
 ### 수집 순서
 
 1. **고유번호 파일** 다운로드 → corp_code ↔ stock_code 매핑 테이블 구축
-2. **공시검색**으로 각 보고서의 rcept_dt(접수일자) 확보 → look-ahead bias 방지
+2. 접수일은 별도 호출 없이 주요계정 응답(`fnlttMultiAcnt`) 각 행의 `rcept_no` 앞 8자리(`YYYYMMDD`)로 얻는다 → look-ahead bias 방지 (**공시검색**은 Phase 2)
 3. **단일회사 주요계정**으로 순이익, 자본총계, 매출액 등 수집
 4. data.go.kr의 시가총액/상장주식수와 조합하여 PER/PBR/EPS/BPS **직접 계산**
 
