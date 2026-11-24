@@ -210,7 +210,7 @@ active-trading 차단 효과는 **일관**한다(둘 중 하나라도 막으면 
 **final backstop은 경로별로 비대칭이다(attempt5 P2)**: APIGateway는 virtual(`trading_mode != LIVE`) 주문의 `broker.place_order`를 **silent skip**하므로([api-gateway.md](../api-gateway/api-gateway.md) "Virtual 주문 라우팅"), 계층3(`gateway`)의 SUSPENDED 재확인은 **virtual 주문에 도달하지 않는다**. 따라서 in-flight SUSPENDED 차단의 **최종 backstop은 경로별로 다르다**:
 
 - **LIVE 경로 = 계층3 `gateway`**: `gateway.submit_order` → `broker.place_order` **직전** 단일 재확인 지점에서 **readiness AND status(SUSPENDED)** 를 함께 재평가해 in-flight suspend를 잡는다.
-- **virtual 경로 = `VirtualExecutor`**: gateway가 virtual을 skip하므로 VirtualExecutor가 virtual 경로의 **유일한 최종 backstop**이다. `apply_fill`/`OrderFilledEvent` **직전**, 기존 G9 readiness 차단과 **동일 지점·동일 단일 fetch**에서 **status(SUSPENDED)도 함께** 재확인한다(LIVE 경로 `account_suspended` 차단과 대칭).
+- **virtual 경로 = `VirtualExecutor`**: gateway가 virtual을 skip하므로 VirtualExecutor가 virtual 경로의 **유일한 최종 backstop**이다. `FillApplier.apply_direct_fill`/`OrderFilledEvent` **직전**, 기존 G9 readiness 차단과 **동일 지점·동일 단일 fetch**에서 **status(SUSPENDED)도 함께** 재확인한다(LIVE 경로 `account_suspended` 차단과 대칭).
 
 두 경로 모두 status는 **단일 fresh fetch**(await 이후 최신값)로 보며 routing 스냅샷을 재사용하지 않는다(stale 통과 금지). status 3-state(verified / `STATUS_UNAVAILABLE` 검증불가 fail-closed / `None` 소스미구성) 도출은 계층1·계층3·VirtualExecutor가 **동일 공유 헬퍼**(`ante.account.gate.resolve_account_status` / `derive_account_status`)를 써 중복 구현을 금지한다(SSOT). status 차단 reason은 `account_suspended` / `account_status_unavailable`이며 `OrderFailedEvent`로 귀결돼 reserve를 정확 해제하고(G3) G6 운영자 알림(error/system)을 정확히 1회 발행한다([broker-adapter/11-order-flow.md](../broker-adapter/11-order-flow.md) 계층3 census 참조).
 

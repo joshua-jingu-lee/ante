@@ -7,7 +7,9 @@ from typing import Any
 
 from tests.e2e.harness import DaemonHarness, run_json_command, wait_until
 
-STRATEGY_PATH = Path(__file__).resolve().parent / "strategies" / "limit_buy_once.py"
+STRATEGIES_DIR = Path(__file__).resolve().parent / "strategies"
+STRATEGY_PATH = STRATEGIES_DIR / "limit_buy_once.py"
+RESTART_STRATEGY_PATH = STRATEGIES_DIR / "sell_if_held_after_restart.py"
 BOT_ID = "e2e-lifecycle"
 ACCOUNT_BALANCE = 1000000
 ALLOCATION = 500000
@@ -26,9 +28,9 @@ TREASURY_FIELDS = (
 )
 
 
-def _start_bot(daemon: DaemonHarness) -> None:
+def _start_bot(daemon: DaemonHarness, strategy_path: Path = STRATEGY_PATH) -> None:
     daemon.init()
-    submitted = daemon.cli("strategy", "submit", str(STRATEGY_PATH))
+    submitted = daemon.cli("strategy", "submit", str(strategy_path))
     strategy_id = submitted["data"]["strategy_id"]
     daemon.start()
     daemon.cli(
@@ -173,3 +175,36 @@ def _assert_bot_restored(daemon: DaemonHarness, before: dict[str, Any]) -> None:
         expect_failure=True,
     )
     assert duplicate.payload["code"] == "BOT_ALREADY_EXISTS"
+
+
+def _fills(daemon: DaemonHarness, count: int) -> list[dict[str, Any]]:
+    fills = wait_until(
+        lambda: daemon.cli(
+            "treasury", "transactions", "--bot", BOT_ID, "--type", "fill"
+        )["data"],
+        lambda p: p["total"] >= count,
+        seconds=FILL_SECONDS,
+    )
+    assert fills["total"] == count, fills
+    return sorted(fills["items"], key=lambda i: i["id"])
+
+
+def test_virtual_bot_sees_its_holding_after_restart(daemon: DaemonHarness) -> None:
+    """#2816: 재시작 뒤 가상 봇의 첫 체결이 다시 사는 것이 아니라 보유를 판다."""
+    _start_bot(daemon, RESTART_STRATEGY_PATH)
+    assert [f["description"] for f in _fills(daemon, 1)] == ["buy 000001 1 @ 70,000"]
+    stopped = daemon.cli("bot", "stop", BOT_ID)
+    assert stopped["data"]["bot"]["status"] == "stopped"
+
+    daemon.restart()
+    restarted = daemon.cli("bot", "start", BOT_ID)
+    assert restarted["data"]["bot"]["status"] == "running"
+
+    assert [f["description"] for f in _fills(daemon, 2)] == [
+        "buy 000001 1 @ 70,000",
+        "sell 000001 1 @ 71,000",
+    ]
+    positions = daemon.cli("bot", "positions", BOT_ID)["data"]
+    assert positions["positions"] == [], positions
+    daemon.cli("bot", "stop", BOT_ID)
+    _stop_and_check_network(daemon)

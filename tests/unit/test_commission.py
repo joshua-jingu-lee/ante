@@ -124,7 +124,7 @@ class TestKISCommissionInfo:
 class TestVirtualExecutorCommission:
     async def test_buy_commission(self):
         """VirtualExecutor 매수 수수료 = buy_commission_rate만 적용."""
-        from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
+        from ante.bot.providers.virtual import VirtualExecutor
         from ante.eventbus.events import OrderApprovedEvent
 
         eventbus = EventBus()
@@ -137,8 +137,7 @@ class TestVirtualExecutorCommission:
             account_service=_gate_account_service("acct1"),
         )
 
-        portfolio = VirtualPortfolioView(bot_id="bot1", initial_balance=10_000_000.0)
-        executor.register_bot("bot1", portfolio)
+        executor.register_bot("bot1")
         executor.subscribe()
 
         received: list[OrderFilledEvent] = []
@@ -165,7 +164,7 @@ class TestVirtualExecutorCommission:
 
     async def test_sell_commission_includes_tax(self):
         """VirtualExecutor 매도 수수료 = commission_rate + sell_tax_rate."""
-        from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
+        from ante.bot.providers.virtual import VirtualExecutor
         from ante.eventbus.events import OrderApprovedEvent
 
         eventbus = EventBus()
@@ -178,14 +177,7 @@ class TestVirtualExecutorCommission:
             account_service=_gate_account_service("acct1"),
         )
 
-        portfolio = VirtualPortfolioView(bot_id="bot1", initial_balance=10_000_000.0)
-        # 먼저 보유 포지션 설정
-        portfolio._positions["005930"] = {
-            "quantity": 100.0,
-            "avg_entry_price": 50_000.0,
-            "realized_pnl": 0.0,
-        }
-        executor.register_bot("bot1", portfolio)
+        executor.register_bot("bot1")
         executor.subscribe()
 
         received: list[OrderFilledEvent] = []

@@ -1058,7 +1058,6 @@ class TestVirtualRouting:
     ):
         from ante.bot.providers.virtual import (
             VirtualExecutor,
-            VirtualPortfolioView,
         )
 
         if account is None:
@@ -1069,7 +1068,7 @@ class TestVirtualRouting:
             runtime_readiness=registry,
             account_service=_account_service(account),
         )
-        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        executor.register_bot(BOT)
         return executor
 
     async def test_gateway_meta_non_live_silent_skip(self) -> None:
@@ -1358,7 +1357,6 @@ class TestVirtualRouting:
         gateway.get_current_price = AsyncMock(return_value=50000.0)
         from ante.bot.providers.virtual import (
             VirtualExecutor,
-            VirtualPortfolioView,
         )
 
         svc = MagicMock()
@@ -1369,7 +1367,7 @@ class TestVirtualRouting:
             runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
             account_service=svc,
         )
-        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        executor.register_bot(BOT)
         await executor._on_order_approved(_approved())
 
         assert cap.filled == []
@@ -1415,7 +1413,6 @@ class TestVirtualRouting:
         gateway.get_current_price = AsyncMock(return_value=50000.0)
         from ante.bot.providers.virtual import (
             VirtualExecutor,
-            VirtualPortfolioView,
         )
 
         # account_service=None → status 축 비활성. 단 readiness 축은 registry 로 평가.
@@ -1425,7 +1422,7 @@ class TestVirtualRouting:
             runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
             account_service=None,
         )
-        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        executor.register_bot(BOT)
         await executor._on_order_approved(_approved())
 
         # account_service None 은 G2 fail-closed(account_not_ready) — status 축이
@@ -1504,7 +1501,7 @@ class TestVirtualRouting:
 
     async def test_virtual_gate_rereads_account_status_for_each_order(self) -> None:
         """첫 주문 뒤 SUSPENDED 가 되면 두 번째 주문은 새로 읽은 status 로 막힌다."""
-        from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
+        from ante.bot.providers.virtual import VirtualExecutor
 
         svc = MagicMock()
         svc.get = AsyncMock(
@@ -1527,7 +1524,7 @@ class TestVirtualRouting:
             runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
             account_service=svc,
         )
-        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        executor.register_bot(BOT)
 
         await executor._on_order_approved(_approved(order_type="limit"))
         await executor._on_order_approved(_approved(order_type="limit"))
@@ -1561,7 +1558,7 @@ class TestVirtualRouting:
         self, first_meta_ok: bool
     ) -> None:
         """주문 사이에 계좌 메타가 바뀌면 둘째 주문은 새로 읽은 메타로 판정한다."""
-        from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
+        from ante.bot.providers.virtual import VirtualExecutor
 
         good = make_account(ACCOUNT, trading_mode=TradingMode.VIRTUAL)
         missing = MagicMock()
@@ -1582,7 +1579,7 @@ class TestVirtualRouting:
             runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
             account_service=svc,
         )
-        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        executor.register_bot(BOT)
 
         await executor._on_order_approved(_approved(order_type="limit"))
         first = (len(cap.filled), len(cap.failed))
@@ -1657,7 +1654,6 @@ class TestVirtualRouting:
         svc = _account_service(active)
         from ante.bot.providers.virtual import (
             VirtualExecutor,
-            VirtualPortfolioView,
         )
 
         executor = VirtualExecutor(
@@ -1666,7 +1662,7 @@ class TestVirtualRouting:
             runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
             account_service=svc,
         )
-        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        executor.register_bot(BOT)
         await executor._on_order_approved(_approved())
 
         svc.get.assert_awaited_once()  # 단일 fetch(status+readiness 공동 평가).
@@ -1715,7 +1711,6 @@ class TestVirtualRoutingMarkerP2:
         """
         from ante.bot.providers.virtual import (
             VirtualExecutor,
-            VirtualPortfolioView,
         )
 
         vexec_svc = _account_service(account)
@@ -1725,7 +1720,7 @@ class TestVirtualRoutingMarkerP2:
             runtime_readiness=registry,
             account_service=vexec_svc,
         )
-        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        executor.register_bot(BOT)
 
         gw_svc = gateway_account_service or _account_service(account)
         gw_svc.get_broker = AsyncMock(return_value=broker)
@@ -2258,7 +2253,7 @@ class TestFailClosedOnUnrelatedExceptionType:
     async def test_virtual_executor_account_fetch_unrelated_exception_fails_order(
         self,
     ) -> None:
-        from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
+        from ante.bot.providers.virtual import VirtualExecutor
 
         bus = EventBus()
         cap = _capture(bus)
@@ -2272,7 +2267,7 @@ class TestFailClosedOnUnrelatedExceptionType:
             runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
             account_service=svc,
         )
-        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        executor.register_bot(BOT)
         await executor._on_order_approved(_approved())
 
         svc.get.assert_awaited()
