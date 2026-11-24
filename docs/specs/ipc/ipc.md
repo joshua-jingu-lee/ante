@@ -57,8 +57,8 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
-| `ante system halt` | `system.halt` | `AccountService.suspend_all()` | `AccountSuspendedEvent` → BotManager 소속 봇 중지 |
-| `ante system clear-halt` | `system.clear_halt` | `AccountService.activate_all()` | 계좌 상태만 ACTIVE로 복구; BotManager는 `AccountActivatedEvent` 수신 시 로깅만 수행 (자동 재시작은 수행하지 않음) |
+| `ante system halt` | `system.halt` | `AccountService.suspend_all()` | `AccountSuspendedEvent` → BotManager 소속 봇 중지. 일부 계좌의 정지가 실패하면 모든 계좌를 시도한 뒤 `ACCOUNT_SUSPEND_ALL_FAILED` 에러 응답 |
+| `ante system clear-halt` | `system.clear_halt` | `AccountService.activate_all()` | 계좌 상태만 ACTIVE로 복구; BotManager는 `AccountActivatedEvent` 수신 시 로깅만 수행 (자동 재시작은 수행하지 않음). 한 계좌의 활성화가 실패하면 거기서 멈추고 `ACCOUNT_ACTIVATE_ALL_FAILED` 에러 응답 |
 
 #### Account
 
@@ -569,6 +569,7 @@ drift다.
 | 미등록 커맨드 | `_dispatch`에서 `UNKNOWN_COMMAND` 에러 응답 |
 | 인자 검증 실패 | 모든 명령은 요청 모델을 가진다. 인자가 모델을 통과하지 못하면 핸들러를 부르지 않고 `VALIDATION_ERROR` 에러 응답. 메시지는 명령 이름과 필드 경로·검증 종류만 싣는다(`<명령> 인자 검증 실패: <필드 경로>(<검증 종류>), …`). 모르는 키의 이름은 필드 경로로 실리고(인쇄 가능하지 않은 문자는 이스케이프한다), 키 이름 외의 입력값은 싣지 않는다. 전체 응답이 메시지 최대 크기(1MB)를 넘게 되면 앞에서부터 들어가는 필드만 싣고 나머지는 `외 N건`으로 줄인다 |
 | 뒤집힌 날짜 범위 (`broker.order_history`) | 요청 모델은 두 날짜의 형식만 본다. 순서는 핸들러가 브로커를 부르기 전에 검사해 `INVALID_DATE_RANGE` 에러 응답을 낸다(#2736). |
+| 킬 스위치의 일부 계좌 실패 (`system.halt`·`system.clear_halt`) | `ACCOUNT_SUSPEND_ALL_FAILED`·`ACCOUNT_ACTIVATE_ALL_FAILED` 에러 응답. 메시지는 실패한 계좌 id와 바뀐 계좌 수만 싣고 원인 예외의 문자열은 싣지 않는다. 성공 응답의 `accounts` 목록은 오지 않는다. 감사는 남는다([audit.md](../audit/audit.md#cliipc-기록-대상)) |
 | shutdown 중 mutating 명령 | `SHUTTING_DOWN` 상태의 mutating 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
 | 리소스 drain 중 dispatch | `DRAINING` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
 | 서버 종료 후 dispatch | `STOPPED` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
