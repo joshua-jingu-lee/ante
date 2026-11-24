@@ -784,6 +784,7 @@ class BotManager:
                 )
                 logger.info("봇 삭제 (soft delete): %s", bot_id)
             self._cancel_restart_tasks(bot_id)
+            self._restart_counts.pop(bot_id, None)
         finally:
             self._deleting_bots.discard(bot)
 
@@ -1136,6 +1137,9 @@ class BotManager:
             await self._on_restart_exhausted(
                 event.bot_id, config.account_id, count, event.error_message
             )
+            return
+
+        if not self._is_registered(bot):
             return
 
         self._restart_counts[event.bot_id] = count + 1
