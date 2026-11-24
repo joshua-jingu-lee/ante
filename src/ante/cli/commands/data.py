@@ -8,7 +8,7 @@ import click
 
 from ante.cli._data_path import resolve_data_path
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import CommandResult, format_option, table_lines
+from ante.cli.formatter import CommandResult, detail_lines, format_option, table_lines
 from ante.cli.middleware import enforce_scope, require_auth, require_scope
 from ante.contracts.cli_errors import (
     CliConfirmationRequiredError,
@@ -86,7 +86,7 @@ def data_list(
     datasets = result["items"]
     if not datasets:
         empty: dict[str, Any] = {"datasets": [], "count": result["total"]}
-        return CommandResult(data=empty, text=(str(empty),))
+        return CommandResult(data=empty, text=("데이터셋이 없습니다.",))
 
     async def _enrich(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         from ante.instrument.service import InstrumentService
@@ -232,7 +232,7 @@ def schema(ctx: click.Context, data_path: str | None) -> CommandResult:
 
     data_path = resolve_data_path(ctx, data_path)
     columns = {k: str(v) for k, v in OHLCV_SCHEMA.items()}
-    return CommandResult(data=columns, text=(str(columns),))
+    return CommandResult(data=columns, text=tuple(detail_lines(columns)))
 
 
 @data.command()

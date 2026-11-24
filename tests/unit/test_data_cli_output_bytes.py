@@ -227,7 +227,7 @@ def _invoke_case(
 
 
 _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
-    ("list_empty", "text"): ("{'datasets': [], 'count': 0}\n"),
+    ("list_empty", "text"): ("데이터셋이 없습니다.\n"),
     ("list_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'
@@ -238,7 +238,7 @@ _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("list_page_past_end", "text"): ("{'datasets': [], 'count': 3}\n"),
+    ("list_page_past_end", "text"): ("데이터셋이 없습니다.\n"),
     ("list_page_past_end", "json"): (
         "{\n"
         '  "status": "ok",\n'
@@ -439,10 +439,15 @@ _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "}\n"
     ),
     ("schema", "text"): (
-        "{'timestamp': \"Datetime(time_unit='ns', time_zone=None)\", 'symbol': 'St"
-        "ring', 'open': 'Float64', 'high': 'Float64', 'low': 'Float64', '"
-        "close': 'Float64', 'volume': 'Int64', 'amount': 'Int64', 'source'"
-        ": 'String'}\n"
+        "  timestamp      : Datetime(time_unit='ns', time_zone=None)\n"
+        "  symbol         : String\n"
+        "  open           : Float64\n"
+        "  high           : Float64\n"
+        "  low            : Float64\n"
+        "  close          : Float64\n"
+        "  volume         : Int64\n"
+        "  amount         : Int64\n"
+        "  source         : String\n"
     ),
     ("schema", "json"): (
         "{\n"
