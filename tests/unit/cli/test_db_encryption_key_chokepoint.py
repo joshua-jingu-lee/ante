@@ -22,6 +22,7 @@ SSOT 재사용:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
@@ -607,3 +608,107 @@ class TestChokepointConfigLoadFallback:
         # invalid file_key 는 Config.load 가 export 하지 않으므로 env 가 빈 상태로
         # 유지되어 MISSING 으로 종료한다 (Config.load:128-139 게이트).
         assert payload.get("code") == "DB_ENCRYPTION_KEY_MISSING", payload
+
+
+# ── secrets.env 상태 × env 키 유무 (#2918) ──────────────────────────────────
+
+_NON_UTF8_SECRETS = b"ANTE_X=fake-sec\xff\xfe-tail\n"
+_DECODE_TRACES = ("0xff", "0xfe", "codec", "position", "fake-sec")
+_DECODE_MESSAGE = "secrets.env 파일을 UTF-8로 읽을 수 없습니다."
+_PASS = "PASS"
+
+_GATE_TABLE = [
+    ("absent", True, _PASS),
+    ("valid", True, _PASS),
+    ("invalid", True, _PASS),
+    ("unreadable", True, _PASS),
+    ("non_utf8", True, "EXECUTION_ERROR"),
+    ("absent", False, "DB_ENCRYPTION_KEY_MISSING"),
+    ("valid", False, _PASS),
+    ("invalid", False, "DB_ENCRYPTION_KEY_MISSING"),
+    ("unreadable", False, "DB_ENCRYPTION_KEY_MISSING"),
+    ("non_utf8", False, "EXECUTION_ERROR"),
+]
+
+
+def _prepare_secrets_env(config_dir: Path, state: str) -> None:
+    path = config_dir / "secrets.env"
+    if state == "absent":
+        return
+    if state == "valid":
+        path.write_text(f"ANTE_DB_ENCRYPTION_KEY={Fernet.generate_key().decode()}\n")
+    elif state == "invalid":
+        path.write_text("ANTE_DB_ENCRYPTION_KEY=not-a-valid-fernet-key\n")
+    elif state == "unreadable":
+        if os.geteuid() == 0:
+            pytest.skip("root는 권한 없는 파일도 읽는다")
+        path.write_text("ANTE_X=fake-value\n")
+        path.chmod(0)
+    elif state == "non_utf8":
+        path.write_bytes(_NON_UTF8_SECRETS)
+
+
+class TestChokepointSecretsEnvStateTable:
+    """게이트가 막고 통과시키는 것: secrets.env 상태 다섯 × env 키 유무."""
+
+    @pytest.mark.parametrize(("state", "env_key", "expected"), _GATE_TABLE)
+    def test_gate_outcome(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        state: str,
+        env_key: bool,
+        expected: str,
+    ) -> None:
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", Fernet.generate_key().decode())
+        if not env_key:
+            monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY")
+        monkeypatch.delenv("ANTE_MEMBER_TOKEN", raising=False)
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "nonexistent.token"))
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "system.toml").write_text("")
+        monkeypatch.setenv("ANTE_CONFIG_DIR", str(config_dir))
+        _prepare_secrets_env(config_dir, state)
+        try:
+            result = runner.invoke(cli, ["--format", "json", "bot", "list"])
+        finally:
+            if (config_dir / "secrets.env").exists():
+                (config_dir / "secrets.env").chmod(0o600)
+
+        assert result.exit_code == 1, result.output
+        payload = _parse_json_error_envelope(result.output)
+        if expected == _PASS:
+            assert "인증이 필요합니다" in payload.get("message", ""), payload
+        else:
+            assert payload.get("code") == expected, payload
+        if state == "non_utf8":
+            assert payload.get("message") == _DECODE_MESSAGE, payload
+            for trace in (*_DECODE_TRACES, str(config_dir)):
+                assert trace not in result.output, result.output
+
+    @pytest.mark.parametrize("env_key", [True, False])
+    def test_non_utf8_text_mode_has_no_decode_trace(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        env_key: bool,
+    ) -> None:
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", Fernet.generate_key().decode())
+        if not env_key:
+            monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY")
+        monkeypatch.delenv("ANTE_MEMBER_TOKEN", raising=False)
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "nonexistent.token"))
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "system.toml").write_text("")
+        (config_dir / "secrets.env").write_bytes(_NON_UTF8_SECRETS)
+        monkeypatch.setenv("ANTE_CONFIG_DIR", str(config_dir))
+
+        result = CliRunner(mix_stderr=False).invoke(cli, ["bot", "list"])
+
+        assert result.exit_code == 1, result.output
+        assert f"EXECUTION_ERROR: {_DECODE_MESSAGE}" in result.stderr
+        for trace in (*_DECODE_TRACES, str(config_dir)):
+            assert trace not in result.stdout + result.stderr

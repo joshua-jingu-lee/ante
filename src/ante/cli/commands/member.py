@@ -710,7 +710,7 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> CommandResult:
     "--new-password-file",
     "new_password_file",
     default=None,
-    type=click.Path(dir_okay=False),
+    metavar="PATH",
     help="새 패스워드를 담은 파일의 경로 (파일 내용 strip)",
 )
 @click.pass_context
@@ -771,7 +771,7 @@ def member_reset_password(
     "--password-file",
     "password_file",
     default=None,
-    type=click.Path(dir_okay=False),
+    metavar="PATH",
     help="현재 패스워드를 담은 파일의 경로 (파일 내용 strip)",
 )
 @click.pass_context

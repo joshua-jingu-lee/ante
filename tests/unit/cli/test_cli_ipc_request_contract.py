@@ -152,7 +152,7 @@ ROWS: tuple[Row, ...] = (
     ),
     *_rows("broker reconcile", ("--account", ACCOUNT), ("--account", ACCOUNT, "--fix")),
     *_rows("system halt", (), ("--reason", "r")),
-    *_rows("system clear-halt", ()),
+    *_rows("system clear-halt", (), ("--reason", "r")),
 )
 
 COMMAND_EXCEPTIONS: dict[tuple[tuple[str, ...], str], str] = {

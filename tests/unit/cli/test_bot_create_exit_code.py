@@ -166,8 +166,8 @@ class TestBotCreateIPCExceptionExitCode:
         )
         payload = _parse_json_line(result.stdout)
         assert payload["status"] == "error", payload
-        # #1843 sub-PR 3: ``bot create`` generic except 가 ``emit_cli_error``
-        # 로 정렬되어, registry 미등록 + ``.code`` 부재 (RuntimeError) 인
+        # #1843 sub-PR 3 이후 지금은 예외가 ``AuthenticatedGroup.main`` 의 공통
+        # 출구로 전파되어, registry 미등록 + ``.code`` 부재 (RuntimeError) 인
         # 경우 taxonomy SSOT (``docs/specs/contracts/error-taxonomy.md``)
         # 의 ``EXECUTION_ERROR`` fallback 으로 surface 한다. 이전 ad-hoc
         # ``code=""`` 동작은 의도된 taxonomy 정렬 (#1840 helper SSOT) 로

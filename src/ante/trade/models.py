@@ -143,7 +143,7 @@ class PerformanceMetrics:
     avg_profit: float = 0.0
     avg_loss: float = 0.0
     profit_factor: float = 0.0
-    max_drawdown: float = 0.0
+    max_drawdown: float | None = 0.0
     max_drawdown_amount: float = 0.0
     sharpe_ratio: float | None = None
     first_trade_at: datetime | None = None

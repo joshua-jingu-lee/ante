@@ -16,6 +16,8 @@ from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts.cli_errors import TradeError, TradeNotFoundError
+from ante.contracts.error_registry import EXECUTION_ERROR_SPEC
+from ante.contracts.helpers import error_spec_for_exception
 from ante.core.database import OperationalError
 
 if TYPE_CHECKING:
@@ -176,6 +178,8 @@ def trade_info(ctx: click.Context, trade_id: str) -> CommandResult:
     try:
         result = _run(_run_info())
     except Exception as e:
+        if error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:
+            raise
         raise TradeError(str(e)) from e
 
     if not result:

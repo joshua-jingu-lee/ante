@@ -2129,7 +2129,7 @@ ante member reset-password --recovery-key <RECOVERY_KEY> [OPTIONS]
 |------|------|------|--------|------|
 | `--recovery-key` | O | TEXT | — | Recovery Key |
 | `--new-password-env` | - | TEXT | — | 새 패스워드를 담은 환경변수의 *이름* (값이 아닌 변수명만 받음) |
-| `--new-password-file` | - | PATH | — | 새 패스워드를 담은 파일의 경로 (파일 내용 strip) |
+| `--new-password-file` | - | TEXT | — | 새 패스워드를 담은 파일의 경로 (파일 내용 strip) |
 
 
 ### ante member regenerate-recovery-key
@@ -2152,7 +2152,7 @@ ante member regenerate-recovery-key [OPTIONS]
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--password-env` | - | TEXT | — | 현재 패스워드를 담은 환경변수의 *이름* (값이 아닌 변수명만 받음) |
-| `--password-file` | - | PATH | — | 현재 패스워드를 담은 파일의 경로 (파일 내용 strip) |
+| `--password-file` | - | TEXT | — | 현재 패스워드를 담은 파일의 경로 (파일 내용 strip) |
 
 
 ---
