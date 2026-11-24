@@ -826,7 +826,16 @@ async def test_system_halt_audit_action_fires(socket_path: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_system_clear_halt_audit_action_fires(socket_path: str) -> None:
+@pytest.mark.parametrize(
+    ("args", "detail"),
+    [
+        pytest.param({}, "reason=IPC clear_halt", id="default"),
+        pytest.param({"reason": "점검 완료"}, "reason=점검 완료", id="given"),
+    ],
+)
+async def test_system_clear_halt_audit_action_fires(
+    socket_path: str, args: dict[str, Any], detail: str
+) -> None:
     """Refs #2110 (audit.md:116): ``system.clear_halt`` 자동 audit 발화."""
     from ante.ipc.registry import register_all_handlers
 
@@ -848,7 +857,7 @@ async def test_system_clear_halt_audit_action_fires(socket_path: str) -> None:
             {
                 "id": "1",
                 "command": "system.clear_halt",
-                "args": {},
+                "args": args,
                 "actor": "bob",
             }
         )
@@ -858,7 +867,7 @@ async def test_system_clear_halt_audit_action_fires(socket_path: str) -> None:
             member_id="bob",
             action="system.clear_halt",
             resource="system:kill_switch",
-            detail="",
+            detail=detail,
             ip="",
         )
         fake_account.activate_all.assert_awaited_once_with(activated_by="bob")

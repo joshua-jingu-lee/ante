@@ -1,6 +1,7 @@
 """결재 유형별 executor 등록 및 승인→실행 테스트.
 
 Refs #446: 8건 executor 신규 등록 검증.
+Refs #2933: 실제 build_executors·build_validators 조립을 쓴다.
 """
 
 from __future__ import annotations
@@ -11,7 +12,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ante.approval.models import ApprovalValidationError, ValidationResult
+from ante.approval.handlers import build_executors, build_validators
+from ante.approval.models import ApprovalStatus, ApprovalValidationError
 from ante.approval.service import ApprovalService
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
@@ -35,32 +37,46 @@ async def eventbus():
     return EventBus()
 
 
-def _build_executors() -> tuple[dict, dict]:
-    """mock executor dict와 mock 서비스 객체를 생성.
+def _build_deps(monkeypatch: pytest.MonkeyPatch) -> tuple[SimpleNamespace, dict]:
+    """실제 executor·validator 조립에 넘길 mock deps를 생성.
 
     Returns:
-        (executors dict, mocks dict) — mocks에서 호출 검증 가능.
+        (deps, mocks) — mocks에서 호출 검증 가능.
     """
+    from ante.bot.config import BotStatus
+    from ante.strategy.loader import StrategyLoader
     from ante.strategy.registry import StrategyStatus
 
     class FakeStrategy:
         pass
 
     report_store = MagicMock()
+    report_store.get = AsyncMock(return_value=SimpleNamespace(report_id="rpt"))
     report_store.update_status = AsyncMock()
 
     strategy_registry = MagicMock()
     strategy_record = SimpleNamespace(
         strategy_id="strat-1",
+        name="momentum",
+        version="1.0",
         filepath="/tmp/strategy.py",
         status=StrategyStatus.ADOPTED,
     )
     strategy_registry.get = AsyncMock(return_value=strategy_record)
     strategy_registry.update_status = AsyncMock()
     strategy_loader = MagicMock(return_value=FakeStrategy)
+    monkeypatch.setattr(StrategyLoader, "load", strategy_loader)
 
+    bots = {
+        "bot-1": SimpleNamespace(
+            bot_id="bot-1",
+            status=BotStatus.STOPPED,
+            config=SimpleNamespace(account_id="acc-test"),
+        )
+    }
     bot_manager = MagicMock()
-    bot_manager.get_bot = MagicMock(return_value=None)
+    bot_manager.get_bot = MagicMock(side_effect=bots.get)
+    bot_manager.is_bot_id_taken = AsyncMock(side_effect=lambda b: b in bots)
     bot_manager.create_bot = AsyncMock()
     bot_manager.assign_strategy = AsyncMock()
     bot_manager.change_strategy = AsyncMock()
@@ -69,61 +85,28 @@ def _build_executors() -> tuple[dict, dict]:
     bot_manager.delete_bot = AsyncMock()
 
     treasury = MagicMock()
+    treasury.unallocated = 100_000_000
     treasury.update_budget = AsyncMock()
+    treasury_manager = MagicMock()
+    treasury_manager.get = MagicMock(return_value=treasury)
 
     rule_engine = MagicMock()
     rule_engine.update_rules = MagicMock()  # sync
+    rule_engine_manager = MagicMock()
+    rule_engine_manager.get = MagicMock(return_value=rule_engine)
 
-    async def _exec_strategy_adopt(params: dict) -> None:
-        await report_store.update_status(params["report_id"], ReportStatus.ADOPTED)
-        await strategy_registry.update_status(
-            params["strategy_id"], StrategyStatus.ADOPTED
-        )
+    position_history = MagicMock()
+    position_history.get_positions_sync = MagicMock(return_value=[])
 
-    async def _exec_strategy_retire(params: dict) -> None:
-        await report_store.update_status(params["report_id"], ReportStatus.ARCHIVED)
-        await strategy_registry.update_status(
-            params["strategy_id"], StrategyStatus.ARCHIVED
-        )
-
-    async def _exec_rule_change(params: dict) -> None:
-        rule_engine.update_rules(params["bot_id"], params["rules"])
-
-    async def _exec_bot_create(params: dict) -> None:
-        from ante.approval.handlers import _approval_bot_create_config
-
-        config = _approval_bot_create_config(params)
-        record = await strategy_registry.get(config.strategy_id)
-        if record is None:
-            raise ValueError(f"전략을 찾을 수 없습니다: {config.strategy_id}")
-        if record.status != StrategyStatus.ADOPTED:
-            raise ValueError(f"전략이 adopted 상태가 아닙니다: {config.strategy_id}")
-        strategy_cls = strategy_loader(Path(record.filepath))
-        await bot_manager.create_bot(
-            config=config,
-            strategy_cls=strategy_cls,
-            source_path=Path(record.filepath),
-        )
-
-    executors = {
-        "strategy_adopt": _exec_strategy_adopt,
-        "strategy_retire": _exec_strategy_retire,
-        "bot_create": _exec_bot_create,
-        "bot_assign_strategy": lambda params: bot_manager.assign_strategy(
-            params["bot_id"], params["strategy_id"]
-        ),
-        "bot_change_strategy": lambda params: bot_manager.change_strategy(
-            params["bot_id"], params["strategy_id"]
-        ),
-        "bot_stop": lambda params: bot_manager.stop_bot(params["bot_id"]),
-        "bot_resume": lambda params: bot_manager.resume_bot(params["bot_id"]),
-        "bot_delete": lambda params: bot_manager.delete_bot(params["bot_id"]),
-        "budget_change": lambda params: treasury.update_budget(
-            params["bot_id"], params["amount"]
-        ),
-        "rule_change": _exec_rule_change,
-    }
-
+    deps = SimpleNamespace(
+        report_store=report_store,
+        strategy_registry=strategy_registry,
+        bot_manager=bot_manager,
+        treasury_manager=treasury_manager,
+        rule_engine_manager=rule_engine_manager,
+        position_history=position_history,
+        eventbus=None,
+    )
     mocks = {
         "report_store": report_store,
         "strategy_registry": strategy_registry,
@@ -131,66 +114,24 @@ def _build_executors() -> tuple[dict, dict]:
         "strategy_loader": strategy_loader,
         "strategy_cls": FakeStrategy,
         "bot_manager": bot_manager,
+        "bots": bots,
         "treasury": treasury,
+        "treasury_manager": treasury_manager,
         "rule_engine": rule_engine,
+        "rule_engine_manager": rule_engine_manager,
     }
-    return executors, mocks
-
-
-def _build_validators(mocks: dict) -> dict:
-    """mock validator dict를 생성."""
-    from ante.strategy.registry import StrategyStatus
-
-    async def _validate_bot_create(params: dict) -> list[ValidationResult]:
-        from ante.approval.handlers import _approval_bot_create_config
-
-        try:
-            config = _approval_bot_create_config(params)
-        except Exception as e:
-            return [ValidationResult("fail", str(e), "system:bot_manager")]
-
-        results: list[ValidationResult] = []
-        if config.bot_id and mocks["bot_manager"].get_bot(config.bot_id):
-            results.append(
-                ValidationResult(
-                    "fail",
-                    f"동일 ID의 봇이 이미 존재: {config.bot_id}",
-                    "system:bot_manager",
-                )
-            )
-
-        record = await mocks["strategy_registry"].get(config.strategy_id)
-        if record is None:
-            results.append(
-                ValidationResult(
-                    "fail",
-                    f"전략을 찾을 수 없습니다: {config.strategy_id}",
-                    "system:strategy_registry",
-                )
-            )
-        elif record.status != StrategyStatus.ADOPTED:
-            results.append(
-                ValidationResult(
-                    "fail",
-                    f"전략이 adopted 상태가 아닙니다: {config.strategy_id}",
-                    "system:strategy_registry",
-                )
-            )
-        return results or [ValidationResult("pass", "", "system:bot_manager")]
-
-    return {"bot_create": _validate_bot_create}
+    return deps, mocks
 
 
 @pytest.fixture
-async def service_with_executors(db, eventbus):
-    """모든 executor가 등록된 ApprovalService."""
-    executors, mocks = _build_executors()
-    validators = _build_validators(mocks)
+async def service_with_executors(db, eventbus, monkeypatch):
+    """실제 executor·validator가 등록된 ApprovalService."""
+    deps, mocks = _build_deps(monkeypatch)
     svc = ApprovalService(
         db=db,
         eventbus=eventbus,
-        executors=executors,
-        validators=validators,
+        executors=build_executors(deps),
+        validators=build_validators(deps),
     )
     await svc.initialize()
     return svc, mocks
@@ -257,7 +198,7 @@ class TestBotCreateExecutor:
         svc, mocks = service_with_executors
         params = {
             "config": {
-                "bot_id": "bot-1",
+                "bot_id": "bot-new",
                 "strategy_id": "strat-1",
                 "name": "momentum-bot",
                 "account_id": "acc-test",
@@ -272,7 +213,7 @@ class TestBotCreateExecutor:
         )
         await svc.approve(req.id)
         expected_config = BotConfig(
-            bot_id="bot-1",
+            bot_id="bot-new",
             strategy_id="strat-1",
             name="momentum-bot",
             account_id="acc-test",
@@ -309,7 +250,7 @@ class TestBotCreateExecutor:
                 title="봇 생성",
                 params={
                     "config": {
-                        "bot_id": "bot-1",
+                        "bot_id": "bot-new",
                         "strategy_id": "strat-1",
                         "account_id": "acc-test",
                     }
@@ -333,6 +274,34 @@ class TestBotAssignStrategyExecutor:
         mocks["bot_manager"].assign_strategy.assert_awaited_once_with(
             "bot-1", "strat-1"
         )
+
+    async def test_create_rejects_missing_bot(self, service_with_executors):
+        svc, mocks = service_with_executors
+        with pytest.raises(ApprovalValidationError, match="봇이 존재하지 않음"):
+            await svc.create(
+                type="bot_assign_strategy",
+                requester="agent",
+                title="전략 배정",
+                params={"bot_id": "bot-missing", "strategy_id": "strat-1"},
+            )
+        mocks["bot_manager"].assign_strategy.assert_not_awaited()
+
+    async def test_approve_fails_when_strategy_unadopted_after_create(
+        self, service_with_executors
+    ):
+        from ante.strategy.registry import StrategyStatus
+
+        svc, mocks = service_with_executors
+        req = await svc.create(
+            type="bot_assign_strategy",
+            requester="agent",
+            title="전략 배정",
+            params={"bot_id": "bot-1", "strategy_id": "strat-1"},
+        )
+        mocks["strategy_record"].status = StrategyStatus.REGISTERED
+        result = await svc.approve(req.id)
+        assert result.status == ApprovalStatus.EXECUTION_FAILED
+        mocks["bot_manager"].assign_strategy.assert_not_awaited()
 
 
 class TestBotChangeStrategyExecutor:
@@ -436,9 +405,10 @@ class TestRuleChangeExecutor:
 class TestAllExecutorsRegistered:
     """모든 결재 유형에 executor가 등록되어 있는지 확인."""
 
-    def test_all_types_have_executor(self):
+    def test_all_types_have_executor(self, monkeypatch):
         """10개 결재 유형 모두 executor가 등록되어 있다."""
-        executors, _ = _build_executors()
+        deps, _ = _build_deps(monkeypatch)
+        executors = build_executors(deps)
         expected_types = {
             "strategy_adopt",
             "strategy_retire",

@@ -16,7 +16,7 @@
 - stop() → Task 취소 + on_stop() 호출 + BotStoppedEvent 발행 확인
 - on_stop() 예외 시 stop()이 STOPPED 전이 + BotStoppedEvent 발행 뒤 예외를 다시 올림, stop_bot·실행 중 assign_strategy는 전략별 룰 제거, 계좌 정지는 나머지 봇을 계속 중지 확인
 - OrderFilledEvent 수신 → 해당 bot_id만 on_fill() 호출 확인
-- VIRTUAL 계좌 봇: VirtualPortfolioView 가상 자금 관리 정상 동작
+- VIRTUAL 계좌 봇: VirtualPortfolioView의 보유·잔고가 재시작·재조립 뒤에도 포지션 표·봇 예산과 같음 확인
 - BotManager: 복수 봇 동시 운영 + 개별 시작/중지 확인
 - BotManager: 봇 생성 시 Account 존재·상태 검증 확인
 - BotManager: Strategy.meta.exchange와 Account.exchange 불일치 시 에러 확인

@@ -107,7 +107,7 @@ error-taxonomy.md 자체를 갱신한다.
   는 `AUTH_REQUIRED`/`AUTH_FAILED`/`PERMISSION_DENIED`의 legacy alias로 정렬 (#1815 migration 책임)
 - `SERVICE_NOT_CONFIGURED`를 `service_unavailable` category 안정 코드로 등록 (#1819 소비)
 - 대표 fault lock: `InvalidAccountIdError → VALIDATION_ERROR`, `BotNotFoundError → BOT_NOT_FOUND`,
-  `ApprovalNotFoundError → APPROVAL_NOT_FOUND`, `MemberInvalidScopeError → MEMBER_INVALID_SCOPE`
+  `ApprovalNotFoundError → APPROVAL_NOT_FOUND`, `InvalidScopeError → MEMBER_INVALID_SCOPE`
 - broker 원천 code는 envelope 최상위 `code` 슬롯에 노출 금지 (ante public taxonomy만 노출)
 - `details: dict | None`은 CLI error envelope에만 있다(상세가 있을 때만 직렬화, 키는 envelopes.md). IPC error에는 없다
 - redaction: envelope `message`에 token/password/recovery_key 등 민감정보 포함 금지

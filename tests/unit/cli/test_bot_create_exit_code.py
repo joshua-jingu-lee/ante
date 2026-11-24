@@ -8,15 +8,12 @@
     으로 끝나서 SystemExit 가 발화하지 않음).
 
     자동화 호출자(특히 CI / agent 파이프라인)는 stdout JSON 만으로 분기하지
-    않고 process exit code 를 1차 신호로 사용한다. 본 테스트는 두 분기 모두에서
-    JSON / text 모드 양쪽이 exit 1 로 종료되며, stdout/stderr 에 기존 메시지가
-    정상 출력됨을 회귀 보장한다.
+    않고 process exit code 를 1차 신호로 사용한다. 본 테스트는 generic
+    Exception 분기에서 JSON / text 모드 양쪽이 exit 1 로 종료되며, stdout/stderr
+    에 기존 메시지가 정상 출력됨을 회귀 보장한다. BadParameter 분기는
+    ``--param`` 옵션과 함께 없어졌다 (#2684).
 
 Coverage map:
-    - BadParameter 분기 (``--param invalidformat``)
-      - JSON 모드: stdout JSON envelope ``{"status":"error","code":"",
-        "message":"잘못된 파라미터 형식: ..."}`` + exit 1.
-      - text 모드: stderr ``Error: 잘못된 파라미터 형식: ...`` + exit 1.
     - generic Exception 분기 (``ipc_send`` mock 으로 ``RuntimeError`` raise)
       - JSON 모드: stdout JSON envelope + exit 1.
       - text 모드: stderr ``Error: ...`` + exit 1.
@@ -57,8 +54,8 @@ Coverage map (#1558, Codex P2):
       - text 모드: stderr ``Error: 봇을 찾을 수 없습니다: ...`` + exit 1.
 
 SSOT 참조:
-    - ``src/ante/cli/commands/bot.py`` (``bot_create``, ``_parse_param``,
-      ``bot_positions``, canonical missing-bot 패턴은 ``bot_info``)
+    - ``src/ante/cli/commands/bot.py`` (``bot_create``, ``bot_positions``,
+      canonical missing-bot 패턴은 ``bot_info``)
     - ``src/ante/cli/formatter.py`` (``OutputFormatter.error`` 스키마)
     - ``src/ante/bot/manager.py`` (``BOT_SCHEMA``),
       ``src/ante/trade/position.py`` (``POSITION_SCHEMA``)
@@ -128,81 +125,6 @@ def _parse_json_line(stdout: str) -> dict[str, object]:
     raise AssertionError(f"stdout 에서 JSON dict 를 찾지 못함: {stdout!r}")
 
 
-# ── BadParameter 분기 (``--param invalidformat``) ───────────────────────────
-
-
-class TestBotCreateBadParamExitCode:
-    """``--param`` 로컬 파싱 실패 분기에서 exit 1 회귀."""
-
-    def test_bad_param_json_mode_emits_json_envelope_and_exits_1(
-        self, runner: CliRunner
-    ) -> None:
-        """JSON 모드: stdout JSON envelope + exit 1."""
-        result = runner.invoke(
-            cli,
-            [
-                "--format",
-                "json",
-                "bot",
-                "create",
-                "--name",
-                "테스트봇",
-                "--strategy",
-                "stg-1",
-                "--account",
-                "test",
-                "--param",
-                "invalidformat",
-            ],
-        )
-
-        assert result.exit_code == 1, (
-            f"expected exit 1, got {result.exit_code}\n"
-            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
-        )
-        payload = _parse_json_line(result.stdout)
-        assert payload["status"] == "error", payload
-        # #1784 Group A sweep: invalid --param 입력은 안정 코드
-        # ``BOT_INVALID_PARAM`` 으로 surface 한다 (이전: empty ``code``).
-        # 자동화/오라클이 메시지 텍스트 파싱 없이 invalid-input 분류 가능.
-        assert payload["code"] == "BOT_INVALID_PARAM", payload
-        assert "잘못된 파라미터 형식" in str(payload["message"]), payload
-        # text 메시지가 stderr 로 동시에 새지 않아야 한다.
-        assert "잘못된 파라미터 형식" not in result.stderr, result.stderr
-
-    def test_bad_param_text_mode_emits_stderr_and_exits_1(
-        self, runner: CliRunner
-    ) -> None:
-        """text 모드: stderr ``Error: 잘못된 파라미터 형식 ...`` + exit 1."""
-        result = runner.invoke(
-            cli,
-            [
-                "--format",
-                "text",
-                "bot",
-                "create",
-                "--name",
-                "테스트봇",
-                "--strategy",
-                "stg-1",
-                "--account",
-                "test",
-                "--param",
-                "invalidformat",
-            ],
-        )
-
-        assert result.exit_code == 1, (
-            f"expected exit 1, got {result.exit_code}\n"
-            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
-        )
-        # text 모드: stdout 에 JSON 이 새지 않아야 한다.
-        assert result.stdout.strip() == "", result.stdout
-        assert "Error: BOT_INVALID_PARAM: 잘못된 파라미터 형식" in result.stderr, (
-            result.stderr
-        )
-
-
 # ── generic Exception 분기 (``ipc_send`` raise) ─────────────────────────────
 
 
@@ -244,8 +166,8 @@ class TestBotCreateIPCExceptionExitCode:
         )
         payload = _parse_json_line(result.stdout)
         assert payload["status"] == "error", payload
-        # #1843 sub-PR 3: ``bot create`` generic except 가 ``emit_cli_error``
-        # 로 정렬되어, registry 미등록 + ``.code`` 부재 (RuntimeError) 인
+        # #1843 sub-PR 3 이후 지금은 예외가 ``AuthenticatedGroup.main`` 의 공통
+        # 출구로 전파되어, registry 미등록 + ``.code`` 부재 (RuntimeError) 인
         # 경우 taxonomy SSOT (``docs/specs/contracts/error-taxonomy.md``)
         # 의 ``EXECUTION_ERROR`` fallback 으로 surface 한다. 이전 ad-hoc
         # ``code=""`` 동작은 의도된 taxonomy 정렬 (#1840 helper SSOT) 로

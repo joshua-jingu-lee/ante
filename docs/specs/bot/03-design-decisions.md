@@ -97,12 +97,12 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 
 | 메서드명 | 파라미터 | 반환값 | 설명 |
 |----------|----------|--------|------|
-| `create_bot` | `config: BotConfig, strategy_cls: type[Strategy], ctx: StrategyContext \| None = None` | `Bot` | 봇 생성. ctx가 주입되면 그대로 사용하고, None이면 context_factory로 자동 생성. 이벤트 구독 등록 + DB 저장. `accepts_external_signals=True`이면 시그널 키 자동 발급 |
+| `create_bot` | `config: BotConfig, strategy_cls: type[Strategy], ctx: StrategyContext \| None = None` | `Bot` | 봇 생성. ctx가 주입되면 그대로 사용하고, None이면 context_factory로 자동 생성. 이벤트 구독 등록 + DB 저장. `accepts_external_signals=True`이면 시그널 키 자동 발급. `bot_id`가 메모리에 있거나 `deleted` 행으로 남아 있으면 `BotAlreadyExistsError`(`BOT_ALREADY_EXISTS`) — 삭제한 id는 다시 쓸 수 없다(보유·이력 귀속) |
 | `start_bot` | `bot_id: str` | `None` | 봇 시작. `bot.start()` 호출 |
 | `stop_bot` | `bot_id: str` | `None` | 봇 중지 |
 | `update_bot` | `bot_id: str, updates: dict` | `Bot` | 봇 설정 수정. **중지 상태에서만 가능** — RUNNING이면 `BotError` 발생. BotConfig는 frozen dataclass이므로 재생성 패턴 적용: 기존 config를 dict로 풀고 → updates 병합 → 새 BotConfig 생성 → Bot.config 교체 → DB 갱신. `budget` 키가 포함되면 `Treasury.deallocate()` + `Treasury.allocate()`로 예산 재조정. `strategy_id` 변경 시 StrategyRegistry 존재 확인 + exchange 호환성 검증 후 실행 코드도 함께 교체(아래 「전략 교체」). **`account_id`는 불변 필드** — updates에 현재 값과 다른 `account_id`가 포함되면 `BotImmutableFieldError`(안정 코드 `BOT_IMMUTABLE_FIELD`, validation 카테고리) 발생. 같은 값(no-op)·미포함은 통과 |
 
-**`account_id` 불변 정책 (#2282)**: 봇의 `account_id`는 생성 후 변경할 수 없다. treasury 예산은 옛 account 아래에 할당되고, broker credential도 옛 account에 바인딩되며, 포지션 격리도 account-bound이므로, `account_id`를 변경하면 이 자원들이 새 account로 재배치되지 않아 불일치가 발생한다. 단일 사용자 홈서버에서 복잡한 re-isolation(예산 이전·credential 재바인딩·포지션 마이그레이션)을 구현하는 대신, `account_id`를 `update_bot`의 불변 필드로 제약한다(YAGNI 안전 기본). 변경이 필요하면 **봇을 삭제 후 재생성**한다. 이는 Account의 불변 필드(`exchange`/`currency`/`trading_mode`/`broker_type`, `AccountImmutableFieldError`) 정책과 정합한다([account/04-account-service.md](../account/04-account-service.md) 참조). `_save_bot_config`의 UPSERT가 `account_id` 컬럼을 갱신하는 것(#2274, create/load 경로 persistence 일관성)은 그대로 유지되며, 제약은 `update_bot` ingress에서만 적용된다.
+**`account_id` 불변 정책 (#2282)**: 봇의 `account_id`는 생성 후 변경할 수 없다. treasury 예산은 옛 account 아래에 할당되고, broker credential도 옛 account에 바인딩되며, 포지션 격리도 account-bound이므로, `account_id`를 변경하면 이 자원들이 새 account로 재배치되지 않아 불일치가 발생한다. 단일 사용자 홈서버에서 복잡한 re-isolation(예산 이전·credential 재바인딩·포지션 마이그레이션)을 구현하는 대신, `account_id`를 `update_bot`의 불변 필드로 제약한다(YAGNI 안전 기본). 변경이 필요하면 봇을 삭제한 뒤 **새 `bot_id`로** 다시 만든다. 이는 Account의 불변 필드(`exchange`/`currency`/`trading_mode`/`broker_type`, `AccountImmutableFieldError`) 정책과 정합한다([account/04-account-service.md](../account/04-account-service.md) 참조). `_save_bot_config`의 UPSERT가 `account_id` 컬럼을 갱신하는 것(#2274, create/load 경로 persistence 일관성)은 그대로 유지되며, 제약은 `update_bot` ingress에서만 적용된다.
 | `delete_bot` | `bot_id: str, handle_positions: str = "keep"` | `None` | 봇 삭제. 실행 중이면 먼저 중지. `handle_positions="liquidate"` 시 TradeService를 통해 보유 종목 시장가 매도 주문 발행 후 삭제 진행. `"keep"`(기본)은 포지션 유지한 채 봇만 삭제. 이벤트 구독 해제 + VIRTUAL 계좌 봇의 VirtualExecutor 해제 + 시그널 키 폐기 + DB 레코드 삭제. `remove_bot`은 동일 기능의 별칭(alias) |
 | `stop_all` | — | `None` | 모든 실행 중 봇 중지 + 재시작 태스크 취소. 시스템 셧다운 시 호출 |
 | `list_bots` | — | `list[dict[str, Any]]` | 봇 목록 조회 |
@@ -130,7 +130,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 
 1. **봇 유형 차이는 StrategyContext 주입으로 해결**
    - LIVE 계좌 봇: 실제 계좌 연동 PortfolioView (Treasury + Trade 경유)
-   - VIRTUAL 계좌 봇: 가상 자금 PortfolioView (독립 인메모리)
+   - VIRTUAL 계좌 봇: 가상 자금 PortfolioView (Treasury(잔고) + Trade(포지션) 경유 — 실전과 같은 정본)
    - DataProvider는 동일 — VIRTUAL 계좌도 실시간 시세 데이터를 사용
    - Bot 클래스는 하나, 주입되는 의존성만 다름
    - ContextFactory가 Account의 trading_mode를 참조하여 적절한 의존성을 주입
@@ -152,13 +152,13 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 
 | 측면 | LIVE 계좌 봇 | VIRTUAL 계좌 봇 |
 |------|-------------|----------------|
-| PortfolioView | Treasury(잔고) + Trade(포지션) 경유 | VirtualPortfolioView, 가상 자금 인메모리 관리 |
+| PortfolioView | Treasury(잔고) + Trade(포지션) 경유 | VirtualPortfolioView, Treasury(잔고) + Trade(포지션) 경유 |
 | 주문 처리 | OrderRequestEvent → RuleEngine → BrokerAdapter → 실제 주문 | OrderRequestEvent → RuleEngine → VirtualExecutor → 가상 체결 |
 | 데이터 | 실시간 시세 (API Gateway 경유) | 실시간 시세 (동일) |
-| 자금 | Treasury에서 할당받은 실제 자금 | Account 레벨에서 설정된 가상 자금 |
+| 자금 | Treasury에서 할당받은 실제 자금 | Treasury에서 할당받은 가상 자금(봇 예산) |
 | 체결 | BrokerAdapter가 실제 체결 후 OrderFilledEvent 발행 | VirtualExecutor가 즉시 가상 체결 → FillApplier direct 적용 후 OrderFilledEvent 발행 |
 | 브로커 접근 | `AccountService.get_broker(account_id)` | — (VirtualExecutor 사용) |
-| 예산 접근 | `TreasuryManager.get(account_id)` | 가상 자금 관리 |
+| 예산 접근 | `TreasuryManager.get(account_id)` | `TreasuryManager.get(account_id)` |
 
 **근거**:
 - Bot 자체는 trading_mode를 모른다. Account의 trading_mode에 따라 ContextFactory가 실행 경로를 결정

@@ -16,10 +16,12 @@ from ante.account.errors import (
     AccountHasActiveBotsError,
     AccountImmutableFieldError,
     AccountNotFoundError,
+    AccountReconcileNotApplicableError,
     AccountStructuralChangeRequiresStoppedServerError,
     AccountSuspendedError,
     BrokerReconnectFailedError,
     InvalidAccountIdError,
+    InvalidBrokerConfigError,
     InvalidBrokerTypeError,
     InvalidExchangeError,
     MissingCredentialsError,
@@ -72,7 +74,6 @@ from ante.contracts.cli_errors import (
     BacktestInvalidExchangeError,
     BacktestInvalidSymbolError,
     BacktestInvalidTimeframeError,
-    BotInvalidParamError,
     BotMissingRequiredAccountError,
     CliAlreadyInitializedError,
     CliAuthFailedError,
@@ -227,6 +228,11 @@ _ACCOUNT_INVALID_EXCHANGE_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="validation",
 )
 
+_ACCOUNT_INVALID_BROKER_CONFIG_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="VALIDATION_ERROR",
+    category="validation",
+)
+
 _ACCOUNT_MISSING_CREDENTIALS_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="ACCOUNT_MISSING_CREDENTIALS",
     category="validation",
@@ -245,6 +251,12 @@ _ACCOUNT_DELETED_SPEC: Final[ErrorSpec] = ErrorSpec(
 _ACCOUNT_SUSPENDED_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="ACCOUNT_SUSPENDED",
     category="state_conflict",
+)
+
+_ACCOUNT_RECONCILE_NOT_APPLICABLE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_RECONCILE_NOT_APPLICABLE",
+    category="state_conflict",
+    description="가상 계좌(D-ACC-09 reconcile 면제)에 대한 수동 대사",
 )
 
 _ACCOUNT_IMMUTABLE_FIELD_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -420,7 +432,7 @@ _TREASURY_NOT_CONFIGURED_SPEC: Final[ErrorSpec] = ErrorSpec(
 
 _BROKER_AUTH_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="BROKER_AUTH_FAILED",
-    category="auth",
+    category="external",
 )
 
 _BROKER_API_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -887,11 +899,6 @@ _APPROVAL_INVALID_TYPE_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="validation",
 )
 
-_BOT_INVALID_PARAM_SPEC: Final[ErrorSpec] = ErrorSpec(
-    code="BOT_INVALID_PARAM",
-    category="validation",
-)
-
 _BOT_MISSING_REQUIRED_ACCOUNT_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="BOT_MISSING_REQUIRED_ACCOUNT",
     category="validation",
@@ -1075,6 +1082,7 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     AccountAlreadyExistsError: _ACCOUNT_ALREADY_EXISTS_SPEC,
     InvalidBrokerTypeError: _ACCOUNT_INVALID_BROKER_TYPE_SPEC,
     InvalidExchangeError: _ACCOUNT_INVALID_EXCHANGE_SPEC,
+    InvalidBrokerConfigError: _ACCOUNT_INVALID_BROKER_CONFIG_SPEC,
     MissingCredentialsError: _ACCOUNT_MISSING_CREDENTIALS_SPEC,
     AccountAlreadySuspendedError: _ACCOUNT_ALREADY_SUSPENDED_SPEC,
     AccountDeletedError: _ACCOUNT_DELETED_SPEC,
@@ -1083,6 +1091,7 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     BrokerReconnectFailedError: _BROKER_RECONNECT_FAILED_SPEC,
     AccountStructuralChangeRequiresStoppedServerError: _ACCOUNT_STRUCTURAL_CHANGE_SPEC,
     AccountHasActiveBotsError: _ACCOUNT_HAS_ACTIVE_BOTS_SPEC,
+    AccountReconcileNotApplicableError: _ACCOUNT_RECONCILE_NOT_APPLICABLE_SPEC,
     PermissionDeniedError: _MEMBER_PERMISSION_DENIED_SPEC,
     MemberNotFoundError: _MEMBER_NOT_FOUND_SPEC,
     MemberStateConflictError: _MEMBER_STATE_CONFLICT_SPEC,
@@ -1178,7 +1187,6 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     UpdateServerRunningError: _UPDATE_SERVER_RUNNING_SPEC,
     ApprovalInvalidStatusError: _APPROVAL_INVALID_STATUS_SPEC,
     ApprovalInvalidTypeError: _APPROVAL_INVALID_TYPE_SPEC,
-    BotInvalidParamError: _BOT_INVALID_PARAM_SPEC,
     BotMissingRequiredAccountError: _BOT_MISSING_REQUIRED_ACCOUNT_SPEC,
     CliBotNotFoundError: _BOT_NOT_FOUND_SPEC,
     CliMissingRequiredInputError: _CLI_MISSING_REQUIRED_INPUT_SPEC,

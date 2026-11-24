@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -81,3 +82,15 @@ class BrokerPreset:
     default_account_id: str
     default_name: str
     required_credentials: list[str]
+
+
+def is_blank_credential(value: Any) -> bool:
+    """인증정보 값이 없거나 거짓 값이거나 공백만인 문자열이면 참."""
+    return not value or (isinstance(value, str) and not value.strip())
+
+
+def missing_required_credentials(
+    required: Iterable[str], credentials: Mapping[str, Any]
+) -> list[str]:
+    """필수 키 가운데 값이 비어 있는 키 이름을 필수 키의 순서로 돌려준다."""
+    return [key for key in required if is_blank_credential(credentials.get(key))]

@@ -180,8 +180,9 @@ class TestStrategyLoadErrorEquivalence:
     """``StrategyLoadError`` 는 양쪽에서 ``STRATEGY_LOAD_ERROR``.
 
     CLI direct path: ``strategy submit`` 의 load 단계가 ``StrategyLoader.load``
-    에서 raise → ``except StrategyLoadError`` 분기의 ``emit_cli_error`` 가
-    registry MRO lookup 으로 ``STRATEGY_LOAD_ERROR`` 를 surface.
+    에서 raise → ``except StrategyLoadError`` 분기가 다시 올린 예외를
+    ``AuthenticatedGroup.main`` 이 registry MRO lookup 으로 ``STRATEGY_LOAD_ERROR``
+    로 surface.
 
     submit 표면은 path 인자 + 파일 시스템 의존성이 많아 본 test 는 IPC
     envelope equivalence 만 단언한다 (registry resolver 가 동일 코드를

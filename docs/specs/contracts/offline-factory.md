@@ -229,9 +229,6 @@ PRAGMA가 쓰기를 요구하기 때문이다. 따라서 옵션 A를 normative�
   ```python
   async with open_cli_db(ctx) as db:
       ...
-
-  async with open_cli_account_service(ctx, read_only=True) as service:
-      ...
   ```
 - factory 내부는 `get_db_path(ctx)` / `get_config_dir(ctx)`를 호출한다. ctx
   없는 `get_db_path()` 호출은 **factory 내부에서 금지**한다.

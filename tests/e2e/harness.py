@@ -53,6 +53,7 @@ SAFE_SEGMENT = re.compile(r"[\w.-]+")
 ROOT_MARK = "<root>"
 REDACTED = "<redacted>"
 SECRET_KEYS = frozenset({"token", "api_key", "secret", "password"})
+SECRET_SUFFIXES = ("_token", "_secret", "_key")
 
 
 class HarnessError(AssertionError):
@@ -118,7 +119,7 @@ def run_json_command(
             timeout=timeout,
             check=False,
         )
-    except (subprocess.TimeoutExpired, OSError):
+    except BaseException:
         if recorder is not None:
             elapsed = time.monotonic() - started
             recorder.record_cli(argv, None, None, elapsed, expect_failure)
@@ -222,9 +223,11 @@ def _collect_secrets(payload: Any, found: set[str]) -> None:
     if isinstance(payload, dict):
         for key, item in payload.items():
             name = str(key).lower()
-            secret = name in SECRET_KEYS or name.endswith("_token")
+            secret = name in SECRET_KEYS or name.endswith(SECRET_SUFFIXES)
             if secret and isinstance(item, str) and item:
                 found.add(item)
+            if secret and isinstance(item, list):
+                found.update(v for v in item if isinstance(v, str) and v)
             _collect_secrets(item, found)
     elif isinstance(payload, list):
         for item in payload:

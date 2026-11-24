@@ -17,7 +17,10 @@ ante feed start
   ├─ [스케줄 루프]
   │   ├─ backfill 미완료? → backfill_at 시각에 backfill 실행
   │   ├─ daily_at 시각 도달? → daily 실행
-  │   └─ 방어 가드 (blocked_days/blocked_hours 해당 시 대기)
+  │   └─ 방어 가드는 각 실행 안에서 확인 (아래 절)
+  │       backfill: data.go.kr 날짜 루프에서만 (blocked_hours 대기 / blocked_days 그 날짜 skip)
+  │       daily: blocked_hours·blocked_days 해당 시 그 실행을 건너뜀
+  │       스케줄 루프는 가드로 건너뛴 daily도 그날의 실행으로 친다
   │
   └─ 종료 시그널(SIGTERM) 수신 시 체크포인트 저장 후 안전 종료
 ```
@@ -62,7 +65,8 @@ ante feed run daily
   │
   ├─ config 로드 ({data.path}/.feed/config.toml + .env + 환경변수)
   ├─ 전일 날짜 결정
-  ├─ 방어 가드 (blocked_days/blocked_hours)
+  ├─ 방어 가드 (blocked_days: 수집 대상 날짜 요일 / blocked_hours: 현재 시각)
+  │   └─ 해당 시 대기 없이 이 실행을 건너뜀 (data.go.kr·DART 모두 수집 안 함)
   ├─ 동일 ETL 흐름 (날짜 1개)
   └─ 리포트 생성
 ```

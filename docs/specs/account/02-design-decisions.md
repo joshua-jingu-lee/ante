@@ -176,7 +176,7 @@ per-account 4개 플래그를 둔다. 디폴트 초기값은 `not_ready`이며, 
 
 - virtual은 broker API를 미호출하므로(주문은 `VirtualExecutor`가 가상 체결, [api-gateway.md](../api-gateway/api-gateway.md) "Virtual 주문 라우팅" 참조) broker / fill / reconcile이 무의미하다. test도 동일하다. **단, virtual broker_ready 면제는 VirtualExecutor의 시장가 가격 안전(가격 조회 실패 시 0원 체결 금지·terminal reject, api-gateway.md 참조)과 짝을 이룬다** — broker 장애 중 virtual 시장가 0원 체결 회귀 방지(#2398). **virtual / test fill·reconcile은 broker-backed 스케줄러를 등록하지 않고 registry에 no-op으로 ready mark(면제)한다([must_fix H] 재정의 / R2 정합)** — broker-backed 등록을 유지하면 `_init_fill_recovery`/`_init_reconcile`이 `get_broker`를 호출해 virtual을 KIS 토큰/connect 실패에 **재노출**하여 readiness 분리 전제가 붕괴되기 때문이다. readiness SSOT는 registry 단독이므로 broker-backed dict에 virtual key가 없어도 drift가 없다(registry no-op mark가 단일 권위). LIVE 계좌만 broker-backed 스케줄러 등록 → registry mark.
 - `BROKER_REGISTRY` 미래 타입의 default 정책은 **fail-closed**다(매트릭스에 미지정인 `(broker_type, trading_mode)` pair는 모든 플래그를 요구로 취급).
-- `mock`은 가상 전용이라 `(mock, live)` 행을 두지 않는다. 그 조합은 계좌 생성과 어댑터 조립에서 거부되며([broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#브로커-타입-mock)), 매트릭스에서는 위 fail-closed 기본 정책을 따른다. 시나리오 하네스의 테스트 주입으로 열린 `(mock, live)` 계좌도 이 기본 정책(넷 다 요구)을 따른다.
+- `mock`과 `test`는 가상 전용이라 `(mock, live)`·`(test, live)` 행을 두지 않는다. 그 조합은 계좌 생성과 어댑터 조립에서 거부되며([broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#가상-전용)), 매트릭스에서는 위 fail-closed 기본 정책을 따른다. 시나리오 하네스의 테스트 주입으로 열린 `(mock, live)` 계좌도 이 기본 정책(넷 다 요구)을 따른다.
 
 #### (5) 자동전이 ([must_fix B], normative)
 
@@ -210,7 +210,7 @@ active-trading 차단 효과는 **일관**한다(둘 중 하나라도 막으면 
 **final backstop은 경로별로 비대칭이다(attempt5 P2)**: APIGateway는 virtual(`trading_mode != LIVE`) 주문의 `broker.place_order`를 **silent skip**하므로([api-gateway.md](../api-gateway/api-gateway.md) "Virtual 주문 라우팅"), 계층3(`gateway`)의 SUSPENDED 재확인은 **virtual 주문에 도달하지 않는다**. 따라서 in-flight SUSPENDED 차단의 **최종 backstop은 경로별로 다르다**:
 
 - **LIVE 경로 = 계층3 `gateway`**: `gateway.submit_order` → `broker.place_order` **직전** 단일 재확인 지점에서 **readiness AND status(SUSPENDED)** 를 함께 재평가해 in-flight suspend를 잡는다.
-- **virtual 경로 = `VirtualExecutor`**: gateway가 virtual을 skip하므로 VirtualExecutor가 virtual 경로의 **유일한 최종 backstop**이다. `apply_fill`/`OrderFilledEvent` **직전**, 기존 G9 readiness 차단과 **동일 지점·동일 단일 fetch**에서 **status(SUSPENDED)도 함께** 재확인한다(LIVE 경로 `account_suspended` 차단과 대칭).
+- **virtual 경로 = `VirtualExecutor`**: gateway가 virtual을 skip하므로 VirtualExecutor가 virtual 경로의 **유일한 최종 backstop**이다. `FillApplier.apply_direct_fill`/`OrderFilledEvent` **직전**, 기존 G9 readiness 차단과 **동일 지점·동일 단일 fetch**에서 **status(SUSPENDED)도 함께** 재확인한다(LIVE 경로 `account_suspended` 차단과 대칭).
 
 두 경로 모두 status는 **단일 fresh fetch**(await 이후 최신값)로 보며 routing 스냅샷을 재사용하지 않는다(stale 통과 금지). status 3-state(verified / `STATUS_UNAVAILABLE` 검증불가 fail-closed / `None` 소스미구성) 도출은 계층1·계층3·VirtualExecutor가 **동일 공유 헬퍼**(`ante.account.gate.resolve_account_status` / `derive_account_status`)를 써 중복 구현을 금지한다(SSOT). status 차단 reason은 `account_suspended` / `account_status_unavailable`이며 `OrderFailedEvent`로 귀결돼 reserve를 정확 해제하고(G3) G6 운영자 알림(error/system)을 정확히 1회 발행한다([broker-adapter/11-order-flow.md](../broker-adapter/11-order-flow.md) 계층3 census 참조).
 

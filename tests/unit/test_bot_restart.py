@@ -14,6 +14,7 @@ from ante.eventbus.events import (
     BotErrorEvent,
     BotRestartExhaustedEvent,
     BotStartedEvent,
+    NotificationEvent,
 )
 
 
@@ -437,10 +438,76 @@ class TestDeleteStopsRestart:
 
             assert manager._restart_tasks.get("b1") is restart
             assert not restart.done()
+            assert manager.get_restart_count("b1") == 1
             assert manager.get_bot("b1") is bot
             assert bot.status == BotStatus.ERROR
         finally:
             await manager.stop_all()
+
+    async def test_error_during_failed_delete_schedules_no_restart(
+        self, manager, eventbus, monkeypatch
+    ):
+        bot = await self._error_bot(manager)
+        self._gate_cooldown(monkeypatch)
+        notified: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, notified.append)
+
+        async def _error_then_fail(target):
+            await eventbus.publish(
+                BotErrorEvent(bot_id="b1", error_message="boom", account_id="acc-test")
+            )
+            raise RuntimeError("liquidate down")
+
+        monkeypatch.setattr(manager, "_liquidate_positions", _error_then_fail)
+        try:
+            with pytest.raises(RuntimeError, match="liquidate down"):
+                await manager.delete_bot("b1", handle_positions="liquidate")
+
+            assert "b1" not in manager._restart_tasks
+            assert manager.get_restart_count("b1") == 0
+            assert bot.status == BotStatus.ERROR
+            assert [n.title for n in notified if n.title == "봇 에러"] == ["봇 에러"]
+        finally:
+            await manager.stop_all()
+
+    async def test_error_during_delete_with_exhausted_count_still_reports(
+        self, manager, eventbus, monkeypatch
+    ):
+        await self._error_bot(manager)
+        self._gate_cooldown(monkeypatch)
+        manager._restart_counts["b1"] = 3
+        exhausted: list[BotRestartExhaustedEvent] = []
+        eventbus.subscribe(BotRestartExhaustedEvent, exhausted.append)
+
+        async def _error_during_delete(target):
+            await eventbus.publish(
+                BotErrorEvent(bot_id="b1", error_message="boom", account_id="acc-test")
+            )
+            assert "b1" not in manager._restart_tasks
+            assert manager.get_restart_count("b1") == 3
+
+        monkeypatch.setattr(manager, "_liquidate_positions", _error_during_delete)
+        try:
+            await manager.delete_bot("b1", handle_positions="liquidate")
+        finally:
+            await manager.stop_all()
+
+        assert len(exhausted) == 1
+        assert exhausted[0].bot_id == "b1"
+        assert exhausted[0].restart_attempts == 3
+        assert "b1" not in manager._restart_tasks
+
+    @pytest.mark.parametrize("hard", [False, True], ids=["soft", "hard"])
+    async def test_delete_clears_restart_count(self, manager, hard):
+        await self._error_bot(manager)
+        manager._restart_counts["b1"] = 2
+
+        await manager.delete_bot("b1", hard=hard)
+        assert manager.get_restart_count("b1") == 0
+
+        if hard:
+            await self._error_bot(manager)
+            assert manager.get_restart_count("b1") == 0
 
 
 # ── BotRestartExhaustedEvent 필드 ──────────────────

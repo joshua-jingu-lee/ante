@@ -16,9 +16,11 @@ from ante.account.errors import (
     AccountHasActiveBotsError,
     AccountImmutableFieldError,
     AccountNotFoundError,
+    AccountReconcileNotApplicableError,
     AccountStructuralChangeRequiresStoppedServerError,
     BrokerReconnectFailedError,
     InvalidAccountIdError,
+    InvalidBrokerConfigError,
     InvalidBrokerTypeError,
     InvalidExchangeError,
     MissingCredentialsError,
@@ -28,13 +30,16 @@ from ante.account.models import (
     Account,
     AccountStatus,
     TradingMode,
+    missing_required_credentials,
 )
 from ante.account.presets import BROKER_PRESETS, VIRTUAL_ONLY_BROKER_TYPES
+from ante.account.readiness import ReadinessFlag, is_flag_exempt
 from ante.account.scoping import require_account_id, validate_new_account_id
 from ante.account.timezone import validate_iana_timezone
 from ante.core import clock
 from ante.core.database import OperationalError
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
+from ante.core.price import is_valid_price
 
 if TYPE_CHECKING:
     from ante.broker.base import BrokerAdapter
@@ -107,6 +112,34 @@ def _reject_virtual_only_broker_in_live(account: Account) -> None:
         )
 
 
+def _reject_invalid_mock_prices(account: Account) -> None:
+    """``mock`` 계좌의 ``broker_config`` 가격 값을 가격 정의로 검사한다."""
+    if account.broker_type != "mock":
+        return
+    config = account.broker_config
+    if "prices" in config:
+        prices = config["prices"]
+        if not isinstance(prices, dict):
+            raise InvalidBrokerConfigError(
+                f"mock 계좌의 broker_config prices는 객체여야 합니다: {prices!r}"
+            )
+        invalid = {
+            symbol: value
+            for symbol, value in prices.items()
+            if not is_valid_price(value)
+        }
+        if invalid:
+            raise InvalidBrokerConfigError(
+                "mock 계좌의 broker_config prices 값은 불리언이 아닌 "
+                f"0보다 큰 유한한 수여야 합니다: {invalid!r}"
+            )
+    if "default_price" in config and not is_valid_price(config["default_price"]):
+        raise InvalidBrokerConfigError(
+            "mock 계좌의 broker_config default_price는 불리언이 아닌 "
+            f"0보다 큰 유한한 수여야 합니다: {config['default_price']!r}"
+        )
+
+
 def _transition_status(account: Account, target: AccountStatus) -> AccountStatus:
     if target not in ACCOUNT_STATUS_TRANSITIONS.get(account.status, set()):
         raise ValueError(
@@ -157,6 +190,18 @@ def _load_persisted_timezone(stored_tz: str, account_id: str) -> tuple[str, bool
         )
         return stored_tz, True
     return stored_tz, False
+
+
+def _reject_missing_credentials(broker_type: str, credentials: dict[str, Any]) -> None:
+    """프리셋의 필수 인증정보가 비어 있으면 키 이름만 실어 거부한다."""
+    preset = BROKER_PRESETS[broker_type]
+    missing = missing_required_credentials(preset.required_credentials, credentials)
+    if missing:
+        raise MissingCredentialsError(
+            f"필수 credentials 누락: {missing}. "
+            f"broker_type '{broker_type}'에 필요: "
+            f"{preset.required_credentials}"
+        )
 
 
 class AccountService:
@@ -292,17 +337,9 @@ class AccountService:
                 f"가능한 값: {list(BROKER_PRESETS.keys())}"
             )
         _reject_virtual_only_broker_in_live(account)
+        _reject_invalid_mock_prices(account)
 
-        preset = BROKER_PRESETS[account.broker_type]
-        missing = [
-            k for k in preset.required_credentials if k not in account.credentials
-        ]
-        if missing:
-            raise MissingCredentialsError(
-                f"필수 credentials 누락: {missing}. "
-                f"broker_type '{account.broker_type}'에 필요: "
-                f"{preset.required_credentials}"
-            )
+        _reject_missing_credentials(account.broker_type, account.credentials)
 
         now = clock.now(UTC)
         account.created_at = now
@@ -430,6 +467,11 @@ class AccountService:
         unrecognized = set(fields.keys()) - updatable - self.IMMUTABLE_FIELDS
         if unrecognized:
             raise ValueError(f"인식할 수 없는 필드입니다: {sorted(unrecognized)}")
+
+        if "credentials" in fields and account.broker_type in BROKER_PRESETS:
+            _reject_missing_credentials(
+                account.broker_type, fields["credentials"] or {}
+            )
 
         timezone_update = fields.get("timezone")
         if timezone_update is not None:
@@ -796,6 +838,25 @@ class AccountService:
             await broker.connect()
             self._brokers[account_id] = broker
             return broker
+
+    async def ensure_reconcile_applicable(self, account_id: str) -> None:
+        """수동 대사를 할 수 있는 계좌인지 판정한다. 브로커는 만들지 않는다.
+
+        Raises:
+            AccountNotFoundError: 계좌를 찾을 수 없음.
+            AccountReconcileNotApplicableError: D-ACC-09 매트릭스에서 reconcile
+                이 면제인 계좌(가상).
+        """
+        account = await self.get(account_id)
+        if is_flag_exempt(
+            ReadinessFlag.RECONCILE,
+            broker_type=account.broker_type,
+            trading_mode=account.trading_mode,
+        ):
+            raise AccountReconcileNotApplicableError(
+                f"계좌 '{account_id}'는 가상 계좌라 브로커와 대사하지 않습니다. "
+                "가상 계좌의 포지션은 내부 기록이 기준입니다."
+            )
 
     async def get_cached_broker(self, account_id: str) -> BrokerAdapter | None:
         """이미 캐시된 BrokerAdapter 만 반환한다 (build/connect 없음).

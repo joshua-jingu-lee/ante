@@ -31,6 +31,7 @@
 | `ACCOUNT_MISSING_CREDENTIALS` | `validation` | 1 | `ante.account.errors.MissingCredentialsError` | — |
 | `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` | `validation` | 1 | `ante.contracts.cli_errors.AccountMissingRequiredCredentialError` | `BrokerPreset.required_credentials`에 정의된 credential key 누락 |
 | `ACCOUNT_NOT_FOUND` | `not_found` | 1 | `ante.account.errors.AccountNotFoundError` | — |
+| `ACCOUNT_RECONCILE_NOT_APPLICABLE` | `state_conflict` | 1 | `ante.account.errors.AccountReconcileNotApplicableError` | 가상 계좌(D-ACC-09 reconcile 면제)에 대한 수동 대사 |
 | `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` | `state_conflict` | 1 | `ante.account.errors.AccountStructuralChangeRequiresStoppedServerError` | — |
 | `ACCOUNT_SUSPENDED` | `state_conflict` | 1 | `ante.account.errors.AccountSuspendedError` | — |
 | `ACCOUNT_TEST_CREATE_FAILED` | `internal` | 1 | `ante.contracts.cli_errors.AccountTestCreateFailedError` | — |
@@ -51,7 +52,6 @@
 | `BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED` | `validation` | 1 | `ante.bot.exceptions.BotAccountCredentialsNotConfigured` | — |
 | `BOT_ALREADY_EXISTS` | `state_conflict` | 1 | `ante.bot.exceptions.BotAlreadyExistsError` | — |
 | `BOT_IMMUTABLE_FIELD` | `validation` | 1 | `ante.bot.exceptions.BotImmutableFieldError` | — |
-| `BOT_INVALID_PARAM` | `validation` | 1 | `ante.contracts.cli_errors.BotInvalidParamError` | — |
 | `BOT_MISSING_REQUIRED_ACCOUNT` | `validation` | 1 | `ante.contracts.cli_errors.BotMissingRequiredAccountError` | `--account` 생략 시 active 계좌가 0개 또는 2개 이상 |
 | `BOT_NOT_ACCEPTING_SIGNALS` | `state_conflict` | 1 | `ante.bot.exceptions.BotNotAcceptingSignals` | — |
 | `BOT_NOT_FOUND` | `not_found` | 1 | `ante.bot.exceptions.BotNotFoundError`<br>`ante.contracts.cli_errors.CliBotNotFoundError` | — |
@@ -60,7 +60,7 @@
 | `BOT_STATE_CONFLICT` | `state_conflict` | 1 | `ante.bot.exceptions.BotStateConflict` | — |
 | `BOT_STRATEGY_ALREADY_RUNNING` | `state_conflict` | 1 | `ante.bot.exceptions.BotStrategyAlreadyRunningError` | — |
 | `BROKER_API_ERROR` | `external` | 1 | `ante.broker.exceptions.APIError` | — |
-| `BROKER_AUTH_FAILED` | `auth` | 1 | `ante.broker.exceptions.AuthenticationError` | — |
+| `BROKER_AUTH_FAILED` | `external` | 1 | `ante.broker.exceptions.AuthenticationError` | — |
 | `BROKER_CIRCUIT_OPEN` | `service_unavailable` | 1 | `ante.broker.exceptions.CircuitOpenError` | — |
 | `BROKER_INVALID_TYPE` | `validation` | 1 | `ante.broker.registry.InvalidBrokerTypeError` | — |
 | `BROKER_MODIFY_ORGNO_UNAVAILABLE` | `state_conflict` | 1 | `ante.broker.exceptions.ModifyOrgnoUnavailableError` | — |
@@ -168,7 +168,7 @@
 | `UPDATE_MIGRATION_FAILED` | `internal` | 1 | `ante.contracts.cli_errors.UpdateMigrationFailedError` | — |
 | `UPDATE_ROLLBACK_FAILED` | `internal` | 1 | `ante.contracts.cli_errors.UpdateRollbackFailedError` | — |
 | `UPDATE_SERVER_RUNNING` | `state_conflict` | 1 | `ante.contracts.cli_errors.UpdateServerRunningError` | `ante update --force` 없이 서버가 실행 중 |
-| `VALIDATION_ERROR` | `validation` | 1 | `ante.account.errors.InvalidExchangeError`<br>`ante.contracts.cli_errors.FeedInjectValidationError`<br>`ante.contracts.request_errors.RequestValidationError`<br>`ante.core.account_id.InvalidAccountIdError`<br>`ante.core.time.InvalidIsoDateError` | — |
+| `VALIDATION_ERROR` | `validation` | 1 | `ante.account.errors.InvalidBrokerConfigError`<br>`ante.account.errors.InvalidExchangeError`<br>`ante.contracts.cli_errors.FeedInjectValidationError`<br>`ante.contracts.request_errors.RequestValidationError`<br>`ante.core.account_id.InvalidAccountIdError`<br>`ante.core.time.InvalidIsoDateError` | — |
 | `auth_failed` | `auth` | 1 | `ante.contracts.cli_errors.CliAuthFailedError` | `ANTE_MEMBER_TOKEN`의 토큰 판정 거부와 DB `connect()` 실패 |
 | `auth_required` | `auth` | 1 | `ante.contracts.cli_errors.CliAuthRequiredError` | `@require_auth` 미충족 (`ctx.obj["member"] is None`) |
 | `permission_denied` | `permission` | 1 | `ante.contracts.cli_errors.CliPermissionDeniedError` | 인증 OK이나 scope 부족 |

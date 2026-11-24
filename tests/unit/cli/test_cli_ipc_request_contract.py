@@ -75,7 +75,6 @@ ROWS: tuple[Row, ...] = (
         "bot create",
         ("--name", "n", "--strategy", "s", "--account", ACCOUNT),
         ("--name", "n", "--strategy", "s", "--account", ACCOUNT, "--id", "b1"),
-        ("--name", "n", "--strategy", "s", "--account", ACCOUNT, "--param", "k=v"),
     ),
     *_rows("bot remove", ("b1", "--yes")),
     *_rows("bot start", ("b1",)),
@@ -153,7 +152,7 @@ ROWS: tuple[Row, ...] = (
     ),
     *_rows("broker reconcile", ("--account", ACCOUNT), ("--account", ACCOUNT, "--fix")),
     *_rows("system halt", (), ("--reason", "r")),
-    *_rows("system clear-halt", ()),
+    *_rows("system clear-halt", (), ("--reason", "r")),
 )
 
 COMMAND_EXCEPTIONS: dict[tuple[tuple[str, ...], str], str] = {

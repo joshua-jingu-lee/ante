@@ -1,4 +1,4 @@
-"""mock 브로커 타입을 계좌에 연결하는 경로 테스트."""
+"""mock·test 브로커 타입(가상 전용)을 계좌에 연결하는 경로 테스트."""
 
 from __future__ import annotations
 
@@ -15,7 +15,9 @@ from ante.account.models import Account, TradingMode
 from ante.account.presets import BROKER_PRESETS, VIRTUAL_ONLY_BROKER_TYPES
 from ante.account.readiness import ReadinessFlag, RuntimeReadinessRegistry
 from ante.account.service import AccountService
-from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
+from ante.bot.providers.virtual import VirtualExecutor
+from ante.broker import test as test_broker
+from ante.broker.kis import KISAdapter
 from ante.broker.mock import MockBrokerAdapter
 from ante.broker.registry import BROKER_REGISTRY
 from ante.core.database import Database
@@ -26,13 +28,22 @@ from ante.gateway.gateway import APIGateway
 ACCOUNT_ID = "scenario"
 
 
-def _mock_account(
+_CREDENTIALS: dict[str, dict[str, str]] = {
+    "mock": {},
+    "test": {"app_key": "x", "app_secret": "x"},
+    "kis-domestic": {"app_key": "x", "app_secret": "x", "account_no": "12345678-01"},
+}
+
+
+def _account(
+    broker_type: str,
     prices_file: str,
     *,
     account_id: str = ACCOUNT_ID,
     trading_mode: TradingMode = TradingMode.VIRTUAL,
 ) -> Account:
-    preset = BROKER_PRESETS["mock"]
+    preset = BROKER_PRESETS[broker_type]
+    broker_config = {"prices_file": prices_file} if broker_type == "mock" else {}
     return Account(
         account_id=account_id,
         name="시나리오",
@@ -42,13 +53,17 @@ def _mock_account(
         trading_hours_start=preset.trading_hours_start,
         trading_hours_end=preset.trading_hours_end,
         trading_mode=trading_mode,
-        broker_type="mock",
-        credentials={},
-        broker_config={"prices_file": prices_file},
+        broker_type=broker_type,
+        credentials=dict(_CREDENTIALS[broker_type]),
+        broker_config=broker_config,
         buy_commission_rate=preset.buy_commission_rate,
         sell_commission_rate=preset.sell_commission_rate,
         market_order_reserve_buffer_rate=preset.market_order_reserve_buffer_rate,
     )
+
+
+def _mock_account(prices_file: str) -> Account:
+    return _account("mock", prices_file)
 
 
 @pytest.fixture
@@ -87,7 +102,8 @@ def test_registry_and_preset_key_sets_match() -> None:
 
 def test_virtual_only_broker_types_are_registered() -> None:
     """가상 전용 타입은 모두 등록된 브로커 타입이다."""
-    assert "mock" in VIRTUAL_ONLY_BROKER_TYPES
+    assert {"mock", "test"} <= VIRTUAL_ONLY_BROKER_TYPES
+    assert "kis-domestic" not in VIRTUAL_ONLY_BROKER_TYPES
     assert VIRTUAL_ONLY_BROKER_TYPES <= set(BROKER_PRESETS)
 
 
@@ -108,14 +124,43 @@ async def test_create_virtual_mock_account_and_get_broker(
 
 
 @pytest.mark.asyncio
-async def test_create_live_mock_account_rejected(
+async def test_create_virtual_test_account_and_get_broker(
     service: AccountService, prices_file: str
 ) -> None:
-    """(mock, live) 계좌 생성은 InvalidBrokerTypeError다."""
+    """test 가상 계좌는 계속 만들어지고 get_broker가 TestBrokerAdapter를 돌려준다."""
+    created = await service.create(_account("test", prices_file))
+    assert created.trading_mode == TradingMode.VIRTUAL
+    assert isinstance(
+        await service.get_broker(ACCOUNT_ID), test_broker.TestBrokerAdapter
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_kis_account_is_not_virtual_only(
+    service: AccountService, prices_file: str
+) -> None:
+    """대조군: (kis-domestic, live)는 생성과 어댑터 조립을 그대로 지난다."""
+    created = await service.create(
+        _account("kis-domestic", prices_file, trading_mode=TradingMode.LIVE)
+    )
+    assert created.trading_mode == TradingMode.LIVE
+    adapter = await service._build_broker_adapter(ACCOUNT_ID)
+    assert isinstance(adapter, KISAdapter)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broker_type", ["mock", "test"])
+async def test_create_live_mock_account_rejected(
+    service: AccountService, prices_file: str, broker_type: str
+) -> None:
+    """가상 전용 타입의 (broker_type, live) 계좌 생성은 InvalidBrokerTypeError다."""
     with pytest.raises(InvalidBrokerTypeError) as exc_info:
-        await service.create(_mock_account(prices_file, trading_mode=TradingMode.LIVE))
+        await service.create(
+            _account(broker_type, prices_file, trading_mode=TradingMode.LIVE)
+        )
     assert exc_info.value.code == "ACCOUNT_INVALID_BROKER_TYPE"
     assert "trading_mode" in str(exc_info.value)
+    assert f"'{broker_type}'" in str(exc_info.value)
     row = await service._db.fetch_one(
         "SELECT account_id FROM accounts WHERE account_id = ?", (ACCOUNT_ID,)
     )
@@ -123,18 +168,24 @@ async def test_create_live_mock_account_rejected(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("broker_type", ["mock", "test"])
 async def test_seed_path_rejects_live_mock_account(
-    service: AccountService, prices_file: str
+    service: AccountService, prices_file: str, broker_type: str
 ) -> None:
-    """seed 경로도 _persist_account를 거쳐 (mock, live)를 거부한다."""
-    account = _mock_account(
-        prices_file, account_id="mock", trading_mode=TradingMode.LIVE
+    """seed 경로도 _persist_account를 거쳐 (broker_type, live)를 거부한다."""
+    account = _account(
+        broker_type, prices_file, account_id=broker_type, trading_mode=TradingMode.LIVE
     )
     with pytest.raises(InvalidBrokerTypeError):
         await service._create_seed_account(account)
+    row = await service._db.fetch_one(
+        "SELECT account_id FROM accounts WHERE account_id = ?", (broker_type,)
+    )
+    assert row is None
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("broker_type", ["mock", "test"])
 @pytest.mark.parametrize(
     "broker_config",
     [{}, {"trading_mode": "virtual"}],
@@ -145,13 +196,15 @@ async def test_get_broker_rejects_live_mock_row_written_directly(
     service: AccountService,
     prices_file: str,
     broker_config: dict[str, Any],
+    broker_type: str,
 ) -> None:
-    """DB 행을 직접 (mock, live)로 고치면 get_broker가 InvalidBrokerTypeError다."""
-    await service.create(_mock_account(prices_file))
+    """DB 행을 직접 (broker_type, live)로 고치면 get_broker가 거부한다."""
+    account = _account(broker_type, prices_file)
+    await service.create(account)
     await db.execute(
         "UPDATE accounts SET trading_mode = 'live', broker_config = ? "
         "WHERE account_id = ?",
-        (json.dumps({"prices_file": prices_file, **broker_config}), ACCOUNT_ID),
+        (json.dumps({**account.broker_config, **broker_config}), ACCOUNT_ID),
     )
     reloaded = AccountService(db, EventBus())
     await reloaded.initialize()
@@ -183,9 +236,7 @@ async def _run_market_orders(tmp_path: Path, prices_file: str) -> list[tuple]:
             runtime_readiness=registry,
             account_service=svc,
         )
-        executor.register_bot(
-            "bot1", VirtualPortfolioView(bot_id="bot1", initial_balance=10_000_000.0)
-        )
+        executor.register_bot("bot1")
         executor.subscribe()
 
         filled: list[OrderFilledEvent] = []
