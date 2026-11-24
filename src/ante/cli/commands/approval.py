@@ -10,7 +10,7 @@ import click
 
 from ante.approval.models import ApprovalStatus, ApprovalType, ApprovalValidationError
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import CommandResult, format_option, table_lines
+from ante.cli.formatter import CommandResult, detail_lines, format_option, table_lines
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
     ApprovalInvalidStatusError,
@@ -188,7 +188,7 @@ def info(ctx: click.Context, id: str, db_path: str | None) -> CommandResult:
             }
 
     result = asyncio.run(_info())
-    return CommandResult(data=result, text=(str(result),))
+    return CommandResult(data=result, text=tuple(detail_lines(result)))
 
 
 @approval.command()

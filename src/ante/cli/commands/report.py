@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from ante.cli._validators import reject_inverted_date_range, validate_iso_date
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import CommandResult, format_option, table_lines
+from ante.cli.formatter import CommandResult, detail_lines, format_option, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts.cli_errors import (
@@ -48,7 +48,7 @@ def schema(ctx: click.Context) -> CommandResult:
 
     store = ReportStore.__new__(ReportStore)
     payload = store.get_schema()
-    return CommandResult(data=payload, text=(str(payload),))
+    return CommandResult(data=payload, text=tuple(detail_lines(payload)))
 
 
 @report.command()
