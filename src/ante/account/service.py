@@ -39,7 +39,7 @@ from ante.account.readiness import ReadinessFlag, is_flag_exempt
 from ante.account.scoping import require_account_id, validate_new_account_id
 from ante.account.timezone import validate_iana_timezone
 from ante.core import clock
-from ante.core.database import OperationalError
+from ante.core.database import OperationalError, is_missing_table
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
 from ante.core.price import is_valid_price
 
@@ -736,7 +736,7 @@ class AccountService:
                 (account_id, "deleted"),
             )
         except OperationalError as exc:
-            if "no such table" in str(exc).lower():
+            if is_missing_table(exc):
                 return 0
             raise
 

@@ -35,7 +35,7 @@ from ante.contracts.ipc_client_errors import (
     IPCRemoteError,
     IPCServerNotRunningError,
 )
-from ante.core.database import OperationalError
+from ante.core.database import OperationalError, is_missing_table
 from ante.strategy.exceptions import (
     StrategyError,
     StrategyLoadError,
@@ -235,7 +235,7 @@ def strategy_list(ctx: click.Context, status: str | None) -> CommandResult:
     except click.ClickException:
         raise
     except OperationalError as e:
-        if "no such table" in str(e).lower():
+        if is_missing_table(e):
             rows = []
         else:
             raise CliStrategyError(str(e)) from e
@@ -369,7 +369,7 @@ def strategy_info(ctx: click.Context, name: str) -> CommandResult:
     try:
         result = _run(_info())
     except OperationalError as e:
-        if "no such table" in str(e).lower():
+        if is_missing_table(e):
             result = None
         else:
             raise CliStrategyError(str(e)) from e
@@ -562,7 +562,7 @@ async def _load_allocated_budgets(db: Database, account_id: str) -> dict[str, fl
             (account_id,),
         )
     except OperationalError as e:
-        if "no such table" in str(e).lower():
+        if is_missing_table(e):
             return {}
         raise
     return {str(row["bot_id"]): float(row["allocated"]) for row in rows}
@@ -614,7 +614,7 @@ def strategy_performance(
                     (account_id,),
                 )
             except OperationalError as e:
-                if "no such table" in str(e).lower():
+                if is_missing_table(e):
                     raise AccountNotFoundError(
                         f"계좌 '{account_id}'를 찾을 수 없습니다."
                     ) from e
@@ -641,7 +641,7 @@ def strategy_performance(
     except AccountNotFoundError:
         raise
     except OperationalError as e:
-        if "no such table" in str(e).lower():
+        if is_missing_table(e):
             result = None
         else:
             raise CliStrategyError(str(e)) from e
