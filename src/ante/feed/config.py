@@ -134,7 +134,7 @@ class FeedConfig:
         env_values[key] = value
 
         lines = [f"{k}={v}\n" for k, v in env_values.items()]
-        self.env_path.write_text("".join(lines))
+        self.env_path.write_text("".join(lines), encoding="utf-8")
         self.env_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
         return self.env_path
@@ -248,7 +248,11 @@ class FeedConfig:
         if not self.env_path.exists():
             return {}
         values: dict[str, str] = {}
-        for line in self.env_path.read_text().splitlines():
+        try:
+            text = self.env_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise ValueError("feed .env 파일을 UTF-8로 읽을 수 없습니다.") from None
+        for line in text.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue

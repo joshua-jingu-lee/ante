@@ -253,6 +253,13 @@ class TestExtractList:
         items = DARTSource._extract_list(data)
         assert items == []
 
+    def test_null_list_raises(self) -> None:
+        """#2939: list가 null이면 빈 목록이 아니라 DARTError로 끝난다."""
+        data = {"status": "000", "message": "정상", "list": None}
+        with pytest.raises(DARTError) as exc_info:
+            DARTSource._extract_list(data)
+        assert type(exc_info.value) is DARTError
+
 
 # -- _backoff_delay ----------------------------------------------------
 
@@ -424,6 +431,24 @@ class TestFetchFinancial:
         ):
             with pytest.raises(DARTError):
                 await source.fetch_financial(["00126380"], "2024", "11011")
+
+    @pytest.mark.asyncio
+    async def test_null_list_fails_batch_without_retry(
+        self, source: DARTSource
+    ) -> None:
+        """#2939: status 000에 list가 null이면 재시도 없이 DARTError로 끝난다."""
+        response = {"status": "000", "message": "정상", "list": None}
+
+        with patch.object(
+            source, "_do_request", new_callable=AsyncMock, return_value=response
+        ) as mock_request:
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError) as exc_info:
+                    await source.fetch_financial(["00126380"], "2024", "11011")
+
+        assert type(exc_info.value) is DARTError
+        assert mock_request.await_count == 1
+        assert source.rate_limiter.daily_count == 1
 
     @pytest.mark.asyncio
     async def test_retry_then_success(self, source: DARTSource) -> None:
