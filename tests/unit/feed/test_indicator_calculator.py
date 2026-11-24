@@ -966,3 +966,57 @@ def test_indicator_idempotent_recompute(store: ParquetStore) -> None:
     apr_second = second.filter(pl.col("source") == "data_go_kr").row(0, named=True)
     assert apr_first["per"] is not None
     assert apr_first["per"] == apr_second["per"]
+
+
+def test_indicator_daily_row_records_asof_net_income_only(store: ParquetStore) -> None:
+    """일별 행에 결합한 분기 행의 net_income만 남고 자본·부채 총계는 남지 않는다.
+
+    #2637: 이번의 선택을 잠근다. 일별 행에서 그 열을 빼기로 하면 이 단정을 뒤집는다.
+    """
+    _write_daily(
+        store,
+        [
+            {
+                "date": day,
+                "symbol": SYMBOL,
+                "market_cap": 420_000_000_000_000,
+                "shares_listed": 5_969_782_550,
+                "source": "data_go_kr",
+            }
+            for day in (date(2024, 4, 1), date(2024, 6, 15), date(2024, 9, 15))
+        ],
+    )
+    _write_quarterly(
+        store,
+        [
+            {
+                "date": date(2024, 3, 31),
+                "available_date": date(2024, 5, 15),
+                "symbol": SYMBOL,
+                "net_income": 11_000_000_000_000,
+                "total_equity": 300_000_000_000_000,
+                "total_debt": 100_000_000_000_000,
+                "source": "dart",
+            },
+            {
+                "date": date(2024, 6, 30),
+                "available_date": date(2024, 8, 14),
+                "symbol": SYMBOL,
+                "net_income": 22_000_000_000_000,
+                "total_equity": 310_000_000_000_000,
+                "total_debt": 110_000_000_000_000,
+                "source": "dart",
+            },
+        ],
+    )
+
+    IndicatorCalculator().compute(store, [SYMBOL])
+
+    rows = {row["date"]: row for row in _daily_rows(store).iter_rows(named=True)}
+    assert set(rows) == {date(2024, 4, 1), date(2024, 6, 15), date(2024, 9, 15)}
+    assert rows[date(2024, 4, 1)]["net_income"] is None
+    assert rows[date(2024, 6, 15)]["net_income"] == 11_000_000_000_000
+    assert rows[date(2024, 9, 15)]["net_income"] == 22_000_000_000_000
+    for row in rows.values():
+        assert row.get("total_equity") is None
+        assert row.get("total_debt") is None

@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from ante.config import Config
 from ante.core.log import (
     DateNamedTimedRotatingFileHandler,
     JsonFormatter,
@@ -72,6 +73,22 @@ def test_stdout_only_when_jsonl_gate_unset(monkeypatch: pytest.MonkeyPatch):
     assert len(root.handlers) == 1
     assert isinstance(root.handlers[0], logging.StreamHandler)
     assert not isinstance(root.handlers[0], TimedRotatingFileHandler)
+
+
+def test_jsonl_gate_ignores_secrets_file_value(
+    monkeypatch: pytest.MonkeyPatch, _cwd_tmp: Path
+):
+    """게이트는 프로세스 환경에서만 읽는다 (logging 05 §볼륨 마운트, config 03 §3)."""
+    monkeypatch.delenv("ANTE_LOG_JSONL", raising=False)
+    monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
+    config = Config(static={}, secrets={"ANTE_LOG_JSONL": "1"}, config_dir=_cwd_tmp)
+    assert config.secret("ANTE_LOG_JSONL") == "1"
+
+    setup_logging(config)
+
+    root = logging.getLogger()
+    assert len(root.handlers) == 1
+    assert not any(isinstance(h, TimedRotatingFileHandler) for h in root.handlers)
 
 
 # ── 2. ANTE_LOG_JSONL=1 시 stdout + 파일 핸들러 2개 ────────────

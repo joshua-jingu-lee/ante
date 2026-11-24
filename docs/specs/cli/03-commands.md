@@ -254,6 +254,9 @@ known key만 읽음). 사용자가 오타나 잘못된 key를 `--broker-config`�
 - `--credential-env`이 참조한 환경변수가 설정되지 않으면 `ACCOUNT_CREDENTIAL_ENV_NOT_SET`,
   `--credential-file`이 가리키는 파일이 존재하지 않으면 `ACCOUNT_CREDENTIAL_FILE_NOT_FOUND`로
   실패한다.
+- credential 값이 비었거나 공백만이면 채널별 코드로 실패한다(`--credential`:
+  `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` / `--credential-env`: `ACCOUNT_CREDENTIAL_ENV_NOT_SET` /
+  `--credential-file`: `ACCOUNT_CREDENTIAL_FILE_NOT_FOUND`).
 - prompt fallback은 없다. 누락 입력은 즉시 구조화된 에러로 종료한다.
 
 #### `account set-credentials` 입력 계약

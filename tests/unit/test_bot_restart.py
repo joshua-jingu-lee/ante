@@ -497,15 +497,17 @@ class TestDeleteStopsRestart:
         assert exhausted[0].restart_attempts == 3
         assert "b1" not in manager._restart_tasks
 
-    async def test_delete_clears_restart_count(self, manager):
+    @pytest.mark.parametrize("hard", [False, True], ids=["soft", "hard"])
+    async def test_delete_clears_restart_count(self, manager, hard):
         await self._error_bot(manager)
         manager._restart_counts["b1"] = 2
 
-        await manager.delete_bot("b1")
+        await manager.delete_bot("b1", hard=hard)
         assert manager.get_restart_count("b1") == 0
 
-        await self._error_bot(manager)
-        assert manager.get_restart_count("b1") == 0
+        if hard:
+            await self._error_bot(manager)
+            assert manager.get_restart_count("b1") == 0
 
 
 # ── BotRestartExhaustedEvent 필드 ──────────────────

@@ -75,7 +75,7 @@ class _Harness:
         self.manager: BotManager | None = None
 
     async def setup(self, socket_path: str, *, signal_key: str = "sk_test") -> None:
-        self.db = Database(":memory:")
+        self.db = Database(f"{socket_path}.db")
         await self.db.connect()
 
         skm = MagicMock()

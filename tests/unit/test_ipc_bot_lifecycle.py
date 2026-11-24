@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -127,7 +128,7 @@ KIS_FULL_CREDENTIALS = {"app_key": "AK", "app_secret": "AS", "account_no": "1234
 APP_KEY_MISSING_MESSAGE = "계좌에 인증정보(app_key)가 설정되지 않았습니다"
 
 
-def _account(broker_type: str, credentials: dict[str, str]) -> SimpleNamespace:
+def _account(broker_type: str, credentials: dict[str, Any]) -> SimpleNamespace:
     """Account stub — ``broker_type`` / ``credentials`` 노출."""
     return SimpleNamespace(broker_type=broker_type, credentials=credentials)
 
@@ -256,13 +257,16 @@ class TestHandleBotStartPresetCredentials:
             ("kis-domestic", {}),
             ("kis-domestic", {"app_secret": "AS", "account_no": "1234"}),
             ("kis-domestic", {**KIS_FULL_CREDENTIALS, "app_key": ""}),
+            ("kis-domestic", {**KIS_FULL_CREDENTIALS, "app_key": "  "}),
             ("test", {}),
             ("test", {"app_secret": "AS"}),
+            ("test", {"app_key": "\t\n", "app_secret": "SECRET-MARK"}),
             ("unknown-broker", {}),
+            ("unknown-broker", {"app_key": " "}),
         ],
     )
     async def test_missing_app_key_rejection_is_byte_identical(
-        self, broker_type: str, credentials: dict[str, str]
+        self, broker_type: str, credentials: dict[str, Any]
     ) -> None:
         """app_key 누락 거부는 코드·메시지가 바이트까지 같고 시작하지 않는다."""
         svc, _ = _make_svc(bot=_make_bot(), account=_account(broker_type, credentials))
@@ -283,10 +287,13 @@ class TestHandleBotStartPresetCredentials:
             ("test", {"app_key": "AK", "app_secret": "AS"}),
             ("kis-domestic", dict(KIS_FULL_CREDENTIALS)),
             ("unknown-broker", {"app_key": "AK"}),
+            ("kis-domestic", {**KIS_FULL_CREDENTIALS, "account_no": 1234}),
+            ("mock", {"app_key": "  "}),
+            ("test", {"app_key": " AK ", "app_secret": "AS"}),
         ],
     )
     async def test_starts_when_required_credentials_present(
-        self, broker_type: str, credentials: dict[str, str]
+        self, broker_type: str, credentials: dict[str, Any]
     ) -> None:
         """프리셋의 필수 인증정보가 다 있으면 시작한다(mock 은 필수가 없다)."""
         svc, _ = _make_svc(bot=_make_bot(), account=_account(broker_type, credentials))
@@ -301,6 +308,11 @@ class TestHandleBotStartPresetCredentials:
             ({"app_key": "AK"}, "app_secret"),
             ({"app_key": "AK", "app_secret": "", "account_no": "1234"}, "app_secret"),
             ({"app_key": "AK", "app_secret": "AS"}, "account_no"),
+            ({"app_key": "AK", "app_secret": "  ", "account_no": "1234"}, "app_secret"),
+            (
+                {"app_key": "AK", "app_secret": "AS", "account_no": "\u3000"},
+                "account_no",
+            ),
         ],
     )
     async def test_rejects_first_missing_required_key_in_preset_order(
