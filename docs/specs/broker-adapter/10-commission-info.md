@@ -62,7 +62,7 @@ KIS API 응답 코드를 영구 에러(재시도 불필요)와 일시 에러(재
 
 ### 에러 처리 및 재시도
 
-KISBaseAdapter는 지수 백오프 방식의 재시도 로직을 내장한다. 인증 토큰 만료 감지 시 자동 재인증을 수행하며, 토큰 만료 5분 전에 선제적으로 재발급한다. 모든 API 응답에서 `rt_cd != '0'`이면 `APIError`를 발생시킨다. CircuitBreaker가 `_request()` 흐름에 통합되어, 연속 실패 시 자동으로 요청을 차단한다. 회계 판정은 `to_api_error()` 변환 **전 raw 예외** 기준이며, 재시도 루프에서 `record_failure` 분류이면서 호출측 `cb_exempt_timeout`+`TimeoutError` 조합이 아닐 때만 `record_failure()`를 호출한다(#2350). 단, **late-ccld(`get_order_history`) 경로의 `TimeoutError`는 차단기 회계에서 제외**된다(위 CircuitBreaker 절·[18-fill-recovery.md](18-fill-recovery.md) 참조).
+KISBaseAdapter는 지수 백오프 방식의 재시도 로직을 내장한다. 토큰 만료는 응답으로 감지하지 않고 어댑터가 기록한 만료 시각(발급 시점 + 24시간)으로만 판정하며, 요청의 매 시도 전송 직전에 그 시각 5분 전을 넘었으면 선제적으로 재발급을 시도한다(#2901). 응답을 보고 재인증한 뒤 다시 보내는 경로는 없다(#2908) — 선제 재발급이 놓친 경우(시계 어긋남, KIS 쪽 조기 폐기) 그 요청이 재시도되더라도 기록된 만료 시각 5분 전이 지나기 전에는 같은 토큰으로 다시 보내며, 재발급은 그 시각이 지난 뒤의 선제 확인에서야 시도한다. 모든 API 응답에서 `rt_cd != '0'`이면 `APIError`를 발생시킨다. CircuitBreaker가 `_request()` 흐름에 통합되어, 연속 실패 시 자동으로 요청을 차단한다. 회계 판정은 `to_api_error()` 변환 **전 raw 예외** 기준이며, 재시도 루프에서 `record_failure` 분류이면서 호출측 `cb_exempt_timeout`+`TimeoutError` 조합이 아닐 때만 `record_failure()`를 호출한다(#2350). 단, **late-ccld(`get_order_history`) 경로의 `TimeoutError`는 차단기 회계에서 제외**된다(위 CircuitBreaker 절·[18-fill-recovery.md](18-fill-recovery.md) 참조).
 
 **오퍼레이션별 기본값**:
 
