@@ -63,7 +63,7 @@ def main() -> None:
         }
         print()
         print(f"{BACKTEST_FAILURE_SENTINEL}{json.dumps(failure)}", flush=True)
-        sys.exit(1)
+        raise SystemExit(1) from exc
     print(f"{BACKTEST_RESULT_SENTINEL}{json.dumps(result, default=str)}")
 
 

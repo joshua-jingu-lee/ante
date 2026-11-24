@@ -192,7 +192,7 @@ class BacktestService:
         전달하고, stdout 의 ``BACKTEST_RESULT_SENTINEL`` 라인만 파싱한 dict 를
         반환한다. returncode≠0 또는 sentinel 라인 부재는 ``BacktestError`` 다.
         returncode≠0의 message에는 stderr 대신 실패 sentinel의 종류·메시지·
-        전략 파일 위치만 싣고, 그것이 없으면 종료 코드만 싣는다(#2734).
+        전략 파일 위치만 싣고, 그것이 없으면 종료 코드만 싣는다.
         """
         self._validate_config(config)
 
