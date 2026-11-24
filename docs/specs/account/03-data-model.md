@@ -129,8 +129,8 @@
 `ante.broker.registry.BROKER_REGISTRY`([broker-adapter/05-broker-registry.md](../broker-adapter/05-broker-registry.md))
 세 곳의 keys 가 일치해야 신규 계좌 생성이 preset 기본값과 어댑터 클래스를 동시에
 찾는다. 세 곳 모두 `{"test", "kis-domestic", "mock"}` 만 노출한다 (#1333, #2541).
-`mock`은 가상 전용이다. `(mock, live)` 조합은 계좌 생성과 어댑터 조립에서
-`InvalidBrokerTypeError`로 거부한다([broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#브로커-타입-mock)).
+`mock`과 `test`는 가상 전용이다. `(mock, live)`와 `(test, live)` 조합은 계좌 생성과 어댑터 조립에서
+`InvalidBrokerTypeError`로 거부한다([broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#가상-전용)).
 
 `AccountService.get_broker()`가 `broker_type`으로 이 레지스트리에서 어댑터 클래스를 조회한다. 등록되지 않은 `broker_type`으로 브로커 생성을 시도하면 `InvalidBrokerTypeError`가 발생한다.
 
