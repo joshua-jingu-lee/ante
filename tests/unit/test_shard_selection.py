@@ -72,21 +72,18 @@ def _ci_shard_matrix() -> list[object]:
     return list(data["jobs"]["test-shard"]["strategy"]["matrix"]["shard"])
 
 
-CI_SHARDS = len(_ci_shard_matrix())
-
-
 def test_ci_shard_matrix_is_one_to_n():
     matrix = _ci_shard_matrix()
     assert matrix == list(range(1, len(matrix) + 1))
-    assert CI_SHARDS == len(matrix)
 
 
 def test_largest_shard_is_at_most_twice_the_mean():
-    counts = [0] * CI_SHARDS
+    total = len(_ci_shard_matrix())
+    counts = [0] * total
     for path in FILES:
-        counts[shards.shard_of(path, CI_SHARDS) - 1] += 1
+        counts[shards.shard_of(path, total) - 1] += 1
     assert min(counts) > 0
-    assert max(counts) <= 2 * len(FILES) / CI_SHARDS
+    assert max(counts) <= 2 * len(FILES) / total
 
 
 @pytest.mark.parametrize("value", ["1/1", "1/4", "4/4", "3/8"])
@@ -133,6 +130,7 @@ def _run(
     collected: str = COLLECT_OUTPUT,
     total: str = "2",
     skip_coverage: tuple[str, ...] = (),
+    extra_coverage: tuple[str, ...] = (),
 ) -> int:
     collect = tmp_path / "collect.txt"
     collect.write_text(collected, encoding="utf-8")
@@ -145,6 +143,8 @@ def _run(
         data = name.replace("test-shard-", "coverage-shard-").replace(".txt", ".data")
         if data not in skip_coverage:
             (manifest_dir / data).write_bytes(b"")
+    for data in extra_coverage:
+        (manifest_dir / data).write_bytes(b"")
     return shards.main(
         [
             "--shards",
@@ -180,6 +180,13 @@ def test_check_fails_when_a_coverage_file_is_missing(tmp_path, capsys):
     assert _run(tmp_path, GOOD, skip_coverage=("coverage-shard-2.data",)) == 1
     out = capsys.readouterr().out
     assert "expected 2 coverage files, found 1" in out
+    assert "expected 2 shard lists" not in out
+
+
+def test_check_fails_when_there_are_more_coverage_files_than_shards(tmp_path, capsys):
+    assert _run(tmp_path, GOOD, extra_coverage=("coverage-shard-3.data",)) == 1
+    out = capsys.readouterr().out
+    assert "expected 2 coverage files, found 3" in out
     assert "expected 2 shard lists" not in out
 
 
