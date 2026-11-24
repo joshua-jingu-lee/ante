@@ -89,14 +89,30 @@ Agent가 결재 요청을 생성한 후, 사용자가 처리하기 전에 **스�
 ```python
 # history entry 구조
 {
-    "action": str,    # created | review_added | held | resumed | approved | rejected | cancelled | expired
+    "action": str,    # 아래 목록 참조
     "actor": str,     # 행위자 (예: "agent:strategy-dev", "user", "treasury", "system")
     "at": str,        # 시각
     "detail": str,    # 부가 정보 (거절 사유, 보류 사유 등)
 }
 ```
 
-모든 상태 변경 메서드(`create`, `add_review`, `approve`, `reject`, `hold`, `resume`, `cancel`, `expire_stale`)가 자동으로 history entry를 추가한다.
+모든 상태 변경 메서드(`create`, `add_review`, `approve`, `reject`, `reopen`, `hold`, `resume`, `cancel`, `cancel_invalid_type_request`, `expire_stale`)와 승인 뒤 실행 단계(`_execute_approved`)가 자동으로 history entry를 추가한다. `action` 값과 그 값을 기록하는 메서드는 다음과 같다.
+
+| `action` | 기록하는 메서드 |
+|----------|----------------|
+| `created` | `create` |
+| `approved` | `approve`, `create`(전결) |
+| `rejected` | `reject` |
+| `reopened` | `reopen` |
+| `held` | `hold` |
+| `resumed` | `resume` |
+| `cancelled` | `cancel` |
+| `cancelled_invalid_type` | `cancel_invalid_type_request` |
+| `review_added` | `add_review` |
+| `expired` | `expire_stale` |
+| `executed` | 승인 뒤 실행 단계(`_execute_approved`) |
+| `execution_failed` | 승인 뒤 실행 단계(`_execute_approved`) |
+| `no_executor` | 승인 뒤 실행 단계(`_execute_approved`) |
 
 ### 전결 (자동 승인)
 

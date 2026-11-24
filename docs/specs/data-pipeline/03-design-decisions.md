@@ -176,10 +176,10 @@ SSOT로 삼는다.
 ├── tick/                      # 틱 데이터 (Collector 소유, 선택)
 │   ├── KRX/
 │   │   └── 005930/
-│   │       └── 2026-03-12.parquet
+│   │       └── 2026-03.parquet
 │   └── NYSE/
 │       └── AAPL/
-│           └── 2026-03-12.parquet
+│           └── 2026-03.parquet
 └── .feed/                     # DataFeed 운영 데이터 (`docs/specs/data-feed/data-feed.md` 참조)
 ```
 
@@ -188,7 +188,7 @@ SSOT로 삼는다.
 **파티셔닝 전략**:
 - OHLCV: `ohlcv/{timeframe}/{exchange}/{symbol}/{YYYY-MM}.parquet` — 월 단위 파티셔닝
 - fundamental: `fundamental/{exchange}/{symbol}/{YYYY-MM}.parquet`
-- 틱: `tick/{exchange}/{symbol}/{YYYY-MM-DD}.parquet` — 일 단위 파티셔닝
+- 틱: `tick/{exchange}/{symbol}/{YYYY-MM}.parquet` — tick의 파티션 단위는 아직 정하지 않았다(지금의 저장소는 월 단위로 쓴다)
 - 일봉은 한 파일에 수년치 저장 가능 (파일 크기 작음)
 
 **근거**:
@@ -240,7 +240,7 @@ Parquet 파일 읽기/쓰기/관리를 담당한다. **모든 모듈이 Parquet�
 `_resolve_path()` 내부 메서드는 `exchange` 파라미터를 받아 경로를 생성한다:
 - OHLCV: `{base_path}/ohlcv/{timeframe}/{exchange}/{symbol}/{YYYY-MM}.parquet`
 - fundamental: `{base_path}/fundamental/{exchange}/{symbol}/{YYYY-MM}.parquet`
-- tick: `{base_path}/tick/{exchange}/{symbol}/{YYYY-MM-DD}.parquet`
+- tick: `{base_path}/tick/{exchange}/{symbol}/{YYYY-MM}.parquet`
 
 **기존 데이터 마이그레이션**: exchange 미명시 기존 데이터(OHLCV 경로에 exchange 디렉토리가 없는 경우)는 `KRX/` 하위로 자동 이동한다. 마이그레이션은 시스템 시작 또는 `ante update`의 post-update migration에서 자동 감지·실행한다. 별도 public `ante data migrate` 명령은 CLI SSOT에 포함하지 않는다.
 
