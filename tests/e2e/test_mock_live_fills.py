@@ -4,8 +4,9 @@
 하위 프로세스의 가상 전용 집합에서 ``mock``을 뺀다. 계좌 하나에 체결 모드 하나,
 봇 하나, 전략 하나를 둔다. 주문은 게이트웨이의 제출 → 주문 추적 → 체결 폴링 →
 체결 반영 → 정산을 지난다. 체결 폴링은 부팅 뒤 약 60초에 처음, 약 120초에 두 번째로
-돈다. 지연 계좌는 두 번째 폴에서 체결되므로 그 계좌의 주문 이력은 CLI로 읽지 않는다
-(그 조회도 mock의 횟수에 든다).
+돈다(폴 주기는 ``DEFAULT_POLL_INTERVAL``). 지연 계좌는 두 번째 폴에서 체결되므로 그
+계좌의 주문 이력은 CLI로 읽지 않는다(그 조회도 mock의 횟수에 든다). 체결 대기의 기한은
+계좌마다 예약이 보인 시각부터 필요한 폴 수 × 폴 주기 + 여유로 잰다.
 
 알려진 한계: 시나리오가 KST 자정을 걸치면 주문 추적기가 열린 부분 체결 주문을
 만료로 처리할 수 있다. 재시작 뒤의 복구는 다루지 않는다(mock 장부는 메모리뿐이다).
@@ -20,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from ante.broker.fill_scheduler import DEFAULT_POLL_INTERVAL
 from tests.e2e.harness import DaemonHarness, run_json_command, wait_until
 
 SYMBOL = "000001"
@@ -64,8 +66,8 @@ class LimitBuyOnce(Strategy):
 '''
 BUDGET = 500_000
 SUBMIT_DEADLINE_SECONDS = 30.0
-FIRST_POLL_DEADLINE_SECONDS = 100.0
-SECOND_POLL_DEADLINE_SECONDS = 80.0
+POLL_MARGIN_SECONDS = 60.0
+MIN_FILL_WAIT_SECONDS = 10.0
 POLL_SETTLE_SECONDS = 10.0
 DELAY_POLLS = 2
 BALANCE_SYNC_DEADLINE_SECONDS = 20.0
@@ -155,6 +157,12 @@ def _reconcile(daemon: DaemonHarness, case: LiveCase) -> dict[str, Any]:
     return dict(daemon.cli("broker", "reconcile", "--account", case.account_id))
 
 
+def _fill_deadline(observed_at: float, polls: int) -> float:
+    """예약이 보인 시각부터 ``polls``번째 폴까지 남은 기한(초, 하한 있음)."""
+    deadline = observed_at + polls * DEFAULT_POLL_INTERVAL + POLL_MARGIN_SECONDS
+    return max(deadline - time.monotonic(), MIN_FILL_WAIT_SECONDS)
+
+
 def test_mock_live_fill_modes(daemon: DaemonHarness) -> None:
     daemon.init()
     prices_file = daemon.root / "prices.json"
@@ -233,12 +241,14 @@ def test_mock_live_fill_modes(daemon: DaemonHarness) -> None:
         assert started["data"]["bot"]["status"] == "running", started
         assert started["data"]["bot"]["trading_mode"] == "live", started
 
+    observed_at: dict[str, float] = {}
     for case in OPEN_CASES:
         budget = wait_until(
             lambda case=case: _budget(daemon, case),
             lambda b, case=case: b["reserved"] == case.order_amount,
             seconds=SUBMIT_DEADLINE_SECONDS,
         )
+        observed_at[case.account_id] = time.monotonic()
         assert budget["reserved"] == pytest.approx(case.order_amount), budget
         assert _fills(daemon, case)["total"] == 0
 
@@ -258,7 +268,7 @@ def test_mock_live_fill_modes(daemon: DaemonHarness) -> None:
     fills = wait_until(
         lambda: _fills(daemon, IMMEDIATE),
         lambda f: f["total"] >= 1,
-        seconds=FIRST_POLL_DEADLINE_SECONDS,
+        seconds=_fill_deadline(observed_at[IMMEDIATE.account_id], 1),
     )
     assert fills["total"] == 1, fills
     budget = _budget(daemon, IMMEDIATE)
@@ -281,7 +291,7 @@ def test_mock_live_fill_modes(daemon: DaemonHarness) -> None:
     fills = wait_until(
         lambda: _fills(daemon, PARTIAL),
         lambda f: f["total"] >= 1,
-        seconds=SUBMIT_DEADLINE_SECONDS,
+        seconds=_fill_deadline(observed_at[PARTIAL.account_id], 1),
     )
     assert fills["total"] == 1, fills
     budget = _budget(daemon, PARTIAL)
@@ -300,7 +310,7 @@ def test_mock_live_fill_modes(daemon: DaemonHarness) -> None:
     fills = wait_until(
         lambda: _fills(daemon, DELAYED),
         lambda f: f["total"] >= 1,
-        seconds=SECOND_POLL_DEADLINE_SECONDS,
+        seconds=_fill_deadline(observed_at[DELAYED.account_id], DELAY_POLLS),
     )
     assert fills["total"] == 1, fills
     budget = _budget(daemon, DELAYED)
