@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -106,10 +107,8 @@ class TestBacktestDateValidation:
         # 날짜 검증 에러가 아닌 것만 확인 (이후 단계에서 다른 에러 발생 가능)
         assert "시작일" not in result.output
 
-    def test_same_date_failure_envelope_has_no_traceback(self, tmp_path, monkeypatch):
+    def test_same_date_failure_envelope_has_no_traceback(self, tmp_path):
         """자식 실패는 BACKTEST_ERROR 봉투이고 message에 트레이스백이 없다 (#2734)."""
-        monkeypatch.setenv("HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path / "config"))
         strategy = tmp_path / "test_strategy.py"
         strategy.write_text("# dummy")
         runner = _make_runner()
@@ -134,7 +133,11 @@ class TestBacktestDateValidation:
         )
 
         assert result.exit_code == 1
-        assert '"code": "BACKTEST_ERROR"' in result.output
+        envelope = json.loads(result.output.strip().splitlines()[-1])
+        assert envelope["code"] == "BACKTEST_ERROR"
+        assert envelope["message"].startswith(
+            "Backtest subprocess failed: BacktestConfigError: 전략 검증 실패"
+        )
         assert "Traceback" not in result.output
         assert 'File \\"' not in result.output
 

@@ -274,6 +274,9 @@ class RaisingStrategy(Strategy):
     meta = StrategyMeta(name="raising", version="1.0", description="raises")
 
     async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+        return self._fail()
+
+    def _fail(self) -> list[Signal]:
         raise ValueError({arg})
 """
 
