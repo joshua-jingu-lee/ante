@@ -8,6 +8,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -63,11 +64,26 @@ def test_assignment_is_deterministic():
     assert shards.shard_of("tests/unit/test_account.py", 7) == 7
 
 
+CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def _ci_shard_matrix() -> list[object]:
+    data = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    return list(data["jobs"]["test-shard"]["strategy"]["matrix"]["shard"])
+
+
+def test_ci_shard_matrix_is_one_to_n():
+    matrix = _ci_shard_matrix()
+    assert matrix == list(range(1, len(matrix) + 1))
+
+
 def test_largest_shard_is_at_most_twice_the_mean():
-    counts = [0, 0, 0, 0]
+    total = len(_ci_shard_matrix())
+    counts = [0] * total
     for path in FILES:
-        counts[shards.shard_of(path, 4) - 1] += 1
-    assert max(counts) <= 2 * len(FILES) / 4
+        counts[shards.shard_of(path, total) - 1] += 1
+    assert min(counts) > 0
+    assert max(counts) <= 2 * len(FILES) / total
 
 
 @pytest.mark.parametrize("value", ["1/1", "1/4", "4/4", "3/8"])
@@ -82,6 +98,17 @@ def test_parse_shard_accepts(value):
 def test_parse_shard_rejects(value):
     with pytest.raises(ValueError):
         shards.parse_shard(value)
+
+
+def test_resolve_manifest_anchors_a_relative_path_at_the_base(tmp_path):
+    resolved = shards.resolve_manifest("out/test-shard-1.txt", tmp_path)
+    assert resolved == tmp_path / "out" / "test-shard-1.txt"
+    assert resolved.is_absolute()
+
+
+def test_resolve_manifest_keeps_an_absolute_path(tmp_path):
+    target = tmp_path / "elsewhere" / "test-shard-1.txt"
+    assert shards.resolve_manifest(str(target), tmp_path / "base") == target
 
 
 # ── 샤드 목록 검사 (fail-closed) ─────────────────────────────────────────
@@ -102,6 +129,8 @@ def _run(
     *,
     collected: str = COLLECT_OUTPUT,
     total: str = "2",
+    skip_coverage: tuple[str, ...] = (),
+    extra_coverage: tuple[str, ...] = (),
 ) -> int:
     collect = tmp_path / "collect.txt"
     collect.write_text(collected, encoding="utf-8")
@@ -111,6 +140,11 @@ def _run(
         (manifest_dir / name).write_text(
             "".join(f"{i}\n" for i in ids), encoding="utf-8"
         )
+        data = name.replace("test-shard-", "coverage-shard-").replace(".txt", ".data")
+        if data not in skip_coverage:
+            (manifest_dir / data).write_bytes(b"")
+    for data in extra_coverage:
+        (manifest_dir / data).write_bytes(b"")
     return shards.main(
         [
             "--shards",
@@ -137,7 +171,23 @@ GOOD = {
 
 def test_check_passes_on_a_partition(tmp_path, capsys):
     assert _run(tmp_path, GOOD) == 0
-    assert "OK: 2 shards ran 4 tests == 4 collected" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "OK: 2 shards ran 4 tests == 4 collected" in out
+    assert "2 coverage files" in out
+
+
+def test_check_fails_when_a_coverage_file_is_missing(tmp_path, capsys):
+    assert _run(tmp_path, GOOD, skip_coverage=("coverage-shard-2.data",)) == 1
+    out = capsys.readouterr().out
+    assert "expected 2 coverage files, found 1" in out
+    assert "expected 2 shard lists" not in out
+
+
+def test_check_fails_when_there_are_more_coverage_files_than_shards(tmp_path, capsys):
+    assert _run(tmp_path, GOOD, extra_coverage=("coverage-shard-3.data",)) == 1
+    out = capsys.readouterr().out
+    assert "expected 2 coverage files, found 3" in out
+    assert "expected 2 shard lists" not in out
 
 
 def test_check_fails_when_a_list_is_missing(tmp_path, capsys):
@@ -179,7 +229,7 @@ def test_check_fails_on_an_empty_collected_list(tmp_path, capsys):
     assert "collected list is empty" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("total", ["", "0", "x"])
+@pytest.mark.parametrize("total", ["", "0", "x", "+2", "2_0", " 2", "2\n", "\u0662"])
 def test_check_fails_on_a_bad_shard_count(tmp_path, total):
     assert _run(tmp_path, GOOD, total=total) == 1
 
