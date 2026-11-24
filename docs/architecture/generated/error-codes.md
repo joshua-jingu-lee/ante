@@ -60,7 +60,7 @@
 | `BOT_STATE_CONFLICT` | `state_conflict` | 1 | `ante.bot.exceptions.BotStateConflict` | — |
 | `BOT_STRATEGY_ALREADY_RUNNING` | `state_conflict` | 1 | `ante.bot.exceptions.BotStrategyAlreadyRunningError` | — |
 | `BROKER_API_ERROR` | `external` | 1 | `ante.broker.exceptions.APIError` | — |
-| `BROKER_AUTH_FAILED` | `auth` | 1 | `ante.broker.exceptions.AuthenticationError` | — |
+| `BROKER_AUTH_FAILED` | `external` | 1 | `ante.broker.exceptions.AuthenticationError` | — |
 | `BROKER_CIRCUIT_OPEN` | `service_unavailable` | 1 | `ante.broker.exceptions.CircuitOpenError` | — |
 | `BROKER_INVALID_TYPE` | `validation` | 1 | `ante.broker.registry.InvalidBrokerTypeError` | — |
 | `BROKER_MODIFY_ORGNO_UNAVAILABLE` | `state_conflict` | 1 | `ante.broker.exceptions.ModifyOrgnoUnavailableError` | — |

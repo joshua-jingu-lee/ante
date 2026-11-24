@@ -1618,9 +1618,7 @@ def _bytes_case_invoke(branch: str, mode: str, svc: AsyncMock) -> Any:
 
 
 _ACCOUNT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
-    ("list_empty", "text"): (
-        "{'message': '등록된 계좌가 없습니다.', 'accounts': []}\n"
-    ),
+    ("list_empty", "text"): ("등록된 계좌가 없습니다.\n"),
     ("list_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'
@@ -1706,9 +1704,7 @@ _ACCOUNT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("credentials_empty", "text"): (
-        "{'message': '등록된 인증 정보가 없습니다.', 'credentials': {}}\n"
-    ),
+    ("credentials_empty", "text"): ("등록된 인증 정보가 없습니다.\n"),
     ("credentials_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'
@@ -1740,8 +1736,7 @@ _ACCOUNT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "}\n"
     ),
     ("set_credentials_not_required", "text"): (
-        "{'message': \"브로커 'some-future-broker'에는 인증 정보"
-        '가 필요하지 않습니다."}\n'
+        "브로커 'some-future-broker'에는 인증 정보가 필요하지 않습니다.\n"
     ),
     ("set_credentials_not_required", "json"): (
         "{\n"
