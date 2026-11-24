@@ -897,3 +897,121 @@ def test_connect_failure_json_bytes(runner: CliRunner, site: str) -> None:
     assert result.exit_code == 1, (result.stdout, result.stderr)
     assert result.stdout == _json_line(code, message)
     assert result.stderr == ""
+
+
+# ──────────────────────────────────────────────────────────────
+# G. 일반 파일 stdin (#2575) — 리다이렉트한 파일을 파이프와 같이 읽는다
+# ──────────────────────────────────────────────────────────────
+
+_TWO_SIGNALS = b'{"type": "signal", "n": 1}\n{"type": "signal", "n": 2}\n'
+_MIXED_LINES = (
+    b'{"type": "signal", "n": 1}\n'
+    b"\n"
+    b"not json\n"
+    b'{"type": "signal", "n": 2, "msg": "\xed\x95\x9c"}\n'
+    b'{"type": "signal", "n": 3}'
+)
+
+
+class _EofCountingWriter(FakeWriter):
+    """``write_eof`` 호출 횟수를 센다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.eof_calls = 0
+
+    def write_eof(self) -> None:
+        self.eof_calls += 1
+
+
+def _regular_stdin(tmp_path, data: bytes):  # noqa: ANN001, ANN202
+    path = tmp_path / "signals.jsonl"
+    path.write_bytes(data)
+    return open(path, "rb")  # noqa: SIM115
+
+
+async def _relay(stdin) -> _EofCountingWriter:  # noqa: ANN001
+    from ante.cli.commands.signal import _pump_in
+
+    writer = _EofCountingWriter()
+    try:
+        with patch("ante.cli.commands.signal.sys.stdin", stdin):
+            await asyncio.wait_for(_pump_in(writer), timeout=5)
+    finally:
+        stdin.close()
+    return writer
+
+
+async def test_regular_file_stdin_sends_every_signal_then_eof(tmp_path) -> None:
+    """리다이렉트한 파일의 두 줄이 프레임 둘로 가고, 파일 끝에 송신 쪽을 닫는다."""
+    writer = await _relay(_regular_stdin(tmp_path, _TWO_SIGNALS))
+
+    expected = _frame({"type": "signal", "n": 1}) + _frame({"type": "signal", "n": 2})
+    assert bytes(writer.written) == expected
+    assert writer.eof_calls == 1
+
+
+async def test_regular_file_stdin_relays_the_same_bytes_as_a_pipe(tmp_path) -> None:
+    """같은 입력을 파이프와 일반 파일로 줬을 때 보내는 바이트가 같다."""
+    via_pipe = await _relay(_pipe_stdin(_MIXED_LINES))
+    via_file = await _relay(_regular_stdin(tmp_path, _MIXED_LINES))
+
+    assert len(via_pipe.written) > 0
+    assert bytes(via_file.written) == bytes(via_pipe.written)
+    assert (via_file.eof_calls, via_pipe.eof_calls) == (1, 1)
+
+
+async def test_regular_file_read_error_ends_input_like_eof(tmp_path) -> None:
+    """파일 읽기의 입출력 오류는 입력의 끝처럼 처리한다."""
+    raw = _regular_stdin(tmp_path, _TWO_SIGNALS)
+
+    class _FailingSecondRead:
+        reads = 0
+
+        def fileno(self) -> int:
+            return raw.fileno()
+
+        def readline(self) -> bytes:
+            type(self).reads += 1
+            if type(self).reads > 1:
+                raise OSError(errno.EIO, "read failed")
+            return raw.readline()
+
+        def close(self) -> None:
+            raw.close()
+
+    writer = await _relay(_FailingSecondRead())
+
+    assert bytes(writer.written) == _frame({"type": "signal", "n": 1})
+    assert writer.eof_calls == 1
+
+
+def test_only_a_regular_file_takes_the_thread_source(tmp_path) -> None:
+    """원천 선택: 일반 파일만 스레드 읽기, 나머지는 지금의 파이프 연결."""
+    import os
+    import pty
+    import socket
+
+    from ante.cli.commands.signal import _stdin_is_regular_file
+
+    master, slave = pty.openpty()
+    sock_a, sock_b = socket.socketpair()
+    opened = [
+        _regular_stdin(tmp_path, b""),
+        _pipe_stdin(b""),
+        os.fdopen(slave, "rb"),
+        open(os.devnull, "rb"),  # noqa: SIM115
+    ]
+    try:
+        regular, pipe, tty, devnull = opened
+        assert _stdin_is_regular_file(regular) is True
+        assert _stdin_is_regular_file(pipe) is False
+        assert _stdin_is_regular_file(sock_a) is False
+        assert _stdin_is_regular_file(tty) is False
+        assert _stdin_is_regular_file(devnull) is False
+        assert _stdin_is_regular_file(object()) is False
+        assert _stdin_is_regular_file(None) is False
+    finally:
+        for f in (*opened, sock_a, sock_b):
+            f.close()
+        os.close(master)

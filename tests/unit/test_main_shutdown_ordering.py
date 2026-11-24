@@ -518,9 +518,6 @@ async def test_cold_path_guard_blocks_until_socket_unlinked(
     )
 
     from ante.cli.commands.account import _assert_no_active_runtime
-    from ante.cli.formatter import OutputFormatter
-
-    fmt = OutputFormatter(fmt="text")
 
     # === stop_accepting 호출 후, unlink_socket 전: guard가 차단해야 한다 ===
     await server.stop_accepting()
@@ -529,7 +526,7 @@ async def test_cold_path_guard_blocks_until_socket_unlinked(
     )
 
     with pytest.raises(AccountStructuralChangeRequiresStoppedServerError):
-        _assert_no_active_runtime(fmt)
+        _assert_no_active_runtime()
 
     # === drain_connections + unlink_socket 후: guard가 통과해야 한다 ===
     await server.drain_connections(timeout=0.5)
@@ -537,7 +534,7 @@ async def test_cold_path_guard_blocks_until_socket_unlinked(
     assert not Path(socket_path).exists()
 
     # socket missing → stale PID 판정 → 예외 없음
-    _assert_no_active_runtime(fmt)
+    _assert_no_active_runtime()
 
 
 @pytest.mark.asyncio

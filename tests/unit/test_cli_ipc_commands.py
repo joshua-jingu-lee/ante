@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -170,6 +171,64 @@ class TestSystemClearHaltIPC:
         # 봇 자동 재시작 안내 문구 (Refs #1213 SSOT)
         assert "자동 재시작" in result.output
         mock_client.send.assert_called_once_with("system.clear_halt", {}, "test-master")
+
+
+# ── accounts_changed 누락 응답 (#2932) ────────────────
+
+
+_MISSING_ACCOUNTS_CHANGED = [
+    (
+        ["system", "halt"],
+        {"status": "halted", "changed_at": "2026-05-03T05:21:33+00:00", "accounts": []},
+    ),
+    (
+        ["system", "clear-halt"],
+        {
+            "status": "halt_cleared",
+            "changed_at": "2026-05-03T05:21:33+00:00",
+            "accounts": [],
+        },
+    ),
+]
+
+
+class TestKillSwitchRequiresAccountsChanged:
+    """킬 스위치 응답에 accounts_changed 가 없으면 UNKNOWN 으로 끝난다."""
+
+    @pytest.mark.parametrize("mode", ["json", "text"])
+    @pytest.mark.parametrize("cli_args,result_body", _MISSING_ACCOUNTS_CHANGED)
+    def test_missing_accounts_changed_is_unknown_error(
+        self,
+        runner: CliRunner,
+        mode: str,
+        cli_args: list[str],
+        result_body: dict,
+    ) -> None:
+        mock_response = {"id": "t", "status": "ok", "result": result_body}
+        fmt = ["--format", "json"] if mode == "json" else []
+        with patch(
+            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = mock_response
+            mock_cls.return_value = mock_client
+
+            with patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ):
+                result = runner.invoke(cli, [*fmt, *cli_args])
+
+        mock_client.send.assert_awaited_once()
+        assert result.exit_code == 1, result.output
+        if mode == "json":
+            assert json.loads(result.output) == {
+                "status": "error",
+                "code": "UNKNOWN",
+                "message": "IPC 응답이 계약과 다릅니다",
+            }
+        else:
+            assert result.output == "Error: UNKNOWN: IPC 응답이 계약과 다릅니다\n"
 
 
 # ── account suspend IPC ────────────────────────────

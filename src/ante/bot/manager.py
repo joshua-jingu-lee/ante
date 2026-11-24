@@ -354,6 +354,21 @@ class BotManager:
         self._eventbus.subscribe(BotStartedEvent, self._on_bot_started)
         self._eventbus.subscribe(BotStoppedEvent, self._on_bot_stopped)
 
+    async def is_bot_id_taken(self, bot_id: str) -> bool:
+        """봇 생성이 이 id 를 거부하는가.
+
+        메모리에 있거나 ``deleted`` 행으로 남은 id 면 참이다.
+        """
+        return bot_id in self._bots or await self._is_deleted_bot_id(bot_id)
+
+    async def _is_deleted_bot_id(self, bot_id: str) -> bool:
+        """``bots`` 에 이 id 의 ``deleted`` 행이 있는가."""
+        row = await self._db.fetch_one(
+            "SELECT 1 FROM bots WHERE bot_id = ? AND status = 'deleted'",
+            (bot_id,),
+        )
+        return row is not None
+
     async def create_bot(
         self,
         config: BotConfig,
@@ -379,6 +394,10 @@ class BotManager:
 
         if config.bot_id in self._bots:
             raise BotAlreadyExistsError(f"Bot already exists: {config.bot_id}")
+        if await self._is_deleted_bot_id(config.bot_id):
+            raise BotAlreadyExistsError(
+                f"Bot already exists (deleted): {config.bot_id}"
+            )
 
         active_statuses = {BotStatus.RUNNING, BotStatus.STOPPING}
         for existing_bot in self._bots.values():
@@ -495,7 +514,7 @@ class BotManager:
                 raise BotImmutableFieldError(
                     "account_id 는 생성 후 변경할 수 없습니다 (treasury 예산·"
                     "broker credential·포지션이 account-bound). 변경하려면 봇을 "
-                    f"삭제 후 재생성하세요: {bot_id} "
+                    f"삭제한 뒤 새 bot_id로 다시 만드세요: {bot_id} "
                     f"(현재: {bot.config.account_id}, 요청: {new_account_id})"
                 )
 
@@ -784,6 +803,7 @@ class BotManager:
                 )
                 logger.info("봇 삭제 (soft delete): %s", bot_id)
             self._cancel_restart_tasks(bot_id)
+            self._restart_counts.pop(bot_id, None)
         finally:
             self._deleting_bots.discard(bot)
 
@@ -1138,6 +1158,9 @@ class BotManager:
             )
             return
 
+        if not self._is_registered(bot):
+            return
+
         self._restart_counts[event.bot_id] = count + 1
         logger.warning(
             "봇 재시작 예약: %s (시도 %d/%d, %d초 후)",
@@ -1243,8 +1266,12 @@ class BotManager:
         )
 
     async def get_signal_key(self, bot_id: str) -> str | None:
-        """봇의 시그널 키 조회."""
+        """봇의 시그널 키 조회. 현재 전략이 외부 시그널을 받지 않으면 ``None``."""
         if not self._signal_key_manager:
+            return None
+        bot = self._get_bot(bot_id)
+        meta = await self._strategy_meta(bot)
+        if not getattr(meta, "accepts_external_signals", False):
             return None
         return await self._signal_key_manager.get_key(bot_id)
 
@@ -1274,27 +1301,7 @@ class BotManager:
         if not self._signal_key_manager:
             raise BotError("SignalKeyManager가 설정되지 않았습니다")
         bot = self._get_bot(bot_id)
-
-        meta = None
-        strategy = getattr(bot, "strategy", None)
-        if strategy is not None:
-            meta = getattr(strategy, "meta", None)
-        if meta is None:
-            strategy_cls = getattr(bot, "_strategy_cls", None)
-            if strategy_cls is not None:
-                meta = getattr(strategy_cls, "meta", None)
-        if meta is None:
-            from ante.strategy.loader import StrategyLoader
-            from ante.strategy.registry import StrategyRegistry
-
-            registry = StrategyRegistry(self._db)
-            await registry.initialize()
-            record = await registry.get(bot.config.strategy_id)
-            if record is None:
-                raise BotError(f"전략 미발견: {bot.config.strategy_id}")
-            loaded_cls = StrategyLoader.load(Path(record.filepath))
-            meta = getattr(loaded_cls, "meta", None)
-
+        meta = await self._strategy_meta(bot)
         if not getattr(meta, "accepts_external_signals", False):
             raise BotNotAcceptingSignals(
                 f"이 봇의 전략은 외부 시그널을 받지 않습니다: "
@@ -1307,6 +1314,29 @@ class BotManager:
             reg.bump_generation(bot_id)
             reg.close_bot(bot_id, "rotated")
         return new_key
+
+    async def _strategy_meta(self, bot: Bot) -> Any:
+        """봇에 지금 묶인 전략의 meta(인스턴스 → 클래스 → 레지스트리 로드 순)."""
+        strategy = getattr(bot, "strategy", None)
+        if strategy is not None:
+            meta = getattr(strategy, "meta", None)
+            if meta is not None:
+                return meta
+        strategy_cls = getattr(bot, "_strategy_cls", None)
+        if strategy_cls is not None:
+            meta = getattr(strategy_cls, "meta", None)
+            if meta is not None:
+                return meta
+        from ante.strategy.loader import StrategyLoader
+        from ante.strategy.registry import StrategyRegistry
+
+        registry = StrategyRegistry(self._db)
+        await registry.initialize()
+        record = await registry.get(bot.config.strategy_id)
+        if record is None:
+            raise BotError(f"전략 미발견: {bot.config.strategy_id}")
+        loaded_cls = StrategyLoader.load(Path(record.filepath))
+        return getattr(loaded_cls, "meta", None)
 
     def get_restart_count(self, bot_id: str) -> int:
         """봇의 현재 재시작 시도 횟수."""

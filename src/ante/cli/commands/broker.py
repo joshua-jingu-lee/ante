@@ -44,11 +44,15 @@ async def _create_account_service() -> tuple[Any, Any]:
     return account_service, db
 
 
-async def _get_broker(account_id: str | None = None) -> tuple[Any, Any]:
+async def _get_broker(
+    account_id: str | None = None, *, reconcile: bool = False
+) -> tuple[Any, Any]:
     """브로커 어댑터와 db(Config 기반이면 None) 획득. 받은 db는 호출자가 close."""
     if account_id:
         account_service, db = await _create_account_service()
         try:
+            if reconcile:
+                await account_service.ensure_reconcile_applicable(account_id)
             adapter = await account_service.get_broker(account_id)
             await adapter.connect()
         except Exception:
@@ -83,9 +87,14 @@ async def _get_broker(account_id: str | None = None) -> tuple[Any, Any]:
 
 
 @asynccontextmanager
-async def _direct_broker(account_id: str) -> AsyncIterator[tuple[Any, Any]]:
+async def _direct_broker(
+    account_id: str, *, reconcile: bool = False
+) -> AsyncIterator[tuple[Any, Any]]:
     """직접 연결 어댑터와 db를 주고, 연결 해제가 실패해도 db를 닫는다."""
-    adapter, db = await _get_broker(account_id)
+    if reconcile:
+        adapter, db = await _get_broker(account_id, reconcile=True)
+    else:
+        adapter, db = await _get_broker(account_id)
     try:
         yield adapter, db
     finally:
@@ -409,7 +418,7 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> CommandResult:
                 from ante.core.database import Database
                 from ante.trade.position import PositionHistory
 
-                async with _direct_broker(validated_account_id) as (
+                async with _direct_broker(validated_account_id, reconcile=True) as (
                     adapter,
                     adapter_db,
                 ):
@@ -481,4 +490,6 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> CommandResult:
         )
     if result.get("fix_applied"):
         lines.append(f"  자동 보정      : {result.get('corrections', 0)}건 수행")
+    elif fix:
+        lines.append("  자동 보정      : 안 함 (봇이 0개이거나 둘 이상인 계좌)")
     return CommandResult(data=result, text=tuple(lines))
