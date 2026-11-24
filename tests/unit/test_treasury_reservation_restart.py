@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from unittest.mock import patch
@@ -283,3 +284,407 @@ async def test_unattributed_reserved_warns_without_change(
     assert node.treasury.get_reservations(BOT) == {ORDER: RESERVED}
     warned = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert any(BOT in r.getMessage() for r in warned)
+
+
+OTHER = "ord-2"
+OTHER_AMOUNT = 30_000.0
+
+
+async def budget_row(db: Database) -> tuple[float, float]:
+    row = await db.fetch_one(
+        "SELECT available, reserved FROM bot_budgets WHERE bot_id = ?", (BOT,)
+    )
+    assert row is not None
+    return float(row["available"]), float(row["reserved"])
+
+
+def assert_budget(budget, available: float, reserved: float, spent: float = 0.0):
+    assert budget.available == pytest.approx(available)
+    assert budget.reserved == pytest.approx(reserved)
+    assert budget.spent == pytest.approx(spent)
+    assert budget.available == pytest.approx(
+        budget.allocated - budget.reserved - budget.spent + budget.returned
+    )
+
+
+def gated(original, target: str, reached: asyncio.Event, gate: asyncio.Event):
+    async def wrapper(order_id: str) -> None:
+        if order_id == target and not reached.is_set():
+            reached.set()
+            await gate.wait()
+            raise RuntimeError("io")
+        await original(order_id)
+
+    return wrapper
+
+
+async def overlap_other_reservation(node: Node, failing) -> None:
+    reached, gate = asyncio.Event(), asyncio.Event()
+    original = node.treasury._persist_reservation
+    with patch.object(
+        node.treasury,
+        "_persist_reservation",
+        gated(original, ORDER, reached, gate),
+    ):
+        first = asyncio.create_task(failing())
+        await reached.wait()
+        second = asyncio.create_task(
+            node.treasury.reserve_for_order(BOT, OTHER, OTHER_AMOUNT)
+        )
+        await asyncio.sleep(0)
+        gate.set()
+        with pytest.raises(RuntimeError):
+            await first
+        assert await second
+
+
+async def test_failed_reserve_keeps_overlapping_reservation(db: Database) -> None:
+    node = await funded(db)
+
+    await overlap_other_reservation(
+        node, lambda: node.treasury.reserve_for_order(BOT, ORDER, RESERVED)
+    )
+
+    assert_budget(budget_of(node), ALLOCATED - OTHER_AMOUNT, OTHER_AMOUNT)
+    assert await budget_row(db) == pytest.approx(
+        (ALLOCATED - OTHER_AMOUNT, OTHER_AMOUNT)
+    )
+    assert node.treasury.get_reservations(BOT) == {OTHER: OTHER_AMOUNT}
+    assert await stored(db) == {OTHER: OTHER_AMOUNT}
+
+
+async def test_failed_release_keeps_overlapping_reservation(db: Database) -> None:
+    node = await funded(db)
+    await reserve(node)
+
+    await overlap_other_reservation(
+        node, lambda: node.treasury.release_reservation(BOT, ORDER)
+    )
+
+    expected = (ALLOCATED - RESERVED - OTHER_AMOUNT, RESERVED + OTHER_AMOUNT)
+    assert_budget(budget_of(node), *expected)
+    assert await budget_row(db) == pytest.approx(expected)
+    assert node.treasury.get_reservations(BOT) == {
+        ORDER: RESERVED,
+        OTHER: OTHER_AMOUNT,
+    }
+
+
+async def test_failed_bot_release_keeps_overlapping_reservation(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node)
+
+    await overlap_other_reservation(
+        node,
+        lambda: node.treasury._release_bot_reservations(BOT, {ORDER: RESERVED}),
+    )
+
+    expected = (ALLOCATED - RESERVED - OTHER_AMOUNT, RESERVED + OTHER_AMOUNT)
+    assert_budget(budget_of(node), *expected)
+    assert await budget_row(db) == pytest.approx(expected)
+
+
+async def test_failed_fill_keeps_reservation_made_during_tracker_read(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    await node.tracker.record_fill(ORDER, float(QTY), PRICE)
+    reached, gate = asyncio.Event(), asyncio.Event()
+    original_get = node.tracker.get
+
+    async def gated_get(order_id: str):
+        reached.set()
+        await gate.wait()
+        return await original_get(order_id)
+
+    event = OrderFilledEvent(
+        account_id=ACCOUNT_ID,
+        order_id=ORDER,
+        broker_order_id=f"bk-{ORDER}",
+        bot_id=BOT,
+        strategy_id="s1",
+        symbol="005930",
+        side="buy",
+        quantity=float(QTY),
+        price=PRICE,
+        commission=0.0,
+        order_type="limit",
+        fill_dedup_key=f"{ORDER}:{QTY}",
+    )
+    with (
+        patch.object(node.tracker, "get", gated_get),
+        patch.object(node.treasury, "_log_transaction", side_effect=RuntimeError("io")),
+    ):
+        settling = asyncio.create_task(node.treasury._on_order_filled(event))
+        await reached.wait()
+        other = asyncio.create_task(
+            node.treasury.reserve_for_order(BOT, OTHER, OTHER_AMOUNT)
+        )
+        await asyncio.sleep(0)
+        gate.set()
+        with pytest.raises(RuntimeError):
+            await settling
+        assert await other
+
+    expected = (ALLOCATED - RESERVED - OTHER_AMOUNT, RESERVED + OTHER_AMOUNT)
+    assert_budget(budget_of(node), *expected)
+    assert await budget_row(db) == pytest.approx(expected)
+    assert node.treasury.get_reservations(BOT) == {
+        ORDER: RESERVED,
+        OTHER: OTHER_AMOUNT,
+    }
+
+
+def buy_fill_event(qty: int, cumulative: int) -> OrderFilledEvent:
+    return OrderFilledEvent(
+        account_id=ACCOUNT_ID,
+        order_id=ORDER,
+        broker_order_id=f"bk-{ORDER}",
+        bot_id=BOT,
+        strategy_id="s1",
+        symbol="005930",
+        side="buy",
+        quantity=float(qty),
+        price=PRICE,
+        commission=0.0,
+        order_type="limit",
+        fill_dedup_key=f"{ORDER}:{cumulative}",
+    )
+
+
+async def full_row(db: Database) -> tuple[float, float, float]:
+    row = await db.fetch_one(
+        "SELECT available, reserved, spent FROM bot_budgets WHERE bot_id = ?", (BOT,)
+    )
+    assert row is not None
+    return float(row["available"]), float(row["reserved"]), float(row["spent"])
+
+
+def gated_log(reached: asyncio.Event, gate: asyncio.Event):
+    async def wrapper(*args, **kwargs) -> None:
+        reached.set()
+        await gate.wait()
+        raise RuntimeError("io")
+
+    return wrapper
+
+
+async def test_failed_fill_keeps_reservation_made_during_its_write(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    await node.tracker.record_fill(ORDER, float(QTY), PRICE)
+    reached, gate = asyncio.Event(), asyncio.Event()
+
+    with patch.object(node.treasury, "_log_transaction", gated_log(reached, gate)):
+        settling = asyncio.create_task(
+            node.treasury._on_order_filled(buy_fill_event(QTY, QTY))
+        )
+        await reached.wait()
+        other = asyncio.create_task(
+            node.treasury.reserve_for_order(BOT, OTHER, OTHER_AMOUNT)
+        )
+        await asyncio.sleep(0)
+        gate.set()
+        with pytest.raises(RuntimeError):
+            await settling
+        assert await other
+
+    expected = (ALLOCATED - RESERVED - OTHER_AMOUNT, RESERVED + OTHER_AMOUNT)
+    assert_budget(budget_of(node), *expected)
+    assert await budget_row(db) == pytest.approx(expected)
+    assert node.treasury.get_reservations(BOT) == {
+        ORDER: RESERVED,
+        OTHER: OTHER_AMOUNT,
+    }
+
+
+async def test_failed_reserve_after_bot_stop_took_it_does_not_revert(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    reached, gate = asyncio.Event(), asyncio.Event()
+    original = node.treasury._persist_reservation
+
+    with patch.object(
+        node.treasury,
+        "_persist_reservation",
+        gated(original, ORDER, reached, gate),
+    ):
+        reserving = asyncio.create_task(
+            node.treasury.reserve_for_order(BOT, ORDER, RESERVED)
+        )
+        await reached.wait()
+        stopping = asyncio.create_task(
+            node.treasury._on_bot_stopped(
+                BotStoppedEvent(account_id=ACCOUNT_ID, bot_id=BOT)
+            )
+        )
+        await asyncio.sleep(0)
+        gate.set()
+        with pytest.raises(RuntimeError):
+            await reserving
+        await stopping
+
+    budget = budget_of(node)
+    assert (budget.available, budget.reserved, budget.spent) == (ALLOCATED, 0.0, 0.0)
+    assert await full_row(db) == (ALLOCATED, 0.0, 0.0)
+    assert node.treasury.get_reservations(BOT) == {}
+    assert await stored(db) == {}
+
+
+async def test_failed_partial_fill_after_bot_stop_took_rest_stays_consistent(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    await node.tracker.record_fill(ORDER, 4.0, PRICE)
+    reached, gate = asyncio.Event(), asyncio.Event()
+
+    with patch.object(node.treasury, "_log_transaction", gated_log(reached, gate)):
+        settling = asyncio.create_task(
+            node.treasury._on_order_filled(buy_fill_event(4, 4))
+        )
+        await reached.wait()
+        stopping = asyncio.create_task(
+            node.treasury._release_bot_reservations(
+                BOT, node.treasury.get_reservations(BOT)
+            )
+        )
+        await asyncio.sleep(0)
+        gate.set()
+        with pytest.raises(RuntimeError):
+            await settling
+        assert await stopping == RESERVED - 4 * PRICE
+
+    budget = budget_of(node)
+    memory = (budget.available, budget.reserved, budget.spent)
+    assert memory == (ALLOCATED - 4 * PRICE, 0.0, 4 * PRICE)
+    assert await full_row(db) == memory
+    assert node.treasury.get_reservations(BOT) == {}
+    assert await stored(db) == {}
+
+
+async def test_failed_bot_release_reverts_only_orders_still_released(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node)
+    assert await node.treasury.reserve_for_order(BOT, OTHER, OTHER_AMOUNT)
+    retaken = 20_000.0
+    reached, gate = asyncio.Event(), asyncio.Event()
+    original = node.treasury._persist_reservation
+
+    with patch.object(
+        node.treasury,
+        "_persist_reservation",
+        gated(original, ORDER, reached, gate),
+    ):
+        releasing = asyncio.create_task(
+            node.treasury._release_bot_reservations(
+                BOT, node.treasury.get_reservations(BOT)
+            )
+        )
+        await reached.wait()
+        retaking = asyncio.create_task(
+            node.treasury.reserve_for_order(BOT, ORDER, retaken)
+        )
+        await asyncio.sleep(0)
+        gate.set()
+        with pytest.raises(RuntimeError):
+            await releasing
+        assert await retaking
+
+    expected = (ALLOCATED - retaken - OTHER_AMOUNT, retaken + OTHER_AMOUNT)
+    assert_budget(budget_of(node), *expected)
+    assert await budget_row(db) == pytest.approx(expected)
+    assert node.treasury.get_reservations(BOT) == {
+        ORDER: retaken,
+        OTHER: OTHER_AMOUNT,
+    }
+    assert await stored(db) == {ORDER: retaken, OTHER: OTHER_AMOUNT}
+
+
+def failing_delete(db: Database, gate: asyncio.Event | None = None, fail=True):
+    original = db.execute
+
+    async def wrapper(sql: str, *args, **kwargs):
+        if sql.startswith("DELETE FROM bot_budgets"):
+            if gate is not None:
+                await gate.wait()
+            if fail:
+                raise RuntimeError("io")
+        return await original(sql, *args, **kwargs)
+
+    return wrapper
+
+
+async def test_failed_release_budget_restores_memory_and_retries_once(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node)
+    unallocated = node.treasury.unallocated
+
+    with (
+        patch.object(db, "execute", failing_delete(db)),
+        pytest.raises(RuntimeError),
+    ):
+        await node.treasury.release_budget(BOT)
+
+    assert node.treasury.unallocated == unallocated
+    assert_budget(budget_of(node), ALLOCATED - RESERVED, RESERVED)
+    assert node.treasury.get_reservations(BOT) == {ORDER: RESERVED}
+
+    assert await node.treasury.release_budget(BOT) == ALLOCATED
+    assert node.treasury.unallocated == unallocated + ALLOCATED
+    assert node.treasury.get_budget(BOT) is None
+
+
+@pytest.mark.parametrize("fail", [False, True])
+async def test_release_budget_overlapping_sync_keeps_unallocated(
+    db: Database, fail: bool
+) -> None:
+    node = await funded(db)
+    balance = node.treasury.account_balance
+    gate = asyncio.Event()
+
+    with patch.object(db, "execute", failing_delete(db, gate, fail)):
+        releasing = asyncio.create_task(node.treasury.release_budget(BOT))
+        await asyncio.sleep(0)
+        syncing = asyncio.create_task(node.treasury.sync_balance({"cash": balance}))
+        await asyncio.sleep(0)
+        gate.set()
+        if fail:
+            with pytest.raises(RuntimeError):
+                await releasing
+        else:
+            assert await releasing == ALLOCATED
+        await syncing
+
+    allocated = sum(b.allocated for b in node.treasury.list_budgets())
+    assert node.treasury.unallocated == pytest.approx(balance - allocated)
+    assert (node.treasury.get_budget(BOT) is not None) is fail
+
+
+async def test_release_budget_state_failure_drops_reservations(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node)
+    unallocated = node.treasury.unallocated
+
+    with (
+        patch.object(node.treasury, "_save_state", side_effect=RuntimeError("io")),
+        pytest.raises(RuntimeError),
+    ):
+        await node.treasury.release_budget(BOT)
+
+    assert node.treasury.get_reservations(BOT) == {}
+    assert node.treasury.get_budget(BOT) is None
+    assert node.treasury.unallocated == unallocated + ALLOCATED
+    assert await stored(db) == {}
