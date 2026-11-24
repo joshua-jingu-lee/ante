@@ -33,6 +33,11 @@ def _is_valid_quantity(value: object) -> bool:
         return False
 
 
+def _is_limit_priced(signal: Signal) -> bool:
+    """스톱 변환 뒤 지정가로 체결되는 주문(``limit``·``stop_limit``)인지 판정."""
+    return signal.order_type in ("limit", "stop_limit")
+
+
 class BacktestExecutor:
     """백테스트 시뮬레이션 실행기.
 
@@ -262,6 +267,7 @@ class BacktestExecutor:
                 slippage=abs(exec_price - price) * executed_qty,
                 reason=signal.reason,
                 exchange=self._exchange,
+                order_type="limit" if _is_limit_priced(signal) else "market",
             )
         )
 
@@ -341,7 +347,7 @@ class BacktestExecutor:
     def _apply_slippage_cap(self, signal: Signal, price: float, side: str) -> float:
         """게이트 통과 후 order_type별 체결가(``exec_price``)를 산출한다."""
         limit = signal.price
-        is_capped_limit = signal.order_type in ("limit", "stop_limit")
+        is_capped_limit = _is_limit_priced(signal)
         if side == "buy":
             slipped = price * (1 + self._slippage_rate)
             if is_capped_limit and limit is not None:
@@ -492,7 +498,7 @@ class BacktestExecutor:
                 "quantity": t.quantity,
                 "price": t.price,
                 "status": "filled",
-                "order_type": "market",
+                "order_type": t.order_type,
                 "reason": t.reason,
                 "commission": t.commission,
                 "timestamp": t.timestamp.isoformat()

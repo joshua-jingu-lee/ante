@@ -858,12 +858,15 @@ class TestStartRacingDelete:
         seen_status: list[BotStatus] = []
         raised: list[BaseException] = []
 
+        counts_after_call: list[int | None] = []
+
         async def _start_during_delete(target):
             seen_status.append(target.status)
             try:
                 await getattr(manager, path)("bot1")
             except Exception as exc:
                 raised.append(exc)
+            counts_after_call.append(manager._restart_counts.get("bot1"))
 
         monkeypatch.setattr(manager, "_liquidate_positions", _start_during_delete)
         generation = bot._generation
@@ -879,7 +882,8 @@ class TestStartRacingDelete:
         assert bot._task is None or bot._task.done()
         assert bot.status == BotStatus.DELETED
         assert manager.get_bot("bot1") is None
-        assert manager._restart_counts.get("bot1") == 2
+        assert counts_after_call == [2]
+        assert manager._restart_counts.get("bot1") is None
         row = await _db_row(db)
         if hard:
             assert row is None

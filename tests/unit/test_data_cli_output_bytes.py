@@ -489,9 +489,7 @@ _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("validate_empty", "text"): (
-        "{'message': '검증할 데이터가 없습니다.', 'results': []}\n"
-    ),
+    ("validate_empty", "text"): ("검증할 데이터가 없습니다.\n"),
     ("validate_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'
