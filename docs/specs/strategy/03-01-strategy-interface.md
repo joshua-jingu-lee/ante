@@ -68,7 +68,7 @@
 | `async on_position_corrected` | `correction: dict[str, Any]` | `None` | 대사(Reconciliation) 포지션 보정 통보 (선택) |
 | `get_rules` | — | `dict[str, Any]` | 전략별 거래 룰 반환. Rule Engine이 전역 룰과 함께 검증 (선택) |
 | `get_params` | — | `dict[str, Any]` | 백테스트 최적화 가능 파라미터 반환 (선택) |
-| `get_param_schema` | — | `dict[str, str]` | 파라미터별 설명 반환 (선택). Bot CLI에서 `--param` 힌트로 사용 |
+| `get_param_schema` | — | `dict[str, str]` | 파라미터별 설명 반환 (선택). `ante strategy info`에서 파라미터 설명으로 표시 |
 
 **설계 근거**:
 

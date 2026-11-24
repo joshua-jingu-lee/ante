@@ -331,7 +331,7 @@ JSON 출력이 필요하면 root 전역 옵션을 사용한다:
 
 ```bash
 ante bot list [--account <account_id>]  # 봇 목록 (계좌별 필터링)
-ante bot create --name <name> --strategy <strategy_id> [--account <account_id>] [--id <bot_id>] [--interval <초>] [--param key=value ...]
+ante bot create --name <name> --strategy <strategy_id> [--account <account_id>] [--id <bot_id>] [--interval <초>]
 ante bot update <bot_id> [--name <name>] [--strategy <strategy_id>] [--interval 10-3600] [--budget <float>] [--auto-restart|--no-auto-restart] [--max-restart-attempts 1-10] [--restart-cooldown-seconds 10-600] [--step-timeout-seconds 5-120] [--max-signals-per-step 1-200]  # 중지 상태 봇 설정 수정
 ante bot start <bot_id>            # 봇 시작
 ante bot stop <bot_id>             # 봇 중지
