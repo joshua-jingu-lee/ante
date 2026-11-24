@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import date
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ante.account.models import missing_required_credentials
 from ante.account.presets import BROKER_PRESETS
+from ante.contracts.cli_errors import InvalidDateRangeError
 from ante.core import clock
 from ante.ipc.requests import (
     AccountActivateRequest,
@@ -1038,6 +1040,15 @@ async def _handle_broker_order_history(
     """``broker.order_history`` — 주문/체결 이력 read-only 조회."""
     from ante.core.time import iso_to_kis_date
 
+    if (
+        request.from_date is not None
+        and request.to_date is not None
+        and date.fromisoformat(request.from_date) > date.fromisoformat(request.to_date)
+    ):
+        raise InvalidDateRangeError(
+            f"조회 시작일({request.from_date})이(가) "
+            f"조회 종료일({request.to_date}) 이후입니다."
+        )
     from_date = iso_to_kis_date(request.from_date)
     to_date = iso_to_kis_date(request.to_date)
     broker = await svc.account.get_broker(request.account_id)
