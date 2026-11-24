@@ -40,16 +40,9 @@ def error_spec_for_exception(exc: BaseException) -> ErrorSpec:
     return EXECUTION_ERROR_SPEC
 
 
-def _resolve_message(
-    exc: BaseException,
-    spec: ErrorSpec,
-    *,
-    fallback_message: str | None,
-) -> str:
+def _resolve_message(exc: BaseException, spec: ErrorSpec) -> str:
     """``ipc_error_payload`` 의 message resolution."""
 
-    if fallback_message:
-        return fallback_message
     exc_text = str(exc)
     if exc_text:
         return exc_text
@@ -69,5 +62,5 @@ def ipc_error_payload(exc: BaseException) -> dict[str, str]:
     """
 
     spec = error_spec_for_exception(exc)
-    message = _resolve_message(exc, spec, fallback_message=None)
+    message = _resolve_message(exc, spec)
     return {"code": spec.code, "message": message}

@@ -13,7 +13,7 @@ from ante.bot.providers.virtual import (
     VirtualOrderView,
     VirtualPortfolioView,
 )
-from ante.strategy.base import OrderView
+from ante.strategy.base import OrderView, PortfolioView
 from ante.strategy.context import StrategyContext
 
 if TYPE_CHECKING:
@@ -161,15 +161,10 @@ class StrategyContextFactory:
 
     def _create_virtual_context(self, config: BotConfig) -> StrategyContext:
         """Virtual 계좌 봇용 StrategyContext 생성."""
-        initial_balance = self._resolve_virtual_balance(config)
-        virtual_portfolio = VirtualPortfolioView(
-            bot_id=config.bot_id,
-            initial_balance=initial_balance,
-        )
-        virtual_order_view = VirtualOrderView(portfolio=virtual_portfolio)
+        virtual_portfolio = self._get_virtual_portfolio(config)
 
         if self._virtual_executor:
-            self._virtual_executor.register_bot(config.bot_id, virtual_portfolio)
+            self._virtual_executor.register_bot(config.bot_id)
 
         data_provider = self._data_provider
         if self._api_gateway is not None:
@@ -185,30 +180,44 @@ class StrategyContextFactory:
             bot_id=config.bot_id,
             data_provider=data_provider,
             portfolio=virtual_portfolio,
-            order_view=virtual_order_view,
+            order_view=VirtualOrderView(),
         )
-        logger.info(
-            "Virtual StrategyContext 생성: %s (잔고: %s)",
-            config.bot_id,
-            initial_balance,
-        )
+        logger.info("Virtual StrategyContext 생성: %s", config.bot_id)
         return ctx
 
-    def _resolve_virtual_balance(self, config: BotConfig) -> float:
-        """Virtual 봇 초기 잔고: 예산의 allocated, Treasury·예산이 없으면 0.0."""
-        if self._treasury_manager is not None:
-            try:
-                treasury = self._treasury_manager.get(config.account_id)
-                budget = treasury.get_budget(config.bot_id)
-                if budget is not None:
-                    return budget.allocated
-            except KeyError:
-                logger.warning(
-                    "Virtual 계좌 봇 '%s': 계좌 '%s'의 Treasury 미발견 -- 잔고 0",
-                    config.bot_id,
-                    config.account_id,
-                )
-        return 0.0
+    def _get_virtual_portfolio(self, config: BotConfig) -> PortfolioView:
+        """봇 계좌의 VirtualPortfolioView, Treasury·PositionHistory가 없으면 빈 뷰."""
+        if self._treasury_manager is None or self._position_history is None:
+            logger.warning(
+                "Virtual 계좌 봇 '%s': Treasury 또는 PositionHistory 미주입 "
+                "-- 빈 포트폴리오",
+                config.bot_id,
+            )
+            return _EmptyPortfolioView()
+        try:
+            treasury = self._treasury_manager.get(config.account_id)
+        except KeyError:
+            logger.warning(
+                "Virtual 계좌 봇 '%s': 계좌 '%s'의 Treasury 미발견 -- 빈 포트폴리오",
+                config.bot_id,
+                config.account_id,
+            )
+            return _EmptyPortfolioView()
+        return VirtualPortfolioView(
+            treasury=treasury,
+            position_history=self._position_history,
+            account_id=config.account_id,
+        )
+
+
+class _EmptyPortfolioView(PortfolioView):
+    """Virtual 봇의 Treasury·PositionHistory가 없을 때의 잔고 0·보유 없음 뷰."""
+
+    def get_positions(self, bot_id: str) -> dict[str, Any]:
+        return {}
+
+    def get_balance(self, bot_id: str) -> dict[str, float]:
+        return {"allocated": 0.0, "available": 0.0, "reserved": 0.0}
 
 
 class _EmptyOrderView(OrderView):

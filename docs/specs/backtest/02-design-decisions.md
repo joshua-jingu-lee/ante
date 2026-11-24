@@ -28,6 +28,8 @@
 - CPU 격리 — N100의 4코어 중 백테스트가 1코어 점유해도 라이브 봇은 다른 코어 사용
 - 크래시 격리 — 백테스트 중 OOM/segfault 발생해도 메인 프로세스 안전
 
+자식이 일반 예외로 실패하면 stdout의 실패 sentinel 한 줄에 예외의 종류·메시지와 전략 파일 안의 가장 안쪽 줄(`파일 이름:줄`, 그런 줄이 없으면 생략)만 내고 exit 1로 끝난다. `run_subprocess()`는 그것만 `BacktestError` message에 싣고 stderr의 트레이스백은 싣지 않는다(error-taxonomy Redaction). 실패 sentinel이 없거나 읽히지 않으면(stdin 설정 파싱 실패, 인터럽트, OOM·시그널 등) 종료 코드만 싣는다. 예외 메시지 자체에 든 경로는 가리지 않는다.
+
 ### BacktestDataProvider — Parquet 기반 과거 데이터
 
 > 소스: [`src/ante/backtest/data_provider.py`](../../../src/ante/backtest/data_provider.py)
