@@ -33,4 +33,4 @@ Account "test"                Account "domestic"
 └── Backtest Engine
 ```
 
-> **1.1 예정**: Account "us-stock" (NYSE / USD / kis-overseas) 추가. 브로커 프리셋에 `kis-overseas`는 1.0에서 정의만 해두고, 실제 어댑터 구현 및 US 데이터 파이프라인은 1.1에서 지원.
+> **1.1 예정**: Account "us-stock" (NYSE / USD / kis-overseas) 추가. 브로커 프리셋 `kis-overseas`는 1.0에서 정의하지 않으며, 어댑터·프리셋·US 데이터 파이프라인은 1.1에서 함께 추가한다.

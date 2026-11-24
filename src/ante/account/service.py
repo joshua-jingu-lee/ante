@@ -19,6 +19,7 @@ from ante.account.errors import (
     AccountStructuralChangeRequiresStoppedServerError,
     BrokerReconnectFailedError,
     InvalidAccountIdError,
+    InvalidBrokerConfigError,
     InvalidBrokerTypeError,
     InvalidExchangeError,
     MissingCredentialsError,
@@ -36,6 +37,7 @@ from ante.account.timezone import validate_iana_timezone
 from ante.core import clock
 from ante.core.database import OperationalError
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
+from ante.core.price import is_valid_price
 
 if TYPE_CHECKING:
     from ante.broker.base import BrokerAdapter
@@ -105,6 +107,34 @@ def _reject_virtual_only_broker_in_live(account: Account) -> None:
             f"broker_type '{account.broker_type}'은 가상 전용이라 "
             f"trading_mode '{account.trading_mode.value}'와 함께 쓸 수 없습니다. "
             "trading_mode 'virtual'로 만드세요."
+        )
+
+
+def _reject_invalid_mock_prices(account: Account) -> None:
+    """``mock`` 계좌의 ``broker_config`` 가격 값을 가격 정의로 검사한다."""
+    if account.broker_type != "mock":
+        return
+    config = account.broker_config
+    if "prices" in config:
+        prices = config["prices"]
+        if not isinstance(prices, dict):
+            raise InvalidBrokerConfigError(
+                f"mock 계좌의 broker_config prices는 객체여야 합니다: {prices!r}"
+            )
+        invalid = {
+            symbol: value
+            for symbol, value in prices.items()
+            if not is_valid_price(value)
+        }
+        if invalid:
+            raise InvalidBrokerConfigError(
+                "mock 계좌의 broker_config prices 값은 불리언이 아닌 "
+                f"0보다 큰 유한한 수여야 합니다: {invalid!r}"
+            )
+    if "default_price" in config and not is_valid_price(config["default_price"]):
+        raise InvalidBrokerConfigError(
+            "mock 계좌의 broker_config default_price는 불리언이 아닌 "
+            f"0보다 큰 유한한 수여야 합니다: {config['default_price']!r}"
         )
 
 
@@ -305,6 +335,7 @@ class AccountService:
                 f"가능한 값: {list(BROKER_PRESETS.keys())}"
             )
         _reject_virtual_only_broker_in_live(account)
+        _reject_invalid_mock_prices(account)
 
         _reject_missing_credentials(account.broker_type, account.credentials)
 

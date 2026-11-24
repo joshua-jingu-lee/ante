@@ -59,7 +59,7 @@ def _run(coro: Coroutine[Any, Any, Any]) -> Any:
 _COLD_PATH_BLOCKED_CODE = ACCOUNT_COLD_PATH_BLOCKED_CODE
 
 
-def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
+def _assert_no_active_runtime() -> None:
     """active Ante runtime이 있으면 cold-path 명령을 차단한다."""
     if cold_path.is_active_runtime(kill=os.kill):
         raise AccountStructuralChangeRequiresStoppedServerError(
@@ -379,7 +379,7 @@ def account_create(
     """
     fmt = get_formatter(ctx)
 
-    _assert_no_active_runtime(fmt)
+    _assert_no_active_runtime()
 
     from ante.account.models import Account, TradingMode
     from ante.account.presets import BROKER_PRESETS
@@ -619,7 +619,7 @@ def account_delete(
             f'계좌 "{account_id}" 삭제는 확인이 필요합니다. --yes를 명시해 주세요.'
         )
 
-    _assert_no_active_runtime(fmt)
+    _assert_no_active_runtime()
 
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.delete"
@@ -719,7 +719,7 @@ def account_set_credentials(
     """
     fmt = get_formatter(ctx)
 
-    _assert_no_active_runtime(fmt)
+    _assert_no_active_runtime()
 
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.set-credentials"
@@ -799,7 +799,7 @@ def account_repair_timezone(
     """
     fmt = get_formatter(ctx)
 
-    _assert_no_active_runtime(fmt)
+    _assert_no_active_runtime()
 
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.repair-timezone"

@@ -22,7 +22,7 @@
 CLI는 default-deny + allowlist 정책을 적용한다. 다음 명령만 `ANTE_MEMBER_TOKEN`
 없이 실행할 수 있다. 그 외 모든 명령은 토큰이 없으면 자동으로 exit 1로 거부된다.
 
-코드 인용: `_AUTH_EXEMPT_COMMAND_PATHS` 정의는 `src/ante/cli/middleware.py:29-33`.
+코드 인용: `_AUTH_EXEMPT_COMMAND_PATHS` 정의는 `src/ante/cli/middleware.py`의 `_AUTH_EXEMPT_COMMAND_PATHS`.
 매칭은 leaf 이름이 아니라 전체 커맨드 경로 tuple 기준이다(`ante feed init`처럼
 leaf 이름이 우연히 같은 명령은 면제 대상이 아니다).
 
@@ -47,7 +47,7 @@ allowlist 후보에서 제거한다.
 |----------|----------|------|
 | `--help` | `ante --help`, `ante <cmd> --help`, `ante <cmd> <sub> --help` 등 모든 명령 단계 | root `--help`만 root 콜백 진입 전 처리되고, **nested `--help`는 부모 그룹 콜백이 먼저 실행된 뒤** 서브커맨드 단의 도움말이 출력된다(click 동작). 이 때문에 `authenticate_member(ctx)` 및 `AuthenticatedGroup` factory(#1404 적용)는 invocation에 `--help` 플래그가 있거나 `ctx.resilient_parsing == True`인 경우 인증 검사를 skip한다. 도움말은 명령 사용법 그 자체이며 인증 없이도 받을 수 있어야 Agent와 사람이 명령을 학습할 수 있다. 상세 정정 근거는 [02-design-decisions.md — `--help` 처리 시점](02-design-decisions.md#default-deny-cli-인증-게이트) 참조. |
 | `--version` | `ante --version` | `@click.version_option`이 root 콜백 진입 전 처리. 메타데이터 출력. |
-| resilient parsing | 자동완성 등 click이 `ctx.resilient_parsing=True`로 옵션을 시도 파싱하는 경로 | 부작용 없는 파싱이므로 인증 단계로 진입하지 않는다. `authenticate_member(ctx)`가 `ctx.resilient_parsing`을 확인해 즉시 return(`src/ante/cli/middleware.py:64-65`). |
+| resilient parsing | 자동완성 등 click이 `ctx.resilient_parsing=True`로 옵션을 시도 파싱하는 경로 | 부작용 없는 파싱이므로 인증 단계로 진입하지 않는다. `authenticate_member(ctx)`가 `ctx.resilient_parsing`을 확인해 즉시 return(`src/ante/cli/middleware.py`의 `authenticate_member`). |
 
 `--help` / `--version` / resilient parsing은 신규 명령이 추가되어도 자동으로 동일하게
 적용된다. 따라서 새 명령의 인증 여부 판단은 본 메타 경로와 무관하게 명령 자체의
@@ -126,7 +126,7 @@ allowlist 후보에서 제거한다.
 | `ante broker order-history --account <account_id> [--from <날짜>] [--to <날짜>]` | `runtime IPC` | 서버 BrokerAdapter 주문/체결 이력 live 조회 (`--account` 필수, read-only) |
 | `ante broker reconcile --account <account_id> [--fix]` | `runtime IPC` | 서버 PositionReconciler (`--account` 필수) |
 | `ante data list/schema/storage/validate/info/delete ...` | `offline` | canonical data root 또는 명시 data path 대상 |
-| `ante backtest run <strategy_path> ...` | `offline` | 서버와 분리된 백테스트 실행 |
+| `ante backtest run <strategy_path> ...` | `external process` | `python -m ante.backtest.runner` subprocess 격리 실행 (D-004) |
 | `ante backtest history <strategy_name> [--limit N]` | `offline` | BacktestRunStore 조회 |
 | `ante report schema/submit/list/view/performance ...` | `offline` | ReportStore/PerformanceFeedback 직접 호출 |
 | `ante feed init/status/config/inject/run ...` | `offline` | canonical data root의 feed 작업 |
@@ -460,11 +460,11 @@ ante --format json treasury snapshot --from <날짜> --to <날짜> --account <ac
 ante --format json treasury snapshot --date <날짜> --account <account_id>          # 특정일 스냅샷
 ```
 
-`treasury snapshot`의 `--from`/`--to`가 모두 지정되고 시작일(`--from`)이
-종료일(`--to`) 이후이면(inverted date range), `--date`/`--from`/`--to` 배타
-검증(`CLI_OPTION_CONFLICT`) 직후·서비스 호출 이전에 `INVALID_DATE_RANGE` 에러
-코드와 exit code 1로 거부한다(빈 결과 반환 금지). 한쪽만 지정·둘 다
-미지정·동일 날짜는 정상 처리한다.
+`treasury snapshot`(`--from`/`--to` 중 하나 이상 지정 시)과 `treasury portfolio history`는 빈 쪽을
+기본값(snapshot 시작 `2000-01-01`·끝 KST 오늘, history 시작 KST 오늘−30일·끝 KST 오늘)으로
+채운 실효 구간의 시작일이 종료일 이후이면(inverted date range), 서비스 호출 이전에
+`INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(빈 결과 반환 금지; snapshot은
+`--date`/`--from`/`--to` 배타 검증(`CLI_OPTION_CONFLICT`) 직후). 동일 날짜는 정상 처리한다.
 
 > 스냅샷 스펙: [treasury.md — 일별 자산 스냅샷](../treasury/treasury.md#일별-자산-스냅샷-daily-asset-snapshot)
 
@@ -520,7 +520,7 @@ strict zero-padded 검증). 어댑터 경계가 요구하는 압축 `YYYYMMDD`�
 `--from`이 `--to`보다 뒤이면(inverted date range) 서비스/IPC 호출 이전에
 `INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(빈 결과 반환 금지).
 한쪽만 지정·둘 다 미지정·동일 날짜는 정상 처리한다 — `audit list`/`trade list`/
-`treasury snapshot`/`report performance`와 동일 계약이다.
+`report performance`와 동일 계약이다.
 
 폴백 경계는 형제 명령과 같다. `IPC_SERVER_NOT_RUNNING`에서만 직접 연결로 내려가고,
 `IPC_TIMEOUT`과 서버 error envelope은 폴백 없이 원본 코드/메시지로 노출한다.

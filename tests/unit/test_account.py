@@ -1,5 +1,6 @@
 """Account 모듈 단위 테스트."""
 
+import math
 from decimal import Decimal
 
 import pytest
@@ -8,6 +9,7 @@ import pytest_asyncio
 from ante.account.errors import (
     AccountAlreadyExistsError,
     AccountDeletedException,
+    AccountError,
     AccountNotFoundError,
     BrokerReconnectFailedError,
     InvalidAccountIdError,
@@ -18,6 +20,7 @@ from ante.account.errors import (
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
 from ante.account.service import AccountService
+from ante.broker.exceptions import BrokerError
 from ante.core.database import Database, OperationalError
 from ante.core.exchange import CANONICAL_EXCHANGES
 from ante.eventbus.bus import EventBus
@@ -2307,6 +2310,172 @@ async def test_alter_failure_fallback_equals_migrated_value_per_broker(
         assert failed[account_id] == migrated[account_id], broker_type
     assert migrated["legacy-test"] == Decimal("0")
     assert migrated["legacy-kis"] == Decimal("0.005")
+
+
+# ── #2895: mock 계좌의 broker_config 가격 값은 계좌 생성에서 검사한다 ──────
+
+
+_BAD_PRICE_VALUES = [
+    pytest.param(True, id="true"),
+    pytest.param(False, id="false"),
+    pytest.param("100", id="str"),
+    pytest.param(None, id="none"),
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(float("inf"), id="inf"),
+    pytest.param(float("-inf"), id="neg-inf"),
+    pytest.param(float("1e999"), id="cli-1e999"),
+    pytest.param(10**400, id="int-overflow"),
+    pytest.param(0, id="zero"),
+    pytest.param(0.0, id="zero-float"),
+    pytest.param(-1, id="negative"),
+    pytest.param(-0.5, id="negative-float"),
+]
+
+
+def _mock_account(broker_config: dict, account_id: str = "mock-price") -> Account:
+    return Account(
+        account_id=account_id,
+        name="모의",
+        exchange="TEST",
+        currency="KRW",
+        broker_type="mock",
+        trading_mode=TradingMode.VIRTUAL,
+        credentials={},
+        broker_config=broker_config,
+    )
+
+
+async def _assert_rejected_without_row(service, db, account: Account) -> None:
+    with pytest.raises(AccountError) as exc_info:
+        await service.create(account)
+    assert type(exc_info.value).__name__ == "InvalidBrokerConfigError"
+    assert exc_info.value.code == "VALIDATION_ERROR"
+    row = await db.fetch_one(
+        "SELECT account_id FROM accounts WHERE account_id = ?",
+        (account.account_id,),
+    )
+    assert row is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", _BAD_PRICE_VALUES)
+async def test_mock_create_rejects_invalid_default_price(service, db, value):
+    """mock 계좌의 default_price가 가격 정의를 어기면 계좌 생성이 실패한다."""
+    await _assert_rejected_without_row(
+        service, db, _mock_account({"default_price": value})
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", _BAD_PRICE_VALUES)
+async def test_mock_create_rejects_invalid_prices_value(service, db, value):
+    """mock 계좌의 prices 값 하나라도 가격 정의를 어기면 계좌 생성이 실패한다."""
+    await _assert_rejected_without_row(
+        service, db, _mock_account({"prices": {"000001": 72000, "000002": value}})
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prices",
+    [[72000], "72000", 72000, None, True],
+    ids=["list", "str", "int", "none", "bool"],
+)
+async def test_mock_create_rejects_non_object_prices(service, db, prices):
+    """mock 계좌의 prices가 객체가 아니면 계좌 생성이 실패한다."""
+    await _assert_rejected_without_row(service, db, _mock_account({"prices": prices}))
+
+
+@pytest.mark.asyncio
+async def test_mock_create_rejects_direct_price_alongside_prices_file(service, db):
+    """prices_file과 함께 준 직접 가격도 값이 틀리면 계좌 생성이 실패한다."""
+    await _assert_rejected_without_row(
+        service,
+        db,
+        _mock_account({"prices_file": "/abs/prices.json", "default_price": 0}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_mock_seed_create_rejects_invalid_price(service, db):
+    """seed 계좌 생성도 같은 지점을 지나 거부된다."""
+    account = _mock_account({"default_price": float("nan")}, account_id="mock")
+    with pytest.raises(AccountError) as exc_info:
+        await service._create_seed_account(account)
+    assert type(exc_info.value).__name__ == "InvalidBrokerConfigError"
+    assert await db.fetch_one("SELECT 1 FROM accounts WHERE account_id='mock'") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "broker_config",
+    [
+        pytest.param({}, id="no-keys"),
+        pytest.param({"default_price": 50000}, id="int-default"),
+        pytest.param({"default_price": 0.01}, id="float-default"),
+        pytest.param({"prices": {}}, id="empty-prices"),
+        pytest.param(
+            {"prices": {"000001": 72000, "000002": 160000.5}, "default_price": 1},
+            id="int-float-prices",
+        ),
+        pytest.param({"prices_file": "/abs/missing.json"}, id="prices-file-only"),
+        pytest.param({"prices_file": "relative.json"}, id="prices-file-relative"),
+        pytest.param({"initial_cash": float("inf")}, id="other-numeric-key"),
+    ],
+)
+async def test_mock_create_accepts_valid_or_absent_prices(service, broker_config):
+    """유효한 가격·가격 키 없음·prices_file만 있는 mock 계좌는 생성된다."""
+    created = await service.create(_mock_account(broker_config))
+    assert created.broker_config == broker_config
+
+
+@pytest.mark.asyncio
+async def test_mock_create_valid_direct_price_with_prices_file_left_to_adapter(
+    service,
+):
+    """직접 가격이 유효하면 prices_file과 함께여도 생성은 통과하고 어댑터가 거부한다."""
+    await service.create(
+        _mock_account({"prices_file": "/abs/prices.json", "default_price": 100})
+    )
+    with pytest.raises(BrokerError, match="함께 줄 수 없음"):
+        await service._build_broker_adapter("mock-price")
+
+
+@pytest.mark.asyncio
+async def test_non_mock_broker_config_prices_not_checked(service):
+    """mock이 아닌 broker_type의 broker_config 가격 값은 검사하지 않는다."""
+    account = _make_account(
+        "test-prices",
+        broker_config={"default_price": float("nan"), "prices": "x"},
+    )
+    created = await service.create(account)
+    assert created.account_id == "test-prices"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored",
+    [
+        pytest.param('{"default_price": NaN}', id="nan-default"),
+        pytest.param('{"prices": {"000001": true}}', id="bool-price"),
+    ],
+)
+async def test_existing_mock_row_with_invalid_price_still_assembles(
+    service, db, eventbus, stored
+):
+    """이미 저장된 잘못된 가격의 mock 계좌도 어댑터 조립은 지금과 같다."""
+    await service.create(_mock_account({}))
+    await db.execute(
+        "UPDATE accounts SET broker_config = ? WHERE account_id = ?",
+        (stored, "mock-price"),
+    )
+    fresh = AccountService(db, eventbus)
+    await fresh.initialize()
+    adapter = await fresh._build_broker_adapter("mock-price")
+    if "NaN" in stored:
+        assert math.isnan(await adapter.get_current_price("000009"))
+    else:
+        assert await adapter.get_current_price("000001") is True
 
 
 # ── 필수 인증정보의 빈 값·공백만의 값 (#2825) ──────────────────

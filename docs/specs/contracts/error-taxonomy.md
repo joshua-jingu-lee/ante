@@ -15,7 +15,7 @@
   `code`/`error.code` 슬롯이 가지는 값의 **vocabulary와 분류**만 다룬다.
 - 본 문서는 도메인 exception → public code mapping을 강제 등록 매트릭스로 만들지
   않는다. mapper/helper 도입(#1840)과 drift test(#1841), domain 정렬(#1842/#1843)
-  은 후속 이슈 책임이다. 본 문서는 그 후속 이슈가 따라야 할 **명명/분류/허용
+  은 후속 이슈가 맡아 끝냈다. 본 문서는 그 후속 이슈가 따라야 할 **명명/분류/허용
   범위 규칙**과 **대표 lock**, **auth middleware code 정책**을 normative로 고정한다.
 - 본 문서는 production 코드를 바꾸지 않는다. 본 PR은 docs-only다.
 
@@ -44,7 +44,7 @@
 |----------|------|--------------|
 | `validation` | 입력 계약 위반(필수 옵션 누락, enum 비멤버, 형식 오류, 도메인 식별자 형식 위반) | `VALIDATION_ERROR`, `CLI_MISSING_REQUIRED_INPUT`, `CLI_OPTION_CONFLICT`, `CONFIG_VALIDATION_ERROR`, `STRATEGY_VALIDATION_ERROR`, `APPROVAL_VALIDATION_ERROR`, `REPORT_VALIDATION_ERROR`, `INVALID_DATE_RANGE`, `INVALID_DATE`, `INVALID_SIGNAL_KEY`, `MALFORMED_REQUEST` |
 | `auth` | 인증 누락/실패 | `AUTH_REQUIRED`, `AUTH_FAILED` |
-| `permission` | 인증은 됐으나 scope/role 부족 | `PERMISSION_DENIED`, `MEMBER_INVALID_SCOPE` |
+| `permission` | 인증은 됐으나 scope/role 부족, 또는 등록되지 않은 scope의 부여 거부 | `PERMISSION_DENIED`, `MEMBER_INVALID_SCOPE` |
 | `not_found` | 대상 resource 존재하지 않음 | `BOT_NOT_FOUND`, `ACCOUNT_NOT_FOUND`, `APPROVAL_NOT_FOUND`, `MEMBER_NOT_FOUND` |
 | `state_conflict` | 대상이 요청한 상태 전이를 허용하지 않는 상태 | `BOT_STATE_CONFLICT`, `ACCOUNT_ALREADY_DELETED`, `UPDATE_SERVER_RUNNING`, `BOT_NOT_RUNNING`, `BOT_SIGNAL_CHANNEL_BUSY` |
 | `service_unavailable` | 서버 lifecycle / 의존 서비스 미구성으로 dispatch 거부 | `SERVICE_UNAVAILABLE`, `SERVICE_NOT_CONFIGURED` |
@@ -286,20 +286,15 @@ envelope `message`(CLI error의 `message`, IPC error의 `error.message`)는 사�
 |------|----------------|-----------|
 | Taxonomy 명명/category/대표 lock | normative | — |
 | auth lowercase legacy alias 정책 | normative (유지 + alias 등록) | #1815 auth registry migration |
-| `SERVICE_NOT_CONFIGURED` 등록 | normative | #1819 dispatch wrapper 도입 |
-| `EXECUTION_ERROR` 허용 범위 | normative | #1841 drift test guard |
+| `SERVICE_NOT_CONFIGURED` 등록 | normative | — |
+| `EXECUTION_ERROR` 허용 범위 | normative | — |
 | broker external code 분리 (public taxonomy 분리 invariant) | normative | broker 원천 노출 구현 — 별도 이슈 |
 | `details` slot | normative (CLI error에 도입, 키는 envelopes.md) | IPC error 도입·broker_code 등 새 키 — 별도 이슈 |
 | redaction 정책 | normative (규칙만) | 구현 전면화 — 후속 이슈 |
-| `ErrorSpec` mapper / helper 도입 | spec만 (shape) | [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) |
-| drift test guard / fmt.error code 누락 guard | — | [#1841](https://github.com/joshua-jingu-lee/ante/issues/1841) |
-| account domain 정렬 + CLI direct↔IPC 동등성 | 대표 lock만 | [#1842](https://github.com/joshua-jingu-lee/ante/issues/1842) |
-| 나머지 domain (member/approval/bot/treasury/broker/strategy) 정렬 | — | [#1843](https://github.com/joshua-jingu-lee/ante/issues/1843) |
+| account domain 정렬 + CLI direct↔IPC 동등성 | 대표 lock만 | — |
 | Click usage exit code 2 정렬 | — | 별도 이슈 |
 | Success JSON output 표준화 | — | [#1815](https://github.com/joshua-jingu-lee/ante/issues/1815) |
-| IPC metadata 확장 | — | [#1819](https://github.com/joshua-jingu-lee/ante/issues/1819) |
-| Offline service factory | — | [#1818](https://github.com/joshua-jingu-lee/ante/issues/1818) |
-| `signal.connect` 스트리밍 신규 코드 분류 (`INVALID_SIGNAL_KEY`/`BOT_NOT_RUNNING`/`MALFORMED_REQUEST`/`BOT_SIGNAL_CHANNEL_BUSY`) | normative (분류만) | [#2334](https://github.com/joshua-jingu-lee/ante/issues/2334) `ErrorSpec` 등록 + 대표 fault lock 확장 + daemon relay 구현(동기 버그 #2333 unblock) |
+| `signal.connect` 스트리밍 신규 코드 분류 (`INVALID_SIGNAL_KEY`/`BOT_NOT_RUNNING`/`MALFORMED_REQUEST`/`BOT_SIGNAL_CHANNEL_BUSY`) | normative (분류만) | — |
 
 ## 변경 정책
 
