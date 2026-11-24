@@ -798,6 +798,8 @@ class TestHandleBrokerReconcileAccountLevel:
         assert result["mismatches"][0]["symbol"] == "005930"
         # detect-only — fix=True 여도 보정은 없다.
         assert result["corrections"] == 0
+        assert result["fix"] is True
+        assert result["fix_applied"] is False
 
     @pytest.mark.asyncio
     async def test_ignores_caller_supplied_broker_positions(self):
@@ -1060,11 +1062,15 @@ class TestHandleBrokerReconcileConditionalAudit:
             {"symbol": "005930", "broker_qty": 10, "internal_qty": 0, "diff": 10}
         ]
 
-        await _handle_broker_reconcile(
+        result = await _handle_broker_reconcile(
             svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
         )
 
         audit_logger.log.assert_not_awaited()
+        reconciler.reconcile.assert_not_called()
+        assert result["fix"] is True
+        assert result["fix_applied"] is False
+        assert result["corrections"] == 0
 
     @pytest.mark.asyncio
     async def test_fix_true_single_bot_no_adjustments_no_audit(self):
@@ -1197,6 +1203,7 @@ class TestHandleBrokerReconcileUnattributedHolding:
         assert m["diff"] == 2
         # bot_count==1 단일봇 경로.
         assert result["bot_count"] == 1
+        assert result["fix_applied"] is True
         # 상태변경(보정)이 없으므로 audit 미발화(#2109 조건부 audit).
         real_svc.audit_logger.log.assert_not_awaited()
 

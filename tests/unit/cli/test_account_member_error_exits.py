@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import ExitStack, asynccontextmanager
@@ -1048,6 +1049,56 @@ def test_member_secret_file_unreadable(
     message = f"{file_opt} 파일을 읽을 수 없습니다."
     _assert_coded(mode, result, "MEMBER_PASSWORD_FILE_NOT_FOUND", message)
     _assert_no_secret(result, _RECOVERY, str(tmp_path), "Errno")
+
+
+def _directory_target(tmp_path: Path) -> Path:
+    target = tmp_path / "pwdir"
+    target.mkdir()
+    return target
+
+
+def _noperm_target(tmp_path: Path) -> Path:
+    if os.geteuid() == 0:
+        pytest.skip("root는 읽기 권한 검사를 우회한다")
+    target = tmp_path / "pw.txt"
+    target.write_text(_PASSWORD, encoding="utf-8")
+    target.chmod(0)
+    return target
+
+
+@pytest.mark.parametrize("mode", _MODES)
+@pytest.mark.parametrize("make_target", [_directory_target, _noperm_target])
+@pytest.mark.parametrize(("args", "env_opt", "file_opt", "missing"), _SECRET_COMMANDS)
+def test_member_secret_file_not_a_readable_file(
+    mode: str,
+    make_target: Any,
+    args: list[str],
+    env_opt: str,
+    file_opt: str,
+    missing: str,
+    tmp_path: Path,
+) -> None:
+    """#2878: 디렉터리·권한 없음도 사용 오류가 아니라 읽기 실패 출구로 끝난다."""
+    target = make_target(tmp_path)
+    try:
+        result = _invoke(
+            ["--format", mode, *args, file_opt, str(target)],
+            _send(AssertionError("IPC 금지")),
+        )
+    finally:
+        target.chmod(0o700)
+    message = f"{file_opt} 파일을 읽을 수 없습니다."
+    _assert_coded(mode, result, "MEMBER_PASSWORD_FILE_NOT_FOUND", message)
+    _assert_no_secret(
+        result,
+        _PASSWORD,
+        _RECOVERY,
+        str(tmp_path),
+        target.name,
+        "Errno",
+        "is a directory",
+        "not readable",
+    )
 
 
 @pytest.mark.parametrize("mode", _MODES)

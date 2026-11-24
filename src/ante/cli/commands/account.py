@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from ante.account.errors import AccountStructuralChangeRequiresStoppedServerError
-from ante.account.models import AccountStatus
+from ante.account.models import AccountStatus, is_blank_credential
 from ante.cli import cold_path
 from ante.cli._validators import (
     reject_invalid_account_id,
@@ -59,7 +59,7 @@ def _run(coro: Coroutine[Any, Any, Any]) -> Any:
 _COLD_PATH_BLOCKED_CODE = ACCOUNT_COLD_PATH_BLOCKED_CODE
 
 
-def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
+def _assert_no_active_runtime() -> None:
     """active Ante runtime이 있으면 cold-path 명령을 차단한다."""
     if cold_path.is_active_runtime(kill=os.kill):
         raise AccountStructuralChangeRequiresStoppedServerError(
@@ -181,7 +181,7 @@ def _resolve_credentials(
 
     for position, raw in enumerate(direct_pairs, start=1):
         key, value = _allowed_key(raw, "--credential", position)
-        if value == "":
+        if is_blank_credential(value):
             raise AccountMissingRequiredCredentialError(
                 "ACCOUNT_MISSING_REQUIRED_CREDENTIAL: "
                 f"--credential {key}: 값이 비어 있습니다. "
@@ -198,7 +198,7 @@ def _resolve_credentials(
                 f"--credential-env {key}의 환경변수 이름이 비어 있습니다."
             )
         env_value = os.environ.get(env_name_clean)
-        if env_value is None or env_value == "":
+        if env_value is None or is_blank_credential(env_value):
             raise AccountCredentialEnvNotSetError(
                 "ACCOUNT_CREDENTIAL_ENV_NOT_SET: "
                 f"--credential-env 옵션의 {position}번째 인자({key})가 가리키는 "
@@ -230,7 +230,7 @@ def _resolve_credentials(
                 "파일을 읽을 수 없습니다."
             )
         value = content.rstrip("\r\n")
-        if value == "":
+        if is_blank_credential(value):
             raise AccountCredentialFileNotFoundError(
                 "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: "
                 f"--credential-file 옵션의 {position}번째 인자({key})가 가리키는 "
@@ -379,7 +379,7 @@ def account_create(
     """
     fmt = get_formatter(ctx)
 
-    _assert_no_active_runtime(fmt)
+    _assert_no_active_runtime()
 
     from ante.account.models import Account, TradingMode
     from ante.account.presets import BROKER_PRESETS
@@ -619,7 +619,7 @@ def account_delete(
             f'계좌 "{account_id}" 삭제는 확인이 필요합니다. --yes를 명시해 주세요.'
         )
 
-    _assert_no_active_runtime(fmt)
+    _assert_no_active_runtime()
 
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.delete"
@@ -719,7 +719,7 @@ def account_set_credentials(
     """
     fmt = get_formatter(ctx)
 
-    _assert_no_active_runtime(fmt)
+    _assert_no_active_runtime()
 
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.set-credentials"
@@ -799,7 +799,7 @@ def account_repair_timezone(
     """
     fmt = get_formatter(ctx)
 
-    _assert_no_active_runtime(fmt)
+    _assert_no_active_runtime()
 
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.repair-timezone"

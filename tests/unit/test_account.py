@@ -1,5 +1,6 @@
 """Account 모듈 단위 테스트."""
 
+import math
 from decimal import Decimal
 
 import pytest
@@ -8,6 +9,7 @@ import pytest_asyncio
 from ante.account.errors import (
     AccountAlreadyExistsError,
     AccountDeletedException,
+    AccountError,
     AccountNotFoundError,
     BrokerReconnectFailedError,
     InvalidAccountIdError,
@@ -18,6 +20,7 @@ from ante.account.errors import (
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
 from ante.account.service import AccountService
+from ante.broker.exceptions import BrokerError
 from ante.core.database import Database, OperationalError
 from ante.core.exchange import CANONICAL_EXCHANGES
 from ante.eventbus.bus import EventBus
@@ -2307,3 +2310,332 @@ async def test_alter_failure_fallback_equals_migrated_value_per_broker(
         assert failed[account_id] == migrated[account_id], broker_type
     assert migrated["legacy-test"] == Decimal("0")
     assert migrated["legacy-kis"] == Decimal("0.005")
+
+
+# ── #2895: mock 계좌의 broker_config 가격 값은 계좌 생성에서 검사한다 ──────
+
+
+_BAD_PRICE_VALUES = [
+    pytest.param(True, id="true"),
+    pytest.param(False, id="false"),
+    pytest.param("100", id="str"),
+    pytest.param(None, id="none"),
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(float("inf"), id="inf"),
+    pytest.param(float("-inf"), id="neg-inf"),
+    pytest.param(float("1e999"), id="cli-1e999"),
+    pytest.param(10**400, id="int-overflow"),
+    pytest.param(0, id="zero"),
+    pytest.param(0.0, id="zero-float"),
+    pytest.param(-1, id="negative"),
+    pytest.param(-0.5, id="negative-float"),
+]
+
+
+def _mock_account(broker_config: dict, account_id: str = "mock-price") -> Account:
+    return Account(
+        account_id=account_id,
+        name="모의",
+        exchange="TEST",
+        currency="KRW",
+        broker_type="mock",
+        trading_mode=TradingMode.VIRTUAL,
+        credentials={},
+        broker_config=broker_config,
+    )
+
+
+async def _assert_rejected_without_row(service, db, account: Account) -> None:
+    with pytest.raises(AccountError) as exc_info:
+        await service.create(account)
+    assert type(exc_info.value).__name__ == "InvalidBrokerConfigError"
+    assert exc_info.value.code == "VALIDATION_ERROR"
+    row = await db.fetch_one(
+        "SELECT account_id FROM accounts WHERE account_id = ?",
+        (account.account_id,),
+    )
+    assert row is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", _BAD_PRICE_VALUES)
+async def test_mock_create_rejects_invalid_default_price(service, db, value):
+    """mock 계좌의 default_price가 가격 정의를 어기면 계좌 생성이 실패한다."""
+    await _assert_rejected_without_row(
+        service, db, _mock_account({"default_price": value})
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", _BAD_PRICE_VALUES)
+async def test_mock_create_rejects_invalid_prices_value(service, db, value):
+    """mock 계좌의 prices 값 하나라도 가격 정의를 어기면 계좌 생성이 실패한다."""
+    await _assert_rejected_without_row(
+        service, db, _mock_account({"prices": {"000001": 72000, "000002": value}})
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prices",
+    [[72000], "72000", 72000, None, True],
+    ids=["list", "str", "int", "none", "bool"],
+)
+async def test_mock_create_rejects_non_object_prices(service, db, prices):
+    """mock 계좌의 prices가 객체가 아니면 계좌 생성이 실패한다."""
+    await _assert_rejected_without_row(service, db, _mock_account({"prices": prices}))
+
+
+@pytest.mark.asyncio
+async def test_mock_create_rejects_direct_price_alongside_prices_file(service, db):
+    """prices_file과 함께 준 직접 가격도 값이 틀리면 계좌 생성이 실패한다."""
+    await _assert_rejected_without_row(
+        service,
+        db,
+        _mock_account({"prices_file": "/abs/prices.json", "default_price": 0}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_mock_seed_create_rejects_invalid_price(service, db):
+    """seed 계좌 생성도 같은 지점을 지나 거부된다."""
+    account = _mock_account({"default_price": float("nan")}, account_id="mock")
+    with pytest.raises(AccountError) as exc_info:
+        await service._create_seed_account(account)
+    assert type(exc_info.value).__name__ == "InvalidBrokerConfigError"
+    assert await db.fetch_one("SELECT 1 FROM accounts WHERE account_id='mock'") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "broker_config",
+    [
+        pytest.param({}, id="no-keys"),
+        pytest.param({"default_price": 50000}, id="int-default"),
+        pytest.param({"default_price": 0.01}, id="float-default"),
+        pytest.param({"prices": {}}, id="empty-prices"),
+        pytest.param(
+            {"prices": {"000001": 72000, "000002": 160000.5}, "default_price": 1},
+            id="int-float-prices",
+        ),
+        pytest.param({"prices_file": "/abs/missing.json"}, id="prices-file-only"),
+        pytest.param({"prices_file": "relative.json"}, id="prices-file-relative"),
+        pytest.param({"initial_cash": float("inf")}, id="other-numeric-key"),
+    ],
+)
+async def test_mock_create_accepts_valid_or_absent_prices(service, broker_config):
+    """유효한 가격·가격 키 없음·prices_file만 있는 mock 계좌는 생성된다."""
+    created = await service.create(_mock_account(broker_config))
+    assert created.broker_config == broker_config
+
+
+@pytest.mark.asyncio
+async def test_mock_create_valid_direct_price_with_prices_file_left_to_adapter(
+    service,
+):
+    """직접 가격이 유효하면 prices_file과 함께여도 생성은 통과하고 어댑터가 거부한다."""
+    await service.create(
+        _mock_account({"prices_file": "/abs/prices.json", "default_price": 100})
+    )
+    with pytest.raises(BrokerError, match="함께 줄 수 없음"):
+        await service._build_broker_adapter("mock-price")
+
+
+@pytest.mark.asyncio
+async def test_non_mock_broker_config_prices_not_checked(service):
+    """mock이 아닌 broker_type의 broker_config 가격 값은 검사하지 않는다."""
+    account = _make_account(
+        "test-prices",
+        broker_config={"default_price": float("nan"), "prices": "x"},
+    )
+    created = await service.create(account)
+    assert created.account_id == "test-prices"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored",
+    [
+        pytest.param('{"default_price": NaN}', id="nan-default"),
+        pytest.param('{"prices": {"000001": true}}', id="bool-price"),
+    ],
+)
+async def test_existing_mock_row_with_invalid_price_still_assembles(
+    service, db, eventbus, stored
+):
+    """이미 저장된 잘못된 가격의 mock 계좌도 어댑터 조립은 지금과 같다."""
+    await service.create(_mock_account({}))
+    await db.execute(
+        "UPDATE accounts SET broker_config = ? WHERE account_id = ?",
+        (stored, "mock-price"),
+    )
+    fresh = AccountService(db, eventbus)
+    await fresh.initialize()
+    adapter = await fresh._build_broker_adapter("mock-price")
+    if "NaN" in stored:
+        assert math.isnan(await adapter.get_current_price("000009"))
+    else:
+        assert await adapter.get_current_price("000001") is True
+
+
+# ── 필수 인증정보의 빈 값·공백만의 값 (#2825) ──────────────────
+
+_BLANK_VALUES = ["", "  ", "\t\n", "　"]
+_SECRET_MARK = "SECRET-MARK-2825"
+
+
+def test_is_blank_credential_matches_falsy_or_whitespace_only():
+    """거짓 값이거나 공백만인 문자열이면 비었다. 비문자열 참 값은 비지 않았다."""
+    from ante.account.models import is_blank_credential
+
+    for value in [None, "", 0, False, "  ", "\t\n", "　"]:
+        assert is_blank_credential(value), repr(value)
+    for value in ["k", " k ", 1234, True, ["x"]]:
+        assert not is_blank_credential(value), repr(value)
+
+
+def test_missing_required_credentials_keeps_preset_order_and_returns_keys_only():
+    """빠진 키를 프리셋 순서로 돌려준다(값이 아니라 키 이름만)."""
+    from ante.account.models import missing_required_credentials
+
+    required = ["app_key", "app_secret", "account_no"]
+    credentials = {"app_key": _SECRET_MARK, "app_secret": "  ", "is_paper": ""}
+
+    assert missing_required_credentials(required, credentials) == [
+        "app_secret",
+        "account_no",
+    ]
+    assert missing_required_credentials([], {"app_key": " "}) == []
+    full = {"app_key": 1, "app_secret": "s", "account_no": 9}
+    assert missing_required_credentials(required, full) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank", _BLANK_VALUES)
+async def test_create_rejects_blank_required_credential(service, db, blank):
+    """필수 키의 값이 비었거나 공백만이면 거부하고 행을 만들지 않는다."""
+    account = _make_account(credentials={"app_key": blank, "app_secret": _SECRET_MARK})
+
+    with pytest.raises(MissingCredentialsError) as exc:
+        await service.create(account)
+
+    message = str(exc.value)
+    assert "app_key" in message
+    assert _SECRET_MARK not in message
+    rows = await db.fetch_all(
+        "SELECT account_id FROM accounts WHERE account_id = ?", ("main",)
+    )
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_judge_extra_keys(service):
+    """프리셋의 필수 키가 아닌 여분 키는 판정하지 않는다."""
+    account = _make_account(
+        credentials={"app_key": "k", "app_secret": "s", "is_paper": "  "}
+    )
+
+    result = await service.create(account)
+
+    assert result.credentials["is_paper"] == "  "
+
+
+@pytest.mark.asyncio
+async def test_create_keeps_surrounding_whitespace_without_normalizing(service):
+    """앞뒤 공백이 있는 값은 거부하지도 자르지도 않는다."""
+    result = await service.create(
+        _make_account(credentials={"app_key": " k ", "app_secret": "s\n"})
+    )
+
+    stored = await service.get(result.account_id)
+    assert stored.credentials == {"app_key": " k ", "app_secret": "s\n"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank", _BLANK_VALUES)
+async def test_update_rejects_blank_credentials_and_keeps_stored(service, blank):
+    """수정으로 넘긴 인증정보가 비었거나 공백만이면 거부하고 저장값을 두지 않는다."""
+    await service.create(
+        _make_account(credentials={"app_key": "k0", "app_secret": "s0"})
+    )
+
+    with pytest.raises(MissingCredentialsError) as exc:
+        await service.update(
+            "main", credentials={"app_key": _SECRET_MARK, "app_secret": blank}
+        )
+
+    assert "app_secret" in str(exc.value)
+    assert _SECRET_MARK not in str(exc.value)
+    stored = await service.get("main")
+    assert stored.credentials == {"app_key": "k0", "app_secret": "s0"}
+
+
+async def _store_blank_kis_account(service, db, eventbus) -> AccountService:
+    """공백 인증정보가 저장된 KIS 계좌를 두고 기동 때처럼 새 서비스를 띄운다."""
+    from ante.account.crypto import encrypt_credentials
+
+    preset = BROKER_PRESETS["kis-domestic"]
+    await service.create(
+        _make_account(
+            account_id="kis1",
+            exchange="KRX",
+            broker_type="kis-domestic",
+            credentials={k: "v" for k in preset.required_credentials},
+        )
+    )
+    blank = {"app_key": "  ", "app_secret": "", "account_no": "1"}
+    await db.execute(
+        "UPDATE accounts SET credentials = ? WHERE account_id = ?",
+        (encrypt_credentials(blank), "kis1"),
+    )
+    booted = AccountService(db, eventbus)
+    await booted.initialize()
+    return booted
+
+
+@pytest.mark.asyncio
+async def test_update_broker_config_only_skips_credential_judgement(
+    service, db, eventbus
+):
+    """``broker_config``만 바꾸는 수정은 저장된 공백 인증정보를 판정하지 않는다."""
+    booted = await _store_blank_kis_account(service, db, eventbus)
+
+    updated = await booted.update("kis1", broker_config={"is_paper": True})
+
+    assert updated.broker_config == {"is_paper": True}
+    assert updated.credentials["app_key"] == "  "
+
+
+@pytest.mark.asyncio
+async def test_is_paper_migration_succeeds_with_stored_blank_credentials(
+    service, db, eventbus
+):
+    """데몬 기동의 is_paper 이행은 공백 인증정보가 저장된 KIS 계좌에서도 끝난다."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from ante.main import _migrate_is_paper_to_broker_config
+
+    booted = await _store_blank_kis_account(service, db, eventbus)
+    config = MagicMock()
+    config.get.return_value = True
+
+    await _migrate_is_paper_to_broker_config(
+        SimpleNamespace(config=config, account_service=booted)
+    )
+
+    stored = await booted.get("kis1")
+    assert stored.broker_config["is_paper"] is True
+    assert stored.credentials["app_key"] == "  "
+
+
+@pytest.mark.asyncio
+async def test_mock_account_without_credentials_creates_and_updates(service):
+    """인증정보가 없는 ``mock`` 계좌의 생성·수정은 지금처럼 통과한다."""
+    account = _make_account(account_id="mock1", broker_type="mock", credentials={})
+
+    await service.create(account)
+    await service.update("mock1", credentials={})
+    updated = await service.update("mock1", broker_config={"x": 1})
+
+    assert updated.credentials == {}

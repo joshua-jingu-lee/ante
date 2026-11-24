@@ -1776,3 +1776,43 @@ class TestInitDbEncryptionKeyAutoCreate:
         assert invalid_env not in text
         # backup 없음
         assert not list(target.glob("secrets.env.bak.*"))
+
+
+class TestInitNonUtf8SecretsEnv:
+    """#2918: UTF-8이 아닌 secrets.env는 덮어쓰지 않고 바이트 없이 멈춘다."""
+
+    @pytest.mark.parametrize("fmt", ["json", "text"])
+    def test_stops_without_bytes_and_keeps_file(self, tmp_path, monkeypatch, fmt):
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "placeholder")
+        monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY")
+        target = tmp_path / "config"
+        target.mkdir()
+        before = b"ANTE_X=fake-sec\xff\xfe-tail\n"
+        (target / "secrets.env").write_bytes(before)
+        runner = _split_stderr_runner()
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["--format", fmt, "init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 1, result.output
+        combined = result.stdout + result.stderr
+        if fmt == "json":
+            payload = json.loads(result.stdout.strip().splitlines()[-1])
+            assert payload["code"] == "EXECUTION_ERROR"
+            assert payload["message"] == "secrets.env 파일을 UTF-8로 읽을 수 없습니다."
+        else:
+            assert (
+                "EXECUTION_ERROR: secrets.env 파일을 UTF-8로 읽을 수 없습니다."
+                in result.stderr
+            )
+        for trace in ("0xff", "0xfe", "codec", "position", "fake-sec", str(target)):
+            assert trace not in combined
+        assert (target / "secrets.env").read_bytes() == before
+        assert not list(target.glob("secrets.env.bak.*"))
+        assert not list(target.glob(".secrets.env*"))

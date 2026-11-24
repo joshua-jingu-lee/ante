@@ -13,7 +13,8 @@
 | `test` | `TEST` | `KRW` | `Asia/Seoul` | 00:00–23:59 | 0 | 0 |
 | `kis-domestic` | `KRX` | `KRW` | `Asia/Seoul` | 09:00–15:30 | 0.015% | 0.195% |
 | `mock` | `TEST` | `KRW` | `Asia/Seoul` | 00:00–23:59 | 0 | 0 |
-| `kis-overseas` | `NYSE` | `USD` | `America/New_York` | 09:30–16:00 | 0.1% | 0.1% |
+
+`kis-overseas` 프리셋은 1.0에서 정의하지 않는다([account/03-data-model.md](../account/03-data-model.md#broker_presets)). 해외 어댑터([09-kis-overseas-adapter.md](09-kis-overseas-adapter.md))와 함께 1.1에서 추가한다(초안: 거래 시간 09:30–16:00, 매수·매도 수수료 각 0.1% — 추가할 때 확정한다. 거래소·통화는 [account/07-account-layout-v1.md](../account/07-account-layout-v1.md)의 us-stock, 시간대는 [trade/07-notification-events.md](../trade/07-notification-events.md)의 시각 표를 따른다).
 
 `mock` 프리셋의 나머지 값은 시장가 예약 버퍼 0, 기본 계좌 id `mock`, 기본 이름 `모의`, 필수 자격증명 없음(`[]`)이다. 전체 필드는 [account/03-data-model.md](../account/03-data-model.md#broker_presets)의 프리셋 표를 따른다.
 

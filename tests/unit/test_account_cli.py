@@ -1838,3 +1838,134 @@ class TestAccountOutputBytes:
         result = _bytes_case_invoke(branch, mode, mock_account_service)
         assert result.exit_code == 0, result.output
         assert result.output == _ACCOUNT_OUTPUT_BYTES[(branch, mode)]
+
+
+# ── 공백만인 credential 값의 채널별 거부 (#2825) ──────────────
+
+_CLI_SECRET_MARK = "SECRET-MARK-2825"
+_CREATE_PREFIX = [
+    "account",
+    "create",
+    "--broker-type",
+    "test",
+    "--account-id",
+    "test2",
+    "--name",
+    "테스트2",
+    "--trading-mode",
+    "virtual",
+]
+
+
+def _cli_full_output(result: Any) -> str:
+    """stdout·stderr를 합친 출력 전체."""
+    stderr = result.stderr if result.stderr_bytes is not None else ""
+    return result.stdout + stderr + result.output
+
+
+class TestWhitespaceOnlyCredentialRejected:
+    """공백만인 값은 빈 값과 같은 채널별 코드로 거부하고 값을 싣지 않는다."""
+
+    @pytest.mark.parametrize("blank", ["  ", "\t", "　"])
+    def test_direct_channel(
+        self, mock_account_service: AsyncMock, offline_runtime, blank: str
+    ) -> None:
+        """``--credential app_key=<공백>``은 ``ACCOUNT_MISSING_REQUIRED_CREDENTIAL``."""
+        result = _invoke(
+            [
+                *_CREATE_PREFIX,
+                "--credential",
+                f"app_key={blank}",
+                "--credential",
+                f"app_secret={_CLI_SECRET_MARK}",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_MISSING_REQUIRED_CREDENTIAL" in result.output
+        assert "app_key" in result.output
+        assert _CLI_SECRET_MARK not in _cli_full_output(result)
+        mock_account_service.create.assert_not_called()
+
+    def test_env_channel(
+        self, mock_account_service: AsyncMock, offline_runtime, monkeypatch
+    ) -> None:
+        """환경변수 값이 공백만이면 ``ACCOUNT_CREDENTIAL_ENV_NOT_SET``."""
+        monkeypatch.setenv("TEST_WS_ONLY_ENV_2825", "  ")
+        result = _invoke(
+            [
+                *_CREATE_PREFIX,
+                "--credential",
+                f"app_key={_CLI_SECRET_MARK}",
+                "--credential-env",
+                "app_secret=TEST_WS_ONLY_ENV_2825",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_CREDENTIAL_ENV_NOT_SET" in result.output
+        assert _CLI_SECRET_MARK not in _cli_full_output(result)
+        mock_account_service.create.assert_not_called()
+
+    def test_file_channel(
+        self, mock_account_service: AsyncMock, offline_runtime, tmp_path
+    ) -> None:
+        """파일 내용이 공백만이면 ``ACCOUNT_CREDENTIAL_FILE_NOT_FOUND``."""
+        secret_path = tmp_path / "ws.txt"
+        secret_path.write_text("  \n", encoding="utf-8")
+        result = _invoke(
+            [
+                *_CREATE_PREFIX,
+                "--credential",
+                f"app_key={_CLI_SECRET_MARK}",
+                "--credential-file",
+                f"app_secret={secret_path}",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND" in result.output
+        assert "비어 있습니다" in result.output
+        assert _CLI_SECRET_MARK not in _cli_full_output(result)
+        mock_account_service.create.assert_not_called()
+
+    def test_set_credentials_direct_channel(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """``set-credentials``도 같은 판정으로 거부하고 수정을 부르지 않는다."""
+        mock_account_service.get.return_value = _kis_account_for_setcred()
+        result = _invoke(
+            [
+                "account",
+                "set-credentials",
+                "domestic",
+                "--credential",
+                f"app_key={_CLI_SECRET_MARK}",
+                "--credential",
+                "app_secret= ",
+                "--credential",
+                "account_no=5012XXXX-01",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_MISSING_REQUIRED_CREDENTIAL" in result.output
+        assert "app_secret" in result.output
+        assert _CLI_SECRET_MARK not in _cli_full_output(result)
+        mock_account_service.update.assert_not_called()
+
+    def test_surrounding_whitespace_value_passes_unchanged(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """앞뒤 공백이 있는 값은 거부하지도 자르지도 않는다."""
+        mock_account_service.create.return_value = _mock_account(
+            "test2", "테스트2", "TEST", "KRW", "test"
+        )
+        result = _invoke(
+            [
+                *_CREATE_PREFIX,
+                "--credential",
+                "app_key= K ",
+                "--credential",
+                "app_secret=S",
+            ]
+        )
+        assert result.exit_code == 0, result.output
+        account_arg = mock_account_service.create.call_args[0][0]
+        assert account_arg.credentials == {"app_key": " K ", "app_secret": "S"}
