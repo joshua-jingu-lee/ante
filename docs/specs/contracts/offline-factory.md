@@ -192,8 +192,8 @@ amend는 §2.3의 보류를 해제하고 옵션 A를 normative로 채택해 이 
 - 1차 SSOT: [docs/specs/cli/03-commands.md](../cli/03-commands.md)의
   execution class + 명령 의미(`list`/`info`/`status`/`logs`/`history`/`view` 등은
   read-only).
-- 2차 SSOT (구현 후): #1815 CLI command contract registry의 `OutputContract`
-  `kind` (e.g. `entity` / `collection`) 및 execution class. registry 도입 후
+- 2차 SSOT (구현 후): #1815 CLI command contract registry의 execution class.
+  registry 도입 후
   factory는 caller로부터 명시 인자 (`read_only: bool`)를 받거나 registry에서
   derive할 수 있다.
 - 본 SSOT는 분류의 enumeration(전 CLI 명령의 read-only 여부 표)을 재선언하지
