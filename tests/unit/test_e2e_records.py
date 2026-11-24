@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import textwrap
@@ -26,6 +27,7 @@ TOKEN = "ante_ak_MARKE2E_TOKEN_0003"
 NODEID = "tests/e2e/test_virtual_round_trip.py::test_y"
 STRATEGY_REL = "tests/e2e/strategies/round_trip.py"
 TOKEN_FIRST = "ante_ak_MARKE2E_FIRST_0005"
+SECRET_VALUE = "MARKE2E_SECRET_0006"
 
 _FAKE_DAEMON = """
     import os, pathlib, sys, time
@@ -102,6 +104,16 @@ def fake(record_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[DaemonHa
         yield env
     finally:
         env.cleanup()
+
+
+@pytest.fixture
+def restore_alarm() -> Iterator[None]:
+    previous = signal.getsignal(signal.SIGALRM)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def _save(env: DaemonHarness, outcome: str = "passed") -> None:
@@ -410,6 +422,48 @@ class TestPathAllowList:
             _save(fake)
         assert list(record_dir.glob("*.json")) == []
 
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"recovery_key": SECRET_VALUE},
+            {"data": {"app_secret": SECRET_VALUE}},
+            {"api_key": [SECRET_VALUE]},
+        ],
+        ids=["key-suffix", "secret-suffix", "list-under-secret-key"],
+    )
+    def test_secret_shaped_keys_are_checked(
+        self, fake: DaemonHarness, record_dir: Path, payload: dict[str, Any]
+    ) -> None:
+        assert fake.recorder is not None
+        fake.recorder.record_cli(
+            [sys.executable, "-m", "ante", "--format", "json", "init"],
+            0,
+            payload,
+            0.1,
+            expect_failure=False,
+        )
+        fake.cli("member", "show", SECRET_VALUE)
+        with pytest.warns(harness.RecordWarning, match="토큰"):
+            _save(fake)
+        assert list(record_dir.glob("*.json")) == []
+
+    def test_non_secret_key_is_not_collected(
+        self, fake: DaemonHarness, record_dir: Path
+    ) -> None:
+        assert fake.recorder is not None
+        fake.recorder.record_cli(
+            [sys.executable, "-m", "ante", "--format", "json", "init"],
+            0,
+            {"data": {"key_name": SECRET_VALUE, "monkey": [SECRET_VALUE]}},
+            0.1,
+            expect_failure=False,
+        )
+        fake.cli("member", "show", SECRET_VALUE)
+        _save(fake)
+        record = _only_record(record_dir)
+        assert len(record["steps"]) == 2
+        assert SECRET_VALUE in json.dumps(record)
+
 
 class TestCallJudgement:
     def test_exit_zero_non_json_is_failed(
@@ -447,6 +501,22 @@ class TestCallJudgement:
             (None, True),
             (None, True),
         ]
+
+    def test_test_time_limit_is_recorded(
+        self, fake: DaemonHarness, record_dir: Path, restore_alarm: None
+    ) -> None:
+        previous = signal.getsignal(signal.SIGALRM)
+        with pytest.raises(harness.E2ETimeoutError), harness.time_limit(0.3):
+            run_json_command(
+                [sys.executable, "-c", "import time; time.sleep(5)"],
+                env=fake.env(),
+                cwd=fake.work_dir,
+            )
+        assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+        assert signal.getsignal(signal.SIGALRM) is previous
+        _save(fake)
+        steps = _only_record(record_dir)["steps"]
+        assert [(s["returncode"], s["failed"]) for s in steps] == [(None, True)]
 
     def test_fold_key_includes_expect_failure(
         self, fake: DaemonHarness, record_dir: Path
@@ -487,7 +557,44 @@ def test_fails(daemon):
 """
 
 
+_CLEANUP_MARKER = "MARKE2E-CLEANUP-0007"
+
+_INNER_CLEANUP_FAILS = f"""
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _failing_cleanup(monkeypatch, daemon):
+    original = daemon.cleanup
+
+    def _cleanup():
+        original()
+        raise RuntimeError("{_CLEANUP_MARKER}")
+
+    monkeypatch.setattr(daemon, "cleanup", _cleanup)
+"""
+
+
 class TestScenarioOutcome:
+    def test_cleanup_failure_is_recorded_as_failed(
+        self, pytester: pytest.Pytester, record_dir: Path
+    ) -> None:
+        pytester.makeconftest(_INNER_CONFTEST + _INNER_CLEANUP_FAILS)
+        pytester.makepyfile(test_inner=_INNER_TEST)
+        result = pytester.runpytest_inprocess(*INNER_ARGS)
+        result.assert_outcomes(passed=1, failed=1, errors=2)
+        records = {
+            r["nodeid"]: r
+            for r in (
+                json.loads(p.read_text(encoding="utf-8"))
+                for p in record_dir.glob("*.json")
+            )
+        }
+        assert records["test_inner.py::test_passes"]["outcome"] == "failed"
+        assert records["test_inner.py::test_fails"]["outcome"] == "failed"
+        for path in record_dir.glob("*.json"):
+            assert _CLEANUP_MARKER not in path.read_text(encoding="utf-8")
+
     def test_failed_scenario_is_recorded_as_failed(
         self, pytester: pytest.Pytester, record_dir: Path
     ) -> None:

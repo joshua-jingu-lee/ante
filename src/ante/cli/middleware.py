@@ -401,11 +401,10 @@ class AuthenticatedGroup(_LeafPathMixin):
         )
         from ante.cli.main import get_config_dir
         from ante.config.config import Config
-        from ante.config.exceptions import ConfigError
 
         try:
             Config.load(config_dir=get_config_dir(ctx))
-        except (OSError, tomllib.TOMLDecodeError, ConfigError) as exc:
+        except (OSError, tomllib.TOMLDecodeError) as exc:
             logger.debug(
                 "Config.load failed in DB encryption chokepoint; "
                 "falling back to env-only validation: %s",

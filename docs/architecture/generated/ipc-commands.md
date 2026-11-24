@@ -52,7 +52,7 @@
 | `rule.update` | mutating | `account`, `audit_logger`, `dynamic_config` | `account.rule.update` | `RuleUpdateRequest` | `account_id: AccountId` (필수)<br>`rule_type: str` (필수)<br>`enabled: bool \| None = null`<br>`params: dict[str, Any] = {}` | `ante rule update` |
 | `signal.connect` | read-only | `bot_manager` | — | `SignalConnectRequest` | `key: SecretStr` (필수) | — |
 | `strategy.set_status` | mutating | `audit_logger`, `strategy_registry` | `strategy.set_status` | `StrategySetStatusRequest` | `strategy_id: str` (필수)<br>`status: Literal["registered", "adopted", "archived"]` (필수) | `ante strategy set-status` |
-| `system.clear_halt` | mutating | `account`, `audit_logger` | `system.clear_halt` | `SystemClearHaltRequest` | — | `ante system clear-halt` |
+| `system.clear_halt` | mutating | `account`, `audit_logger` | `system.clear_halt` | `SystemClearHaltRequest` | `reason: str = "IPC clear_halt"` | `ante system clear-halt` |
 | `system.halt` | mutating | `account`, `audit_logger` | `system.halt` | `SystemHaltRequest` | `reason: str = "IPC halt"` | `ante system halt` |
 | `treasury.allocate` | mutating | `bot_manager`, `treasury_manager` | — | `TreasuryAllocateRequest` | `account_id: AccountId` (필수)<br>`bot_id: str` (필수)<br>`amount: float` (필수) | `ante treasury allocate` |
 | `treasury.deallocate` | mutating | `bot_manager`, `treasury_manager` | — | `TreasuryDeallocateRequest` | `account_id: AccountId` (필수)<br>`bot_id: str` (필수)<br>`amount: float` (필수) | `ante treasury deallocate` |
