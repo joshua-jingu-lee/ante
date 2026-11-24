@@ -8,20 +8,30 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
 
+from ante.account.errors import (
+    AccountActivateAllFailedError,
+    AccountSuspendAllFailedError,
+)
 from ante.account.models import Account, AccountStatus
 from ante.account.service import AccountService
 from ante.core.database import Database
+from ante.core.registry import ServiceRegistry
 from ante.eventbus.bus import EventBus
 from ante.eventbus.events import (
     AccountActivatedEvent,
     AccountSuspendedEvent,
     NotificationEvent,
 )
+from ante.ipc.registry import CommandRegistry, register_all_handlers
+from ante.ipc.server import IPCServer
 
 
 class _WriteError(RuntimeError):
@@ -211,9 +221,15 @@ async def test_activate_all_stops_at_failed_account_with_cache_matching_db(
     second = await _suspended(service, "acct2")
     _fail_status_update(monkeypatch, service, only_account="acct2")
 
-    with pytest.raises(_WriteError):
+    with pytest.raises(AccountActivateAllFailedError) as caught:
         await service.activate_all(activated_by="admin")
 
+    exc = caught.value
+    assert isinstance(exc.__cause__, _WriteError)
+    assert exc.failed_account_id == "acct2"
+    assert exc.activated_count == 1
+    assert str(exc) == _ACTIVATE_ALL_MESSAGE
+    assert "디스크 오류" not in str(exc)
     assert first.status == AccountStatus.ACTIVE
     assert (await _db_status(db, "acct1"))[0] == AccountStatus.ACTIVE
     assert second.status == AccountStatus.SUSPENDED
@@ -279,3 +295,184 @@ async def test_suspend_failure_keeps_memory_suspended_pending_maintainer_decisio
     assert account.status == AccountStatus.SUSPENDED, reason
     assert (await _db_status(db, "main"))[0] == AccountStatus.ACTIVE, reason
     assert published == [], reason
+
+
+_SUSPEND_ALL_MESSAGE = (
+    "전체 계좌 정지가 1개 계좌에서 실패했습니다: acct2. "
+    "이번 요청으로 정지된 계좌는 2개입니다."
+)
+_ACTIVATE_ALL_MESSAGE = (
+    "전체 계좌 활성화가 계좌 'acct2'에서 실패해 멈췄습니다. "
+    "그 전에 활성화된 계좌는 1개이고, 뒤의 계좌는 시도하지 않았습니다."
+)
+
+
+async def _three_active(service: AccountService) -> None:
+    for account_id in ("acct1", "acct2", "acct3"):
+        await service.create(_make_account(account_id))
+
+
+def _record_suspend_attempts(monkeypatch, service: AccountService) -> list[str]:
+    attempted: list[str] = []
+    real_suspend = service.suspend
+
+    async def suspend(account_id: str, reason: str, suspended_by: str) -> None:
+        attempted.append(account_id)
+        await real_suspend(account_id, reason, suspended_by)
+
+    monkeypatch.setattr(service, "suspend", suspend)
+    return attempted
+
+
+@pytest.mark.asyncio
+async def test_suspend_all_tries_every_account_and_reports_failed_one(
+    service, db, published, monkeypatch
+):
+    await _three_active(service)
+    published.clear()
+    _fail_status_update(monkeypatch, service, only_account="acct2")
+    attempted = _record_suspend_attempts(monkeypatch, service)
+
+    with pytest.raises(AccountSuspendAllFailedError) as caught:
+        await service.suspend_all(reason="킬 스위치", suspended_by="admin")
+
+    assert attempted == ["acct1", "acct2", "acct3"]
+    for account_id in ("acct1", "acct3"):
+        assert service._accounts[account_id].status == AccountStatus.SUSPENDED
+        assert (await _db_status(db, account_id))[0] == AccountStatus.SUSPENDED
+    suspended_ids = {
+        e.account_id for e in published if isinstance(e, AccountSuspendedEvent)
+    }
+    assert suspended_ids == {"acct1", "acct3"}
+    assert sum(isinstance(e, NotificationEvent) for e in published) == 2
+    exc = caught.value
+    assert exc.failed_account_ids == ("acct2",)
+    assert exc.suspended_count == 2
+    assert str(exc) == _SUSPEND_ALL_MESSAGE
+    assert "디스크 오류" not in str(exc)
+
+
+@pytest.mark.asyncio
+async def test_suspend_all_does_not_trap_cancellation(service, monkeypatch):
+    await _three_active(service)
+    real_execute = service._db.execute
+
+    async def execute(sql: str, params: tuple[Any, ...] = ()) -> None:
+        if _is_status_update(sql) and params[-1] == "acct2":
+            raise asyncio.CancelledError
+        await real_execute(sql, params)
+
+    monkeypatch.setattr(service._db, "execute", execute)
+    attempted = _record_suspend_attempts(monkeypatch, service)
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.suspend_all(reason="킬 스위치", suspended_by="admin")
+
+    assert attempted == ["acct1", "acct2"]
+    assert service._accounts["acct3"].status == AccountStatus.ACTIVE
+
+
+def _kill_switch_server(service: AccountService, audit_log: AsyncMock) -> IPCServer:
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    audit_logger = MagicMock()
+    audit_logger.log = audit_log
+    svc_registry = ServiceRegistry(
+        account=service,
+        bot_manager=MagicMock(),
+        treasury_manager=MagicMock(),
+        dynamic_config=MagicMock(),
+        approval=MagicMock(),
+        reconciler=MagicMock(),
+        eventbus=MagicMock(),
+        audit_logger=audit_logger,
+    )
+    socket_dir = tempfile.mkdtemp(prefix="ipc-2924", dir="/tmp")
+    return IPCServer(str(Path(socket_dir) / "t.sock"), svc_registry, cmd_registry)
+
+
+async def _dispatch(server: IPCServer, command: str) -> dict[str, Any]:
+    await server.start()
+    try:
+        return await server._dispatch(
+            {"id": "1", "command": command, "args": {"reason": "r"}, "actor": "ops"}
+        )
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_system_halt_partial_failure_is_error_envelope_with_audit(
+    service, monkeypatch
+):
+    await _three_active(service)
+    _fail_status_update(monkeypatch, service, only_account="acct2")
+    audit_log = AsyncMock(return_value=None)
+
+    response = await _dispatch(_kill_switch_server(service, audit_log), "system.halt")
+
+    assert response == {
+        "id": "1",
+        "status": "error",
+        "error": {
+            "code": "ACCOUNT_SUSPEND_ALL_FAILED",
+            "message": _SUSPEND_ALL_MESSAGE,
+        },
+    }
+    audit_log.assert_awaited_once_with(
+        member_id="ops",
+        action="system.halt",
+        resource="system:kill_switch",
+        detail="failed=acct2; changed=2; reason=r",
+        ip="",
+    )
+
+
+@pytest.mark.asyncio
+async def test_system_clear_halt_partial_failure_is_error_envelope_with_audit(
+    service, monkeypatch
+):
+    await _suspended(service, "acct1")
+    await _suspended(service, "acct2")
+    await _suspended(service, "acct3")
+    _fail_status_update(monkeypatch, service, only_account="acct2")
+    audit_log = AsyncMock(return_value=None)
+
+    response = await _dispatch(
+        _kill_switch_server(service, audit_log), "system.clear_halt"
+    )
+
+    assert response == {
+        "id": "1",
+        "status": "error",
+        "error": {
+            "code": "ACCOUNT_ACTIVATE_ALL_FAILED",
+            "message": _ACTIVATE_ALL_MESSAGE,
+        },
+    }
+    audit_log.assert_awaited_once_with(
+        member_id="ops",
+        action="system.clear_halt",
+        resource="system:kill_switch",
+        detail="failed=acct2; changed=1; reason=r",
+        ip="",
+    )
+    assert service._accounts["acct3"].status == AccountStatus.SUSPENDED
+
+
+@pytest.mark.asyncio
+async def test_system_halt_audit_failure_does_not_mask_partial_failure(
+    service, monkeypatch
+):
+    await _three_active(service)
+    _fail_status_update(monkeypatch, service, only_account="acct2")
+    audit_log = AsyncMock(side_effect=RuntimeError("감사 저장 실패"))
+
+    response = await _dispatch(_kill_switch_server(service, audit_log), "system.halt")
+
+    assert response["status"] == "error"
+    assert response["error"] == {
+        "code": "ACCOUNT_SUSPEND_ALL_FAILED",
+        "message": _SUSPEND_ALL_MESSAGE,
+    }
+    audit_log.assert_awaited_once()

@@ -25,8 +25,8 @@
 | `get_cached_broker` | `account_id: str` | `BrokerAdapter \| None` | 이미 캐시된 BrokerAdapter만 반환(build/connect 없음). 미캐시면 `None`. 종료 루프처럼 "이미 연결된 어댑터만 끊는" 경로 전용 — 미캐시 계좌를 끊기 위해 새로 연결하는 회귀를 차단한다. **async 메서드**: per-account lock으로 in-flight 초기 연결을 drain한 뒤 조회하므로, 종료 중 in-flight connect가 끝난 직후 캐시되어 disconnect를 놓치는 세션 잔존을 막는다 |
 | `ensure_reconcile_applicable` | `account_id: str` | `None` | 수동 대사를 할 수 있는 계좌인지 판정한다. 계좌를 조회해(없으면 `AccountNotFoundError`) D-ACC-09 매트릭스에서 reconcile 이 면제인 계좌(가상)면 `AccountReconcileNotApplicableError`를 낸다. 브로커를 만들거나 연결하지 않는다([15-reconciliation.md](../broker-adapter/15-reconciliation.md)) |
 | `create_default_test_account` | — | `Account` | 테스트 계좌 자동 생성 (`ante init` 시 호출). 이미 존재하면 스킵 |
-| `suspend_all` | `reason: str, suspended_by: str` | `list[dict]` | 모든 ACTIVE 계좌를 SUSPENDED로 전환 (시스템 전체 Kill Switch). DELETED를 뺀 ACTIVE·SUSPENDED 계좌별 결과(`account_id`·`previous_status`·`status`·`changed`)를 반환한다. 이미 목표 상태인 계좌는 `changed: false` |
-| `activate_all` | `activated_by: str` | `list[dict]` | 모든 SUSPENDED 계좌를 ACTIVE로 복구. DELETED를 뺀 ACTIVE·SUSPENDED 계좌별 결과(`account_id`·`previous_status`·`status`·`changed`)를 반환한다. 이미 목표 상태인 계좌는 `changed: false` |
+| `suspend_all` | `reason: str, suspended_by: str` | `list[dict]` | 모든 ACTIVE 계좌를 SUSPENDED로 전환 (시스템 전체 Kill Switch). DELETED를 뺀 ACTIVE·SUSPENDED 계좌별 결과(`account_id`·`previous_status`·`status`·`changed`)를 반환한다. 이미 목표 상태인 계좌는 `changed: false`. 한 계좌의 `suspend`가 예외로 실패해도 나머지 ACTIVE 계좌를 모두 시도한다. 실패가 하나라도 있으면 결과 목록을 돌려주지 않고 `AccountSuspendAllFailedError`(`ACCOUNT_SUSPEND_ALL_FAILED`)를 올린다. 이 오류는 실패한 계좌 id 목록과 이번 호출에서 정지된 계좌 수를 싣고, 원인 예외는 로그에만 남긴다. 작업 취소는 가두지 않는다. 실패한 계좌에 남는 상태는 이 행이 정하지 않는다(#2858) |
+| `activate_all` | `activated_by: str` | `list[dict]` | 모든 SUSPENDED 계좌를 ACTIVE로 복구. DELETED를 뺀 ACTIVE·SUSPENDED 계좌별 결과(`account_id`·`previous_status`·`status`·`changed`)를 반환한다. 이미 목표 상태인 계좌는 `changed: false`. 한 계좌의 `activate`가 예외로 실패하면 거기서 멈추고 뒤의 계좌는 시도하지 않는다. 이때 `AccountActivateAllFailedError`(`ACCOUNT_ACTIVATE_ALL_FAILED`)를 올리며, 실패한 계좌 id와 그 전에 활성화된 계좌 수를 싣고 원인 예외를 `__cause__`로 잇는다. 실패한 계좌는 `activate`의 규칙대로 호출 전 상태로 돌아간다 |
 
 `activate`·`delete`는 상태 UPDATE가 실패하면(작업 취소 포함) 캐시에 든 그 계좌 객체의 `status`·`updated_at`을 호출 전 값으로 제자리에서 되돌리고 같은 예외를 다시 올린다. 이벤트는 UPDATE가 성공한 뒤에만 발행한다: `activate`의 `AccountActivatedEvent`·알림, 그리고 활성 계좌를 지울 때 `delete`가 내는 `AccountSuspendedEvent`(캐시에서 계좌를 뺀 뒤 발행). UPDATE가 커밋된 뒤에 취소가 닿으면 DB는 바뀐 채 캐시만 되돌아갈 수 있다 — `activate`라면 캐시가 정지로 남아 주문이 막히고, 재시작하면 DB 값을 따른다.
 
@@ -107,3 +107,5 @@ CLI cold-path 명령(`ante account create/delete/set-credentials`)은 `_assert_n
 - `AccountStructuralChangeRequiresStoppedServerError`: 런타임 구조 변경 차단
 - `AccountHasActiveBotsError`: delete() 시 활성(non-deleted) 봇 잔존 시 (orphan bot 무결성)
 - `AccountReconcileNotApplicableError`: reconcile 이 면제인 계좌(가상)에 대한 수동 대사 시도 시 (`ensure_reconcile_applicable`)
+- `AccountSuspendAllFailedError`: 일괄 정지에서 한 계좌 이상이 실패 시 (`suspend_all`)
+- `AccountActivateAllFailedError`: 일괄 활성화가 한 계좌의 실패에서 멈출 시 (`activate_all`)

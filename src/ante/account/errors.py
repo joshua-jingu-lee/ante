@@ -179,4 +179,44 @@ class AccountReconcileNotApplicableError(AccountError):
     code: str = "ACCOUNT_RECONCILE_NOT_APPLICABLE"
 
 
+class AccountSuspendAllFailedError(AccountError):
+    """일괄 정지에서 한 계좌 이상의 정지가 실패함.
+
+    나머지 계좌를 모두 시도한 뒤 올린다. 실패한 계좌 id와 이번 호출에서
+    정지된 계좌 수를 싣고, 원인 예외는 메시지에 싣지 않는다.
+    """
+
+    code: str = "ACCOUNT_SUSPEND_ALL_FAILED"
+
+    def __init__(
+        self, failed_account_ids: tuple[str, ...], suspended_count: int
+    ) -> None:
+        self.failed_account_ids = failed_account_ids
+        self.suspended_count = suspended_count
+        super().__init__(
+            f"전체 계좌 정지가 {len(failed_account_ids)}개 계좌에서 실패했습니다: "
+            f"{', '.join(failed_account_ids)}. "
+            f"이번 요청으로 정지된 계좌는 {suspended_count}개입니다."
+        )
+
+
+class AccountActivateAllFailedError(AccountError):
+    """일괄 활성화가 한 계좌의 실패에서 멈춤.
+
+    실패한 계좌 id와 그 전에 활성화된 계좌 수를 싣는다. 원인 예외는
+    ``__cause__``로 잇고 메시지에 싣지 않는다.
+    """
+
+    code: str = "ACCOUNT_ACTIVATE_ALL_FAILED"
+
+    def __init__(self, failed_account_id: str, activated_count: int) -> None:
+        self.failed_account_id = failed_account_id
+        self.activated_count = activated_count
+        super().__init__(
+            f"전체 계좌 활성화가 계좌 '{failed_account_id}'에서 실패해 멈췄습니다. "
+            f"그 전에 활성화된 계좌는 {activated_count}개이고, "
+            "뒤의 계좌는 시도하지 않았습니다."
+        )
+
+
 AccountDeletedException = AccountDeletedError
