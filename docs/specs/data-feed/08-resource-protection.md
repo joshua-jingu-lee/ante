@@ -13,7 +13,7 @@ Ante와 같은 홈서버(인텔 N100, 4코어, TDP 6W)에서 구동된다.
 
 - orchestrator가 매 루프 반복 시 현재 시각/요일 확인
 - `blocked_days`에 해당하는 요일이면 대기
-- `pause_during_trading = true`이고 `blocked_hours` 내이면 대기
+- `pause_during_trading = true`이고 `blocked_hours` 내이면 대기. `blocked_hours`의 각 구간은 시작 ≤ 끝이어야 한다. 자정을 넘는 구간은 `23:00-23:59`와 `00:00-02:00`처럼 둘로 나눠 적는다(`ante feed start`가 시작할 때 거부한다)
 - 설정으로 비활성화 가능 (`pause_during_trading = false`)
 
 ### 2. 프로세스 우선순위 (Nice)
