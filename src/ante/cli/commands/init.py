@@ -16,6 +16,7 @@ import click
 from ante.account.crypto import _validate_fernet_key
 from ante.cli.commands._password import generate_password
 from ante.cli.main import get_formatter
+from ante.config.config import _read_secrets_env_text
 from ante.contracts.cli_errors import (
     AccountMasterBootstrapFailedError,
     AccountTestCreateFailedError,
@@ -95,7 +96,7 @@ def _read_existing_encryption_key_line(secrets_env_path: Path) -> str | None:
     if not secrets_env_path.exists():
         return None
     last: str | None = None
-    for raw_line in secrets_env_path.read_text().splitlines():
+    for raw_line in _read_secrets_env_text(secrets_env_path).splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -148,7 +149,7 @@ def _write_encryption_key_into_secrets_env(
         os.rename(tmp_path, secrets_env_path)
         return
 
-    existing = secrets_env_path.read_text()
+    existing = secrets_env_path.read_text(encoding="utf-8")
     lines = existing.splitlines()
     last_idx: int | None = None
     for i, raw_line in enumerate(lines):

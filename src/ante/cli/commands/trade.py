@@ -135,8 +135,9 @@ def trade_list(
     result = _run(_run_list())
 
     if not result:
-        empty: dict[str, Any] = {"message": "거래 내역 없음", "trades": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "거래 내역 없음"
+        empty: dict[str, Any] = {"message": message, "trades": []}
+        return CommandResult(data=empty, text=(message,))
 
     columns = [
         "trade_id",

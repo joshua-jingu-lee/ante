@@ -217,7 +217,7 @@ def transactions(
                 )
                 rows = await db.fetch_all(
                     f"SELECT * FROM treasury_transactions{where_sql}"
-                    " ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
                     (*params, limit, offset),
                 )
             except Exception as e:
