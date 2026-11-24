@@ -321,6 +321,70 @@ class TestBotManagerSignalKey:
         key = await manager.get_signal_key("bot-005")
         assert key == "sk_test"
 
+    @staticmethod
+    def _manager_with_stored_key(stored_key: str | None):  # noqa: ANN205
+        from ante.bot.manager import BotManager
+
+        db = MagicMock()
+        db.execute = AsyncMock()
+        db.execute_script = AsyncMock()
+        eventbus = MagicMock()
+        eventbus.subscribe = MagicMock()
+
+        skm = MagicMock()
+        skm.generate = AsyncMock(return_value="sk_issued")
+        skm.get_key = AsyncMock(return_value=stored_key)
+
+        manager = BotManager(eventbus=eventbus, db=db, signal_key_manager=skm)
+        return manager, skm
+
+    async def test_get_signal_key_none_after_rebind_to_normal(self) -> None:
+        """받는 전략 → 받지 않는 전략으로 바꾸면 저장된 키가 있어도 None (#2931)."""
+        from ante.bot.config import BotConfig
+
+        manager, skm = self._manager_with_stored_key("sk_stale")
+        config = BotConfig(
+            bot_id="bot-006", strategy_id="accepting", account_id="acc-test"
+        )
+        bot = await manager.create_bot(config, _AcceptingStrategy, ctx=MagicMock())
+        bot.rebind_strategy("normal", _NormalStrategy)
+
+        assert await manager.get_signal_key("bot-006") is None
+        skm.revoke.assert_not_called()
+
+    async def test_get_signal_key_none_for_normal_with_stored_key(self) -> None:
+        """받지 않는 전략의 봇은 DB에 키가 있어도 None (#2931)."""
+        from ante.bot.config import BotConfig
+
+        manager, _ = self._manager_with_stored_key("sk_orphan")
+        config = BotConfig(
+            bot_id="bot-007", strategy_id="normal", account_id="acc-test"
+        )
+        await manager.create_bot(config, _NormalStrategy, ctx=MagicMock())
+
+        assert await manager.get_signal_key("bot-007") is None
+
+    async def test_get_signal_key_after_rebind_to_accepting(self) -> None:
+        """받지 않는 전략 → 받는 전략으로 바꾸면 저장된 키를 돌려준다 (#2931)."""
+        from ante.bot.config import BotConfig
+
+        manager, _ = self._manager_with_stored_key("sk_present")
+        config = BotConfig(
+            bot_id="bot-008", strategy_id="normal", account_id="acc-test"
+        )
+        bot = await manager.create_bot(config, _NormalStrategy, ctx=MagicMock())
+        bot.rebind_strategy("accepting", _AcceptingStrategy)
+
+        assert await manager.get_signal_key("bot-008") == "sk_present"
+
+    async def test_get_signal_key_unknown_bot_raises(self) -> None:
+        """등록되지 않은 봇은 rotate와 같이 BotNotFoundError (#2931)."""
+        from ante.bot.exceptions import BotNotFoundError
+
+        manager, _ = self._manager_with_stored_key("sk_x")
+        with pytest.raises(BotNotFoundError):
+            await manager.get_signal_key("bot-missing")
+
     async def test_validate_signal_key_hit(self) -> None:
         """manager 구성 + key hit → bot_id 반환 (#2334/#2336 게이트①)."""
         from ante.bot.manager import BotManager
