@@ -29,7 +29,7 @@
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `trade_id` | `UUID` | 고유 ID (OrderFilledEvent.event_id 활용) |
+| `trade_id` | `UUID \| str` | 고유 ID (OrderFilledEvent.event_id 활용). DB 행을 읽을 때 UUID로 파싱하지 못하면 저장된 문자열 그대로 (#865) |
 | `account_id` | `str` | 계좌 ID |
 | `bot_id` | `str` | 실행 봇 ID |
 | `strategy_id` | `str` | 전략 ID |
