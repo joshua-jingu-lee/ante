@@ -116,7 +116,7 @@ def _invoke_case(
 
 
 _AUDIT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
-    ("list_empty", "text"): ("{'message': '감사 로그가 없습니다.', 'logs': []}\n"),
+    ("list_empty", "text"): ("감사 로그가 없습니다.\n"),
     ("list_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'
