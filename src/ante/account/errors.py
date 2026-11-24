@@ -52,6 +52,17 @@ class InvalidExchangeError(AccountError):
     code: str = "VALIDATION_ERROR"
 
 
+class InvalidBrokerConfigError(AccountError):
+    """계좌 생성 때 ``broker_config`` 값이 브로커의 정의를 어김.
+
+    ``mock`` 계좌의 ``prices``·``default_price`` 가 가격 정의(불리언이 아닌
+    유한한 수, 0 초과)를 어기면 raise 한다. 안정 코드는 계좌 입력 검증의
+    ``VALIDATION_ERROR`` 다.
+    """
+
+    code: str = "VALIDATION_ERROR"
+
+
 class MissingCredentialsError(AccountError):
     """필수 credentials 키 누락.
 

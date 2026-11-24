@@ -31,6 +31,7 @@ ACCOUNT_ERROR_SUBCLASSES = [
     "AccountSuspendedError",
     "BrokerReconnectFailedError",
     "InvalidAccountIdError",
+    "InvalidBrokerConfigError",
     "InvalidBrokerTypeError",
     "InvalidExchangeError",
     "MissingCredentialsError",

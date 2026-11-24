@@ -490,4 +490,6 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> CommandResult:
         )
     if result.get("fix_applied"):
         lines.append(f"  자동 보정      : {result.get('corrections', 0)}건 수행")
+    elif fix:
+        lines.append("  자동 보정      : 안 함 (봇이 0개이거나 둘 이상인 계좌)")
     return CommandResult(data=result, text=tuple(lines))

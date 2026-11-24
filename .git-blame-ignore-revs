@@ -17,7 +17,7 @@ d469a436cbe90acbe8dbf1608fcb90d3599a7ffc
 4c661d8238042d39ad8e95891a435794fd9ecbe9
 
 # #2547: src/ante의 독스트링을 소유자별 상한 안으로 줄인 커밋(삭제 D1·D2, 고쳐 쓰기 R).
-# 문자열 상수를 비운 src/의 AST는 그대로다. (#2824는 tests/의 줄 번호 허용목록도 함께 맞췄다.)
+# 문자열 상수를 비운 src/의 AST는 그대로다. (#2617·#2824는 tests/의 줄 번호 허용목록도 함께 맞췄다.)
 # #2604 contracts·feed·그 밖의 private 함수(B-D1)
 abfd2a99c415b9eddd62acbb6626b5df8d313226
 # #2606 contracts의 모듈·클래스·속성(B1-D2)
@@ -36,3 +36,5 @@ eec436e53fead4438c802b02bdf82f075c350208
 759f7a539fd7ddfc2fabd23c91a222862ca43769
 # #2824 고쳐 쓰기 R1
 7255e78b75b90b6cee06a2ed3bd5908259be6495
+# #2829 고쳐 쓰기 R2 — 검사기(scripts/check_comments.py·check_review_scope.py)·그 테스트·D-021의 변경과 이 파일의 생성 줄도 함께 가려진다
+028f67cf4d0e4a779c5149c54c5cdffa761c6136

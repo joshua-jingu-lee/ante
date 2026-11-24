@@ -86,7 +86,11 @@ class _Stack:
             account_service=_account_service(),
             fill_applier=self.applier,
         )
-        self.portfolio = VirtualPortfolioView(BOT, initial_balance=1_000_000.0)
+        self.portfolio = VirtualPortfolioView(
+            treasury=self.treasury,
+            position_history=self.position_history,
+            account_id=ACCT,
+        )
         self.events: list[Any] = []
 
     async def start(self) -> None:
@@ -98,7 +102,7 @@ class _Stack:
         await self.treasury.initialize()
         await self.treasury.set_account_balance(10_000_000.0)
         await self.treasury.allocate(BOT, 1_000_000.0)
-        self.executor.register_bot(BOT, self.portfolio)
+        self.executor.register_bot(BOT)
         self.executor.subscribe()
         for cls in (OrderFilledEvent, OrderFailedEvent):
             self.bus.subscribe(cls, self.events.append, priority=-1000)
@@ -441,7 +445,7 @@ async def test_duplicate_order_id_skips_portfolio_and_publish(stack: _Stack) -> 
     assert stack.portfolio.get_positions(BOT)[SYMBOL]["quantity"] == 1.0
 
 
-async def test_without_fill_applier_keeps_legacy_behavior(
+async def test_without_fill_applier_records_nothing_and_warns(
     db, caplog: pytest.LogCaptureFixture
 ) -> None:
     s = _Stack(db)
@@ -459,4 +463,6 @@ async def test_without_fill_applier_keeps_legacy_behavior(
 
     assert len(s.of(OrderFilledEvent)) == 1
     assert await s.count("trades") == 0
+    assert await s.count("positions") == 0
+    assert s.portfolio.get_positions(BOT) == {}
     assert any("fill_applier" in r.getMessage() for r in caplog.records)

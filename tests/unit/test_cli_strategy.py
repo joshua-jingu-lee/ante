@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import asdict
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -486,6 +487,8 @@ class TestStrategyPerformance:
         account_row,
         fetch_one_side_effect=None,
         metrics=None,
+        budget_rows=(),
+        fetch_all_side_effect=None,
     ):
         """`_perf()` 내부 함수 지역 import 대상을 patch하는 컨텍스트 묶음.
 
@@ -498,6 +501,10 @@ class TestStrategyPerformance:
             db.fetch_one = AsyncMock(side_effect=fetch_one_side_effect)
         else:
             db.fetch_one = AsyncMock(return_value=account_row)
+        if fetch_all_side_effect is not None:
+            db.fetch_all = AsyncMock(side_effect=fetch_all_side_effect)
+        else:
+            db.fetch_all = AsyncMock(return_value=list(budget_rows))
 
         registry = MagicMock()
         # #1753: `_perf()` 내부에서 `await registry.initialize()` 를 호출하므로
@@ -648,10 +655,72 @@ class TestStrategyPerformance:
         tracker.calculate.assert_awaited_once_with(
             account_id="acc-test",
             strategy_id=_SAMPLE_RECORD.strategy_id,
+            allocated_budgets={},
         )
         # 회귀 방어: name 으로 호출되면 0건 집계로 회귀한다.
         _args, kwargs = tracker.calculate.await_args
         assert kwargs["strategy_id"] != _SAMPLE_RECORD.name
+
+    def _invoke_perf_json(self, runner, **kwargs):
+        p_db, p_path, p_reg, p_track, db, tracker = self._patch_perf_internals(
+            records=[_SAMPLE_RECORD], account_row={"1": 1}, **kwargs
+        )
+        with p_db, p_path, p_reg, p_track:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "acc-test",
+                ],
+            )
+        return result, db, tracker
+
+    def test_performance_passes_budget_map_from_bot_budgets(self, runner):
+        """#2626: 계좌로 거른 예산 표의 행이 봇별 지도로 calculate 에 간다."""
+        result, db, tracker = self._invoke_perf_json(
+            runner,
+            budget_rows=[
+                {"bot_id": "bot-a", "allocated": 1_000_000},
+                {"bot_id": "bot-b", "allocated": 500_000.0},
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        sql, params = db.fetch_all.await_args.args
+        assert "FROM bot_budgets WHERE account_id = ?" in sql
+        assert params == ("acc-test",)
+        _args, kwargs = tracker.calculate.await_args
+        assert kwargs["allocated_budgets"] == {
+            "bot-a": 1_000_000.0,
+            "bot-b": 500_000.0,
+        }
+
+    def test_performance_missing_budget_table_passes_empty_map(self, runner):
+        """#2626: 예산 표가 없으면 빈 지도로 넘어간다(비율 None의 경우)."""
+        result, _db, tracker = self._invoke_perf_json(
+            runner,
+            fetch_all_side_effect=sqlite3.OperationalError(
+                "no such table: bot_budgets"
+            ),
+        )
+        assert result.exit_code == 0, result.output
+        _args, kwargs = tracker.calculate.await_args
+        assert kwargs["allocated_budgets"] == {}
+
+    def test_performance_budget_lookup_other_error_is_strategy_error(self, runner):
+        """#2626: 예산 조회의 그 밖의 OperationalError 는 STRATEGY_ERROR."""
+        result, _db, tracker = self._invoke_perf_json(
+            runner,
+            fetch_all_side_effect=sqlite3.OperationalError("database is locked"),
+        )
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "STRATEGY_ERROR"
+        tracker.calculate.assert_not_called()
 
     def test_performance_strategy_not_found_regression(self, runner):
         """regression guard: strategy 미존재 → 기존 "전략을 찾을 수 없습니다" 유지.

@@ -403,3 +403,41 @@ class TestMaskValue:
     def test_masks_seven_chars(self) -> None:
         result = _mask_value("abcdefg")
         assert result == "abc***efg"
+
+
+# ── UTF-8이 아닌 .env (#2918) ────────────────────────────────────────────────
+
+_NON_UTF8_ENV = b"ANTE_DART_API_KEY=fake-sec\xff\xfe-tail\n"
+_DECODE_TRACES = ("0xff", "0xfe", "codec", "position", "fake-sec")
+
+
+class TestNonUtf8EnvFile:
+    def _write(self, cfg: FeedConfig) -> bytes:
+        cfg.feed_dir.mkdir(parents=True, exist_ok=True)
+        cfg.env_path.write_bytes(_NON_UTF8_ENV)
+        return _NON_UTF8_ENV
+
+    @pytest.mark.parametrize("method", ["list_api_keys", "load_api_keys"])
+    def test_read_raises_value_error_without_bytes(
+        self, cfg: FeedConfig, method: str
+    ) -> None:
+        self._write(cfg)
+        with pytest.raises(ValueError) as exc_info:
+            getattr(cfg, method)()
+        message = str(exc_info.value)
+        assert message == "feed .env 파일을 UTF-8로 읽을 수 없습니다."
+        assert not isinstance(exc_info.value, UnicodeDecodeError)
+        for trace in (*_DECODE_TRACES, str(cfg.env_path)):
+            assert trace not in message
+        assert exc_info.value.__suppress_context__ is True
+
+    def test_set_api_key_leaves_file_untouched(self, cfg: FeedConfig) -> None:
+        before = self._write(cfg)
+        with pytest.raises(ValueError, match="UTF-8로 읽을 수 없습니다"):
+            cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "abc123def456")
+        assert cfg.env_path.read_bytes() == before
+
+    def test_set_api_key_writes_utf8(self, cfg: FeedConfig) -> None:
+        cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "가나다abc")
+        expected = "ANTE_DATAGOKR_API_KEY=가나다abc\n".encode()
+        assert cfg.env_path.read_bytes() == expected

@@ -16,6 +16,9 @@ SYMBOL = "000001"
 PRICE = 12345
 FILL_DEADLINE_SECONDS = 30.0
 EXPECTED_FILLS = {(f"buy {SYMBOL} 1 @ 12,345", float(PRICE))}
+EXPECTED_TRADES = {("buy", SYMBOL, 1.0, float(PRICE))}
+EXPECTED_POSITION_QUANTITY = 1.0
+UPDATE_CHECKER_MODULE = "ante.update.checker"
 
 
 def _wait_for_fills(daemon: DaemonHarness, count: int) -> dict[str, Any]:
@@ -55,6 +58,7 @@ def test_mock_account_market_fill(daemon: DaemonHarness) -> None:
     assert strategy_id
 
     daemon.start()
+    assert daemon.daemon_pid in daemon.guarded_pids()
 
     accounts = daemon.cli("account", "list")["data"]["accounts"]
     (account,) = [a for a in accounts if a["account_id"] == ACCOUNT_ID]
@@ -89,9 +93,23 @@ def test_mock_account_market_fill(daemon: DaemonHarness) -> None:
     projected = {(i["description"], i["amount"]) for i in fills["items"]}
     assert projected == EXPECTED_FILLS
 
+    trades = daemon.cli("trade", "list", "--bot", BOT_ID)["data"]["trades"]
+    recorded = {(t["side"], t["symbol"], t["quantity"], t["price"]) for t in trades}
+    assert recorded == EXPECTED_TRADES, trades
+    assert {t["status"] for t in trades} == {"filled"}
+
+    positions = daemon.cli("bot", "positions", BOT_ID)["data"]["positions"]
+    held = [(p["symbol"], float(p["quantity"])) for p in positions]
+    assert held == [(SYMBOL, EXPECTED_POSITION_QUANTITY)], positions
+
     stopped = daemon.cli("bot", "stop", BOT_ID)
     assert stopped["data"]["bot"]["status"] == "stopped", stopped
 
     assert daemon.stop() == 0
     assert not daemon.socket_path.exists()
     assert not daemon.pid_path.exists()
+
+    unexpected = [
+        a for a in daemon.net_attempts() if UPDATE_CHECKER_MODULE not in a["modules"]
+    ]
+    assert unexpected == []

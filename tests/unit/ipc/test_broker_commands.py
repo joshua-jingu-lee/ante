@@ -126,7 +126,9 @@ def _typed(values: tuple[Any, ...]) -> list[tuple[str, Any]]:
     return [(type(v).__name__, v) for v in values]
 
 
-def _envelope(fix: bool, bot_count: int, adjustments: list[Any]) -> dict[str, Any]:
+def _envelope(
+    fix: bool, bot_count: int, adjustments: list[Any], *, fix_applied: bool
+) -> dict[str, Any]:
     return {
         "account_id": ACCOUNT,
         "fix": fix,
@@ -136,7 +138,7 @@ def _envelope(fix: bool, bot_count: int, adjustments: list[Any]) -> dict[str, An
         "total_symbols": 1,
         "discrepancies": MISMATCHES,
         "match": False,
-        "fix_applied": fix,
+        "fix_applied": fix_applied,
         "corrections": len(adjustments),
     }
 
@@ -212,7 +214,7 @@ async def test_reconcile_with_fix_corrects_the_single_bot_and_audits() -> None:
     response = await harness.send(
         "broker.reconcile", {"fix": True, "account_id": ACCOUNT}
     )
-    assert response == _ok(_envelope(True, 1, ADJUSTMENTS))
+    assert response == _ok(_envelope(True, 1, ADJUSTMENTS, fix_applied=True))
     harness.account.get_broker.assert_awaited_once_with(ACCOUNT)
     harness.reconciler.reconcile.assert_awaited_once_with(
         "b-1", ACCOUNT_POSITIONS, account_id=ACCOUNT, dry_run=False
@@ -236,7 +238,7 @@ async def test_reconcile_with_fix_corrects_the_single_bot_and_audits() -> None:
 async def test_reconcile_without_fix_is_a_dry_run(args: dict[str, Any]) -> None:
     harness = _Harness()
     response = await harness.send("broker.reconcile", args)
-    assert response == _ok(_envelope(False, 1, ADJUSTMENTS))
+    assert response == _ok(_envelope(False, 1, ADJUSTMENTS, fix_applied=False))
     harness.reconciler.reconcile.assert_awaited_once_with(
         "b-1", ACCOUNT_POSITIONS, account_id=ACCOUNT, dry_run=True
     )
@@ -254,7 +256,7 @@ async def test_reconcile_of_two_bots_only_detects() -> None:
     response = await harness.send(
         "broker.reconcile", {"fix": True, "account_id": ACCOUNT}
     )
-    assert response == _ok(_envelope(True, 2, []))
+    assert response == _ok(_envelope(True, 2, [], fix_applied=False))
     harness.reconciler.reconcile.assert_not_awaited()
     harness.reconciler.detect_account_level.assert_awaited_once_with(
         ACCOUNT_POSITIONS, account_id=ACCOUNT

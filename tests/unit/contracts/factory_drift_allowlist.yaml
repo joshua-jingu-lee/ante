@@ -41,7 +41,7 @@ direct_database_construction:
   # #1984 동형). `report submit` 은 write 명령(INSERT)이라 read-only 대상이
   # 아니며 직접 Database 생성을 유지한다 — 단일 엔트리 잔존.
   - path: src/ante/cli/commands/report.py
-    line: 101
+    line: 103
     reason: "report submit — offline write (INSERT), read-only 비대상; deferred migration"
 
   # backtest domain — `backtest run` 은 spec 상 `long_running` 분류 (subprocess
@@ -65,14 +65,14 @@ direct_database_construction:
   # 새로 생성하는 lifecycle 이라 `open_cli_db` (이미 존재하는 DB 를 여는 helper)
   # 가 부적절하다.
   - path: src/ante/cli/commands/init.py
-    line: 254
+    line: 255
     reason: "ante init — bootstrap, fresh DB creation lifecycle (out of registry scope)"
   - path: src/ante/cli/commands/init.py
-    line: 278
+    line: 279
     reason: "ante init — bootstrap, encryption key init path"
   - path: src/ante/cli/commands/init.py
-    line: 307
+    line: 308
     reason: "ante init — bootstrap, migration / schema apply path"
   - path: src/ante/cli/commands/init.py
-    line: 338
+    line: 339
     reason: "ante init — bootstrap, post-init verification path"

@@ -57,6 +57,12 @@ def _validate_schedule_times(
                 f"잘못된 blocked_hours 항목: '{window}' "
                 "(양 끝점 모두 zero-padded HH:MM 필요, 예: 09:00-15:30)"
             )
+        elif start_time > end_time:
+            errors.append(
+                f"잘못된 blocked_hours 항목: '{window}' "
+                "(시작이 끝보다 늦은 구간은 받지 않습니다 — 자정을 넘으면 "
+                "두 구간으로 나눠 적으세요, 예: 23:00-23:59, 00:00-02:00)"
+            )
 
     if errors:
         raise ValueError("; ".join(errors))

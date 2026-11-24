@@ -65,8 +65,8 @@ StrategyContext에 주입되는 인터페이스. 라이브/백테스트/모의�
 | ABC | live 봇 | virtual 봇 | 백테스트 |
 |-----|---------|---------|---------|
 | DataProvider | LiveDataProvider (API Gateway 경유) | LiveDataProvider (동일) | BacktestDataProvider (Parquet) |
-| PortfolioView | LivePortfolioView (Treasury + Trade) | VirtualPortfolioView (인메모리) | BacktestPortfolioView |
-| OrderView | LiveOrderView (**OrderTracker SSOT 경유** — sync open 캐시, account scope) | VirtualOrderView (인메모리, OrderTracker 미사용 — 즉시 체결로 open window 없음) | BacktestOrderView (`[]`, 미체결 미지원) |
+| PortfolioView | LivePortfolioView (Treasury + Trade) | VirtualPortfolioView (Treasury + Trade, live와 같은 정본) | BacktestPortfolioView |
+| OrderView | LiveOrderView (**OrderTracker SSOT 경유** — sync open 캐시, account scope) | VirtualOrderView (늘 `[]`, OrderTracker 미사용 — 즉시 체결로 open window 없음) | BacktestOrderView (`[]`, 미체결 미지원) |
 
 **OrderView 미체결 가시성 데이터 흐름** (LIVE):
 
