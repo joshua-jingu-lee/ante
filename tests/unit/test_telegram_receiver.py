@@ -637,6 +637,41 @@ class TestConfirmation:
         assert "자동 재시작되지 않습니다" in result
         account_service.activate_all.assert_called_once_with(activated_by="telegram")
 
+    async def test_confirm_halt_reports_partial_failure(
+        self, receiver, account_service
+    ):
+        """일괄 정지의 부분 실패는 성공 문구 대신 실패한 계좌를 답한다."""
+        from ante.account.errors import AccountSuspendAllFailedError
+
+        account_service.suspend_all = AsyncMock(
+            side_effect=AccountSuspendAllFailedError(("acc2",), 1)
+        )
+        await receiver._execute("halt", ["점검"], 12345, 100)
+        result = await receiver._handle_confirm(12345)
+        assert "일부 계좌에서 실패" in result
+        assert "acc2" in result
+        assert "사유: 점검" in result
+        assert "중지되었습니다" not in result
+
+    async def test_confirm_clear_halt_reports_stopped_midway(
+        self, receiver, account_service
+    ):
+        """일괄 활성화가 멈추면 성공 문구 대신 멈춘 계좌를 답한다."""
+        from ante.account.errors import AccountActivateAllFailedError
+        from ante.account.models import AccountStatus
+
+        account_service.list.return_value = [
+            SimpleNamespace(account_id="test", status=AccountStatus.SUSPENDED)
+        ]
+        account_service.activate_all = AsyncMock(
+            side_effect=AccountActivateAllFailedError("acc2", 1)
+        )
+        await receiver._execute("clear_halt", [], 12345, 100)
+        result = await receiver._handle_confirm(12345)
+        assert "중간에 멈췄습니다" in result
+        assert "acc2" in result
+        assert "정지가 해제되었습니다" not in result
+
     async def test_confirm_executes_stop(self, receiver, bot_manager):
         """confirm으로 stop이 실행된다."""
         await receiver._execute("stop", ["bot-1"], 12345, 100)

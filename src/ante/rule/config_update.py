@@ -4,10 +4,22 @@ from __future__ import annotations
 
 from typing import Any
 
+_ACCOUNT_RULES_KEY_PREFIX = "accounts."
+_ACCOUNT_RULES_KEY_SUFFIX = ".rules"
+
 
 def account_rules_config_key(account_id: str) -> str:
     """Return the dynamic config key for account-scoped stored rules."""
-    return f"accounts.{account_id}.rules"
+    return f"{_ACCOUNT_RULES_KEY_PREFIX}{account_id}{_ACCOUNT_RULES_KEY_SUFFIX}"
+
+
+def is_account_rules_config_key(key: str) -> bool:
+    """Return whether ``key`` has the ``accounts.<account_id>.rules`` shape."""
+    return (
+        key.startswith(_ACCOUNT_RULES_KEY_PREFIX)
+        and key.endswith(_ACCOUNT_RULES_KEY_SUFFIX)
+        and len(key) >= len(_ACCOUNT_RULES_KEY_PREFIX) + len(_ACCOUNT_RULES_KEY_SUFFIX)
+    )
 
 
 def rule_config_to_item(cfg: dict[str, Any]) -> dict[str, Any]:

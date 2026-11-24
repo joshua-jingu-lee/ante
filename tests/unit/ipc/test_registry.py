@@ -1282,6 +1282,52 @@ class TestHandleConfigSetValidation:
         assert result == {"key": "system.log_level", "value": "DEBUG"}
         fake_dynamic.set.assert_awaited_once()
 
+    @pytest.mark.parametrize("category", ["user", "rule"])
+    async def test_account_rules_key_rejected(self, category: str) -> None:
+        """계좌 규칙 key는 category와 무관하게 거부되고 서비스에 닿지 않는다(#2997)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.contracts.cli_errors import ConfigUnsupportedKeyError
+        from ante.ipc.registry import _handle_config_set
+        from ante.ipc.requests import ConfigSetRequest
+
+        fake_dynamic = MagicMock()
+        fake_dynamic.set = AsyncMock(return_value=None)
+        svc = MagicMock()
+        svc.dynamic_config = fake_dynamic
+
+        with pytest.raises(ConfigUnsupportedKeyError, match="rule update"):
+            await _handle_config_set(
+                svc,
+                ConfigSetRequest(
+                    key="accounts.acc1.rules", value="off", category=category
+                ),
+                "cli-user",
+            )
+        fake_dynamic.set.assert_not_awaited()
+
+    async def test_neighbour_account_key_still_set(self) -> None:
+        """규칙 key가 아닌 ``accounts.*`` key는 지금처럼 서비스로 간다(#2997)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.ipc.registry import _handle_config_set
+        from ante.ipc.requests import ConfigSetRequest
+
+        fake_dynamic = MagicMock()
+        fake_dynamic.set = AsyncMock(return_value=None)
+        svc = MagicMock()
+        svc.dynamic_config = fake_dynamic
+
+        result = await _handle_config_set(
+            svc,
+            ConfigSetRequest(key="accounts.acc1.rules.x", value="1"),
+            "cli-user",
+        )
+        assert result == {"key": "accounts.acc1.rules.x", "value": "1"}
+        fake_dynamic.set.assert_awaited_once_with(
+            "accounts.acc1.rules.x", "1", category="user", changed_by="cli-user"
+        )
+
 
 # ── #1849 CommandSpec metadata 확장 / 27 commands 완전성 ─────────────
 

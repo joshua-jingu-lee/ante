@@ -20,6 +20,7 @@ from ante.account.scoping import (
 from ante.contracts.error_registry import EXCEPTION_TO_SPEC
 
 ACCOUNT_ERROR_SUBCLASSES = [
+    "AccountActivateAllFailedError",
     "AccountAlreadyExistsError",
     "AccountAlreadySuspendedError",
     "AccountDeletedError",
@@ -28,6 +29,7 @@ ACCOUNT_ERROR_SUBCLASSES = [
     "AccountNotFoundError",
     "AccountReconcileNotApplicableError",
     "AccountStructuralChangeRequiresStoppedServerError",
+    "AccountSuspendAllFailedError",
     "AccountSuspendedError",
     "BrokerReconnectFailedError",
     "InvalidAccountIdError",

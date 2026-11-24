@@ -7,7 +7,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_error_codes.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_error_codes.py --check`
 
-- 코드: **157**개 (예외 클래스 매핑 있음 **149** / 없음 **8**)
+- 코드: **159**개 (예외 클래스 매핑 있음 **151** / 없음 **8**)
 
 코드·분류·종료 코드·의미는 그 코드의 `ErrorSpec`의 `code`·`category`·`exit_code`·`description`에서, 예외 클래스는 `EXCEPTION_TO_SPEC`에서 그 코드를 가진 `ErrorSpec`에 연결된 클래스에서 얻습니다. 예외 클래스가 `—`인 코드는 `EXCEPTION_TO_SPEC`에 연결된 클래스가 없고, 의미가 `—`인 코드는 `description`이 비어 있습니다. 분류의 뜻과 명명 규칙은 [error-taxonomy.md](../../specs/contracts/error-taxonomy.md)에서 봅니다.
 
@@ -15,6 +15,7 @@
 
 | 코드 | 분류 | 종료 코드 | 예외 클래스 | 의미 |
 |---|---|---|---|---|
+| `ACCOUNT_ACTIVATE_ALL_FAILED` | `internal` | 1 | `ante.account.errors.AccountActivateAllFailedError` | 일괄 활성화가 한 계좌의 실패에서 멈춤(뒤의 계좌는 시도하지 않음) |
 | `ACCOUNT_ALREADY_DELETED` | `state_conflict` | 1 | `ante.contracts.cli_errors.AccountAlreadyDeletedError` | — |
 | `ACCOUNT_ALREADY_EXISTS` | `state_conflict` | 1 | `ante.account.errors.AccountAlreadyExistsError` | — |
 | `ACCOUNT_ALREADY_SUSPENDED` | `state_conflict` | 1 | `ante.account.errors.AccountAlreadySuspendedError` | — |
@@ -34,6 +35,7 @@
 | `ACCOUNT_RECONCILE_NOT_APPLICABLE` | `state_conflict` | 1 | `ante.account.errors.AccountReconcileNotApplicableError` | 가상 계좌(D-ACC-09 reconcile 면제)에 대한 수동 대사 |
 | `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` | `state_conflict` | 1 | `ante.account.errors.AccountStructuralChangeRequiresStoppedServerError` | — |
 | `ACCOUNT_SUSPENDED` | `state_conflict` | 1 | `ante.account.errors.AccountSuspendedError` | — |
+| `ACCOUNT_SUSPEND_ALL_FAILED` | `internal` | 1 | `ante.account.errors.AccountSuspendAllFailedError` | 일괄 정지에서 한 계좌 이상의 정지가 실패함(나머지 계좌는 모두 시도) |
 | `ACCOUNT_TEST_CREATE_FAILED` | `internal` | 1 | `ante.contracts.cli_errors.AccountTestCreateFailedError` | — |
 | `ACCOUNT_TEST_INACTIVE` | `state_conflict` | 1 | `ante.contracts.cli_errors.AccountTestInactiveError` | — |
 | `ACCOUNT_UNKNOWN_CREDENTIAL_KEY` | `validation` | 1 | `ante.contracts.cli_errors.AccountUnknownCredentialKeyError` | broker preset의 `required_credentials`에 정의되지 않은 credential key 제공 |
