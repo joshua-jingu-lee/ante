@@ -355,9 +355,10 @@ def test_cli_direct_path_rejects_with_param_validation_exit(
     result = _cli(config_dir, *extra)
 
     assert result.exit_code == nan.exit_code != 0
-    assert json.loads(nan.output)["error"]["code"] == "RULE_UPDATE_ERROR"
+    assert json.loads(nan.output)["code"] == "RULE_UPDATE_ERROR"
     payload = json.loads(result.output)
-    assert payload["error"]["code"] == "RULE_UPDATE_ERROR"
+    assert payload["status"] == "error"
+    assert payload["code"] == "RULE_UPDATE_ERROR"
     assert "bogus" not in result.output
     assert "high" not in result.output
     assert _stored_cli(db_path) == before

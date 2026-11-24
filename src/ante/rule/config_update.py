@@ -6,6 +6,7 @@ from typing import Any
 
 _ACCOUNT_RULES_KEY_PREFIX = "accounts."
 _ACCOUNT_RULES_KEY_SUFFIX = ".rules"
+RULE_ITEM_KEYS: frozenset[str] = frozenset({"type", "id", "enabled"})
 
 
 def account_rules_config_key(account_id: str) -> str:
@@ -24,7 +25,7 @@ def is_account_rules_config_key(key: str) -> bool:
 
 def rule_config_to_item(cfg: dict[str, Any]) -> dict[str, Any]:
     """Convert a stored rule config dict to the public rule item shape."""
-    params = {k: v for k, v in cfg.items() if k not in ("type", "id", "enabled")}
+    params = {k: v for k, v in cfg.items() if k not in RULE_ITEM_KEYS}
     return {
         "type": cfg.get("type", ""),
         "enabled": cfg.get("enabled", True),
@@ -39,6 +40,28 @@ def item_to_rule_config(
     cfg: dict[str, Any] = {"type": rule_type, "enabled": enabled}
     cfg.update(params)
     return cfg
+
+
+def _reject_rule_item_keys(params: dict[str, Any]) -> None:
+    """Reject params that would overwrite the rule item's own keys."""
+    reserved = sorted(params.keys() & RULE_ITEM_KEYS)
+    if reserved:
+        raise ValueError(
+            "params에 규칙 항목 key를 줄 수 없습니다: "
+            f"{', '.join(repr(k) for k in reserved)}. "
+            "규칙 종류는 명령의 인자(rule_type)로, 켜고 끄기는 "
+            "--enabled/--disabled(IPC enabled)로 지정합니다. id는 바꿀 수 없습니다."
+        )
+
+
+def _priority_errors(params: dict[str, Any]) -> list[str]:
+    """Return the error for a non-integer ``priority`` param."""
+    if "priority" not in params:
+        return []
+    value = params["priority"]
+    if isinstance(value, int) and not isinstance(value, bool):
+        return []
+    return ["priority must be an integer"]
 
 
 def _put_rule_config(
@@ -88,8 +111,9 @@ async def update_account_rule_config(
             f"가능한 값: {list(RULE_REGISTRY.keys())}"
         )
 
+    _reject_rule_item_keys(params)
     rule_class = RULE_REGISTRY[rule_type]
-    validation_errors = rule_class.validate_config(params)
+    validation_errors = _priority_errors(params) + rule_class.validate_config(params)
     if validation_errors:
         raise ValueError(f"룰 config 검증 실패: {'; '.join(validation_errors)}")
 
