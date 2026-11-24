@@ -198,7 +198,7 @@ def _resolve_credentials(
                 f"--credential-env {key}의 환경변수 이름이 비어 있습니다."
             )
         env_value = os.environ.get(env_name_clean)
-        if is_blank_credential(env_value):
+        if env_value is None or is_blank_credential(env_value):
             raise AccountCredentialEnvNotSetError(
                 "ACCOUNT_CREDENTIAL_ENV_NOT_SET: "
                 f"--credential-env 옵션의 {position}번째 인자({key})가 가리키는 "
