@@ -1015,3 +1015,63 @@ def test_only_a_regular_file_takes_the_thread_source(tmp_path) -> None:
         for f in (*opened, sock_a, sock_b):
             f.close()
         os.close(master)
+
+
+# ──────────────────────────────────────────────────────────────
+# H. 닫힌 표준 입력 (#3019) — 입력 원천 없음 분기에서 대기한다
+# ──────────────────────────────────────────────────────────────
+
+
+async def test_closed_stdin_waits_in_the_no_source_branch() -> None:
+    """``sys.stdin``이 ``None``이면 입력 중계는 예외 없이 대기하고 보내지 않는다."""
+    from ante.cli.commands.signal import _pump_in
+
+    writer = _EofCountingWriter()
+    with patch("ante.cli.commands.signal.sys.stdin", None):
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(_pump_in(writer), timeout=0.2)
+
+    assert bytes(writer.written) == b""
+    assert writer.eof_calls == 0
+
+
+class _ClosedStdinSys:
+    """``signal`` 모듈의 ``sys`` 대역 — stdin 만 ``None``, 나머지는 실제 것."""
+
+    stdin = None
+
+    @property
+    def stdout(self):  # noqa: ANN201
+        import sys
+
+        return sys.stdout
+
+    @property
+    def stderr(self):  # noqa: ANN201
+        import sys
+
+        return sys.stderr
+
+
+def test_closed_stdin_still_relays_daemon_frames(runner: CliRunner) -> None:
+    """닫힌 표준 입력에서도 데몬 프레임이 stdout 으로 나가고 종료 코드는 0이다."""
+    ack = {"type": "ack", "signal_id": "sig-1"}
+    ok = _frame(_ok_frame("bot-1705"))
+    frames = [ok, _frame(ack), _frame(_CLOSED_FRAME)]
+    reader = DeferredFrameReader(frames, boundary_pos=len(ok))
+    writer = FakeWriter()
+
+    async def _open(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+        return reader, writer
+
+    with (
+        patch(_PATH_EXISTS_TARGET, return_value=True),
+        patch(_SOCKET_TARGET, return_value="/tmp/test-ante.sock"),
+        patch(_OPEN_CONN_TARGET, _open),
+        patch("ante.cli.commands.signal.sys", _ClosedStdinSys()),
+    ):
+        result = runner.invoke(cli, ["signal", "connect", "--key", "sk_ok"])
+
+    assert result.exit_code == 0, (result.stdout, result.stderr, result.exception)
+    assert result.stdout == json.dumps(ack) + "\n" + json.dumps(_CLOSED_FRAME) + "\n"
+    assert "channel closed: eof\n" in result.stderr

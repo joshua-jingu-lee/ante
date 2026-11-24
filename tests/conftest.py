@@ -83,7 +83,8 @@ def _configure_shard(config: pytest.Config) -> None:
     config.stash[_SHARD_KEY] = shard
     manifest = config.getoption("--shard-manifest")
     if manifest is not None:
-        _SHARD_MANIFEST.update(path=manifest, ran=set())
+        path = _SHARD_TOOLS.resolve_manifest(manifest, config.invocation_params.dir)
+        _SHARD_MANIFEST.update(path=str(path), ran=set())
 
 
 def pytest_collection_modifyitems(
