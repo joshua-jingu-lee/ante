@@ -1630,7 +1630,7 @@ class TestBotManager:
         signal_task = asyncio.create_task(old.on_external_signal(_external_signal()))
         await asyncio.wait_for(_LockProbeStrategy.data_entered.wait(), timeout=5.0)
 
-        await manager.delete_bot("bot1")
+        await manager.delete_bot("bot1", hard=True)
         _LockProbeStrategy.stepped.clear()
         new_config = BotConfig(
             bot_id="bot1",

@@ -92,10 +92,10 @@ class _FakeWriter:
         return out
 
 
-async def test_daemon_side_signal_to_order_request_repro_2333() -> None:
+async def test_daemon_side_signal_to_order_request_repro_2333(tmp_path) -> None:
     _AcceptingStrategy.on_data_calls = []
 
-    db = Database(":memory:")
+    db = Database(str(tmp_path / "ante.db"))
     await db.connect()
     try:
         bus = EventBus()

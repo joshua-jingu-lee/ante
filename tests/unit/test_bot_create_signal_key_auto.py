@@ -135,6 +135,7 @@ def _make_bot_manager(signal_key_manager: MagicMock) -> BotManager:
     db = MagicMock()
     db.execute = AsyncMock()
     db.execute_script = AsyncMock()
+    db.fetch_one = AsyncMock(return_value=None)
     eventbus = MagicMock()
     eventbus.subscribe = MagicMock()
 
