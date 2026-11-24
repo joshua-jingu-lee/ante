@@ -78,6 +78,8 @@ _NEW_ORDER_TR_IDS = frozenset({"VTTC0012U", "TTTC0012U", "VTTC0011U", "TTTC0011U
 
 _UNKNOWN_OUTCOME_HTTP_STATUSES = frozenset({500, 502, 503, 504})
 
+_RT_CD_MISSING_ATTR = "_kis_rt_cd_missing"
+
 _REGISTERED_MSG_CODES = (
     PERMANENT_MSG_CODES | TRANSIENT_MSG_CODES | {TOKEN_RATE_LIMIT_MSG_CODE}
 )
@@ -230,6 +232,8 @@ def _order_outcome_unknown(error: Exception) -> bool:
     ):
         return True
     if isinstance(error, APIError):
+        if getattr(error, _RT_CD_MISSING_ATTR, False):
+            return True
         return (
             error.status_code in _UNKNOWN_OUTCOME_HTTP_STATUSES
             and error.error_code not in _REGISTERED_MSG_CODES
@@ -624,11 +628,14 @@ class KISBaseAdapter(BrokerAdapter):
             if not msg1:
                 msg1 = get_error_message(msg_cd)
             retryable = is_retryable_msg_code(msg_cd)
-            raise APIError(
+            error = APIError(
                 f"KIS API Error [{msg_cd}]: {msg1}",
                 error_code=msg_cd,
                 retryable=retryable,
             )
+            if result.get("rt_cd") in (None, ""):
+                setattr(error, _RT_CD_MISSING_ATTR, True)
+            raise error
         return result
 
     async def _request(
