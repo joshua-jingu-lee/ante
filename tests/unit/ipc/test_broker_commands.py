@@ -322,7 +322,7 @@ async def test_reconcile_of_a_live_account_passes_the_check(fix: bool) -> None:
     response = await harness.send(
         "broker.reconcile", {"fix": fix, "account_id": ACCOUNT}
     )
-    assert response == _ok(_envelope(fix, 1, ADJUSTMENTS))
+    assert response == _ok(_envelope(fix, 1, ADJUSTMENTS, fix_applied=fix))
     harness.account.ensure_reconcile_applicable.assert_awaited_once_with(ACCOUNT)
     harness.account.get_broker.assert_awaited_once_with(ACCOUNT)
     harness.reconciler.reconcile.assert_awaited_once_with(
