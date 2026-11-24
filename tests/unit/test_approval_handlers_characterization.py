@@ -2,7 +2,7 @@
 
 처리기는 실제 ``_init_approval(s)`` 가 ``ApprovalService`` 에 등록한 사전에서
 결재 유형 문자열로만 꺼낸다. 서비스는 호출을 하나의 목록에 기록하는 대역이다.
-기대값은 지금 동작 그대로의 리터럴이다(#2686 의 동작과 #2582 의 채택 검증 포함).
+기대값은 지금 동작 그대로의 리터럴이다(#2900 의 동작과 #2582 의 채택 검증 포함).
 """
 
 from __future__ import annotations
@@ -91,6 +91,10 @@ class _ReportStore:
 
     async def update_status(self, report_id: Any, status: Any) -> None:
         self._log.add("report_store.update_status", report_id, str(status))
+
+    async def get(self, report_id: Any) -> Any:
+        self._log.add("report_store.get", report_id)
+        return SimpleNamespace(report_id=report_id) if report_id == "r-1" else None
 
 
 class _StrategyRegistry:
@@ -303,7 +307,7 @@ class TestRegistration:
 
 
 class TestStrategyExecutors:
-    async def test_adopt_with_record_issue_2686(self, env: _Env) -> None:
+    async def test_adopt_with_record_issue_2900(self, env: _Env) -> None:
         await env.executor("strategy_adopt")(
             {"report_id": "r-1", "strategy_id": "s-adopted"}
         )
@@ -323,7 +327,7 @@ class TestStrategyExecutors:
             ),
         ]
 
-    async def test_adopt_without_record_issue_2686(self, env: _Env) -> None:
+    async def test_adopt_without_record_issue_2900(self, env: _Env) -> None:
         await env.executor("strategy_adopt")({"report_id": "r-1", "strategy_id": "s-x"})
         assert env.log.calls == [
             ("report_store.update_status", ("r-1", "adopted"), {}),
@@ -352,7 +356,7 @@ class TestStrategyExecutors:
             ("strategy_registry.get", ("s-adopted",), {}),
         ]
 
-    async def test_adopt_missing_report_id_raises_before_any_call_issue_2686(
+    async def test_adopt_missing_report_id_raises_before_any_call_issue_2900(
         self, env: _Env
     ) -> None:
         with pytest.raises(KeyError) as ei:
@@ -360,7 +364,7 @@ class TestStrategyExecutors:
         assert ei.value.args == ("report_id",)
         assert env.log.calls == []
 
-    async def test_retire_with_record_issue_2686(self, env: _Env) -> None:
+    async def test_retire_with_record_issue_2900(self, env: _Env) -> None:
         await env.executor("strategy_retire")(
             {"report_id": "r-2", "strategy_id": "s-adopted"}
         )
@@ -380,7 +384,7 @@ class TestStrategyExecutors:
             ),
         ]
 
-    async def test_retire_without_record_issue_2686(self, env: _Env) -> None:
+    async def test_retire_without_record_issue_2900(self, env: _Env) -> None:
         await env.executor("strategy_retire")(
             {"report_id": "r-2", "strategy_id": "s-x"}
         )
@@ -400,7 +404,7 @@ class TestStrategyExecutors:
             ),
         ]
 
-    async def test_retire_missing_report_id_raises_before_any_call_issue_2686(
+    async def test_retire_missing_report_id_raises_before_any_call_issue_2900(
         self, env: _Env
     ) -> None:
         with pytest.raises(KeyError) as ei:
@@ -630,9 +634,20 @@ class TestStrategyValidators:
             ),
             pytest.param(
                 {"strategy_id": "s-adopted", "report_id": "r-does-not-exist"},
+                [("fail", "리포트를 찾을 수 없습니다: r-does-not-exist", "system")],
+                [
+                    ("strategy_registry.get", ("s-adopted",), {}),
+                    ("report_store.get", ("r-does-not-exist",), {}),
+                ],
+                id="unknown_report_fails-issue_2686",
+            ),
+            (
+                {"strategy_id": "s-adopted", "report_id": "r-1"},
                 [("pass", "", "system")],
-                [("strategy_registry.get", ("s-adopted",), {})],
-                id="unknown_report_passes-issue_2686",
+                [
+                    ("strategy_registry.get", ("s-adopted",), {}),
+                    ("report_store.get", ("r-1",), {}),
+                ],
             ),
         ],
     )
@@ -647,7 +662,7 @@ class TestStrategyValidators:
         [
             ({}, [("fail", "strategy_id가 누락되었습니다", "system")], []),
             (
-                {"strategy_id": "s-x"},
+                {"strategy_id": "s-x", "report_id": "r-1"},
                 [("fail", "전략을 찾을 수 없습니다", "system")],
                 [("strategy_registry.get", ("s-x",), {})],
             ),
@@ -658,9 +673,15 @@ class TestStrategyValidators:
             ),
             pytest.param(
                 {"strategy_id": "s-adopted"},
+                [("fail", "report_id가 누락되었습니다", "system")],
+                [],
+                id="no_report_id_fails-issue_2686",
+            ),
+            pytest.param(
+                {"strategy_id": "s-adopted", "report_id": "r-does-not-exist"},
                 [("pass", "", "system")],
                 [("strategy_registry.get", ("s-adopted",), {})],
-                id="no_report_id_passes-issue_2686",
+                id="unknown_report_not_looked_up-issue_2900",
             ),
         ],
     )
