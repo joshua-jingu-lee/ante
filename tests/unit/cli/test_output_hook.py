@@ -44,7 +44,7 @@ _BASELINE = _ROOT / "scripts" / "entry_ratchet_baseline.json"
 
 
 def _contract(
-    kind: ContractKind = "raw", data_key: str | None = None
+    kind: ContractKind = "envelope", data_key: str | None = None
 ) -> CliCommandContract:
     return CliCommandContract(
         path=_PATH,
