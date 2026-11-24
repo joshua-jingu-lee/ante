@@ -299,6 +299,8 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 `broker.reconcile`은 CLI `--fix=False` 경로에서도 같은 IPC command를 사용하지만, 한 command
 이름에 mutating/read-only 의미를 섞지 않고 일괄 mutating으로 분류한다. dry-run 전용
 IPC command 분리는 별도 이슈 범위다.
+가상 계좌에 대한 `broker.reconcile`은 브로커 조회 전에 `ACCOUNT_RECONCILE_NOT_APPLICABLE`로
+거부된다([15-reconciliation.md](../broker-adapter/15-reconciliation.md)).
 
 `account.delete`처럼 1.0 IPC 계약에서 제외되어 `CommandRegistry`에 등록되지 않는 명령은
 taxonomy 대상이 아니다. `member.*` 9개(`member.update_scopes` + admin mutation 8개)는 모두

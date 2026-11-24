@@ -60,6 +60,7 @@ class _Harness:
         self.broker = broker
         account = MagicMock()
         account.get_broker = AsyncMock(return_value=broker)
+        account.ensure_reconcile_applicable = AsyncMock(return_value=None)
         self.account = account
         reconciler = MagicMock()
         reconciler.reconcile = AsyncMock(return_value=list(ADJUSTMENTS))
@@ -261,6 +262,89 @@ async def test_reconcile_of_two_bots_only_detects() -> None:
         ACCOUNT_POSITIONS, account_id=ACCOUNT
     )
     harness.audit_logger.log.assert_not_awaited()
+
+
+def _judged_by_the_account(harness: _Harness, broker_type: str, mode: str) -> None:
+    """대역 계좌 서비스의 판정을 실제 ``ensure_reconcile_applicable``로 바꾼다."""
+    from types import MethodType
+
+    from ante.account.models import Account, TradingMode
+    from ante.account.service import AccountService
+
+    account = Account(
+        account_id=ACCOUNT,
+        name="n",
+        exchange="KRX",
+        currency="KRW",
+        broker_type=broker_type,
+        trading_mode=TradingMode(mode),
+    )
+    harness.account.get = AsyncMock(return_value=account)
+    harness.account.ensure_reconcile_applicable = AsyncMock(
+        side_effect=MethodType(
+            AccountService.ensure_reconcile_applicable, harness.account
+        )
+    )
+
+
+_TWO_BOTS = [
+    {"bot_id": "b-1", "account_id": ACCOUNT},
+    {"bot_id": "b-2", "account_id": ACCOUNT},
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broker_type", ["test", "kis-domestic", "mock"])
+@pytest.mark.parametrize("fix", [True, False])
+@pytest.mark.parametrize("bots", [None, _TWO_BOTS], ids=["one-bot", "two-bots"])
+async def test_reconcile_of_a_virtual_account_is_rejected_before_the_broker(
+    broker_type: str, fix: bool, bots: list[dict[str, Any]] | None
+) -> None:
+    harness = _Harness(bots=bots)
+    _judged_by_the_account(harness, broker_type, "virtual")
+    response = await harness.send(
+        "broker.reconcile", {"fix": fix, "account_id": ACCOUNT}
+    )
+    assert response == _error(
+        "ACCOUNT_RECONCILE_NOT_APPLICABLE",
+        f"계좌 '{ACCOUNT}'는 가상 계좌라 브로커와 대사하지 않습니다. "
+        "가상 계좌의 포지션은 내부 기록이 기준입니다.",
+    )
+    harness.account.ensure_reconcile_applicable.assert_awaited_once_with(ACCOUNT)
+    harness.assert_no_service_call()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fix", [True, False])
+async def test_reconcile_of_a_live_account_passes_the_check(fix: bool) -> None:
+    harness = _Harness()
+    _judged_by_the_account(harness, "kis-domestic", "live")
+    response = await harness.send(
+        "broker.reconcile", {"fix": fix, "account_id": ACCOUNT}
+    )
+    assert response == _ok(_envelope(fix, 1, ADJUSTMENTS, fix_applied=fix))
+    harness.account.ensure_reconcile_applicable.assert_awaited_once_with(ACCOUNT)
+    harness.account.get_broker.assert_awaited_once_with(ACCOUNT)
+    harness.reconciler.reconcile.assert_awaited_once_with(
+        "b-1", ACCOUNT_POSITIONS, account_id=ACCOUNT, dry_run=not fix
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_of_a_missing_account_keeps_its_not_found_error() -> None:
+    from ante.account.errors import AccountNotFoundError
+
+    harness = _Harness()
+    harness.account.ensure_reconcile_applicable = AsyncMock(
+        side_effect=AccountNotFoundError(f"계좌 '{ACCOUNT}'를 찾을 수 없습니다.")
+    )
+    response = await harness.send(
+        "broker.reconcile", {"fix": True, "account_id": ACCOUNT}
+    )
+    assert response == _error(
+        "ACCOUNT_NOT_FOUND", f"계좌 '{ACCOUNT}'를 찾을 수 없습니다."
+    )
+    harness.assert_no_service_call()
 
 
 # ── 판정 순서: 수명주기 → required_services → 요청 검증 → 핸들러 ──────────────

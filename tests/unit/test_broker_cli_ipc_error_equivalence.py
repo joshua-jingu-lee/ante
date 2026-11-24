@@ -133,7 +133,7 @@ def _patch_balance_fallback_raises(exc: BaseException):  # noqa: ANN202
     mock_adapter.get_account_positions = AsyncMock(side_effect=exc)
     mock_adapter.disconnect = AsyncMock(return_value=None)
 
-    async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+    async def _fake_get_broker(account_id=None, *, reconcile=False):  # noqa: ANN001, ANN202
         return mock_adapter, None
 
     return patch.object(
@@ -421,7 +421,7 @@ class TestOrderHistoryErrorSurface:
 
         adapter = _raising_adapter(APIError("KIS API Error", status_code=500))
 
-        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+        async def _fake_get_broker(account_id=None, *, reconcile=False):  # noqa: ANN001, ANN202
             return adapter, None
 
         with (
@@ -484,7 +484,7 @@ class TestReconcileOfflineErrorSurface:
         (tmp_path / "db").mkdir()
         adapter = _raising_adapter(exc)
 
-        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+        async def _fake_get_broker(account_id=None, *, reconcile=False):  # noqa: ANN001, ANN202
             return adapter, None
 
         ipc_send = AsyncMock(side_effect=_ipc_click_exc("IPC_SERVER_NOT_RUNNING", "x"))
@@ -509,3 +509,49 @@ class TestReconcileOfflineErrorSurface:
         adapter.get_account_positions.assert_awaited_once()
         payload = _cli_envelope_payload(result.output)
         assert payload["code"] == expected
+
+
+class TestReconcileNotApplicableEquivalence:
+    """가상 계좌의 대사 거부는 양쪽에서 ``ACCOUNT_RECONCILE_NOT_APPLICABLE`` (#2818)."""
+
+    def test_cli_offline_reconcile_rejected_before_the_broker(
+        self, runner: CliRunner
+    ) -> None:
+        from ante.account.errors import AccountReconcileNotApplicableError
+        from ante.cli.commands import broker as broker_cmd
+
+        db = MagicMock()
+        db.close = AsyncMock()
+        service = MagicMock()
+        service.ensure_reconcile_applicable = AsyncMock(
+            side_effect=AccountReconcileNotApplicableError("가상 계좌")
+        )
+        service.get_broker = AsyncMock()
+
+        async def _fake_create_service():  # noqa: ANN202
+            return service, db
+
+        ipc_send = AsyncMock(side_effect=_ipc_click_exc("IPC_SERVER_NOT_RUNNING", "x"))
+        with (
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=ipc_send),
+            patch.object(
+                broker_cmd, "_create_account_service", new=_fake_create_service
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "broker", "reconcile", "--account", "acc-1"],
+            )
+
+        assert result.exit_code == 1, result.output
+        payload = _cli_envelope_payload(result.output)
+        assert payload["code"] == "ACCOUNT_RECONCILE_NOT_APPLICABLE"
+        service.ensure_reconcile_applicable.assert_awaited_once_with("acc-1")
+        service.get_broker.assert_not_awaited()
+        db.close.assert_awaited_once()
+
+    def test_ipc_envelope_reconcile_not_applicable(self) -> None:
+        from ante.account.errors import AccountReconcileNotApplicableError
+
+        exc = AccountReconcileNotApplicableError("가상 계좌")
+        assert _ipc_envelope_code(exc) == "ACCOUNT_RECONCILE_NOT_APPLICABLE"
