@@ -81,7 +81,7 @@ HTTP 상태 코드만으로 성공 여부를 판단하면 안 된다.
 | API | 엔드포인트 | 용도 | Phase |
 |-----|----------|------|:-----:|
 | 고유번호 | `corpCode.xml` | corp_code ↔ stock_code 매핑 (ZIP 바이너리 응답) | 1 |
-| 공시검색 | `list.json` | 보고서별 접수일자(rcept_dt) 확보 — look-ahead bias 방지 | 1 |
+| 공시검색 | `list.json` | 보고서별 접수일자(`rcept_dt`) 조회. Phase 1은 부르지 않는다 — 접수일은 `fnlttMultiAcnt` 응답 각 행의 `rcept_no` 앞 8자리 | 2 |
 | 다중회사 주요계정 | `fnlttMultiAcnt.json` | 순이익, 자본총계 등 (최대 **100개 회사**씩 묶어 호출) | 1 |
 | 단일회사 전체 재무제표 | `fnlttSinglAcntAll.json` | 상세 계정과목 (필요 시) | 2 |
 | 단일회사 주요 재무지표 | `fnlttSinglIndx.json` | ROE, 부채비율 등 (**2023 3Q 이후**만 제공) | 2 |
@@ -101,8 +101,7 @@ HTTP 상태 코드만으로 성공 여부를 판단하면 안 된다.
 
 **수집 순서:**
 1. 고유번호 ZIP 다운로드 → `stock_code` 비어있는 비상장사 필터링 → corp_code ↔ stock_code 매핑 테이블 구축
-2. 공시검색(`list`) → 각 보고서의 `rcept_dt`(접수일자) 확보 (look-ahead bias 방지)
-3. 다중회사 주요계정(`fnlttMultiAcnt`) → 100개씩 묶어 순이익, 자본총계, 매출액, 부채총계 수집
+2. 다중회사 주요계정(`fnlttMultiAcnt`) → 100개씩 묶어 순이익, 자본총계, 매출액, 부채총계 수집. 각 행의 접수번호 `rcept_no` 앞 8자리(`YYYYMMDD`)가 접수일이며, 정규화가 이를 `available_date`로 채운다 (look-ahead bias 방지)
 
 **추출 대상 계정 (`account_nm`):**
 
