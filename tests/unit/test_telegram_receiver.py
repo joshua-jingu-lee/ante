@@ -10,7 +10,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from ante.core import clock
-from ante.notification.telegram_receiver import TelegramCommandReceiver
+from ante.notification.telegram_receiver import (
+    _UPDATE_FAILURE_REPLY,
+    TelegramCommandReceiver,
+)
 from tests.conftest import DEFAULT_MANUAL_CLOCK_AT, ManualClock
 
 # ── Fixtures ──────────────────────────────────────
@@ -932,7 +935,7 @@ class TestPollingBatchIsolation:
 
         sent = session.sent()
         assert [p["chat_id"] for p in sent] == [100, 100]
-        assert _FAILURE_TEXT in sent[0]["text"]
+        assert sent[0]["text"] == _UPDATE_FAILURE_REPLY
         assert "/confirm" in sent[1]["text"]
         assert poll_receiver._pending_confirm[12345][0] == "halt"
         assert all(_SECRET not in p["text"] for p in sent)
