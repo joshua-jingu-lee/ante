@@ -40,9 +40,8 @@ def calculate_metrics(
     metrics["sharpe_ratio"] = round(sharpe, 4) if sharpe is not None else None
 
     equities = [e["equity"] for e in equity_curve] if equity_curve else []
-    mdd, mdd_duration = _max_drawdown(equities)
-    metrics["max_drawdown"] = round(mdd, 4)
-    metrics["max_drawdown_duration"] = mdd_duration
+    metrics["max_drawdown"] = round(_max_drawdown(equities)[0], 4)
+    metrics["max_drawdown_duration"] = _max_drawdown(daily_equities)[1]
 
     sell_trades = [t for t in trades if t.side == "sell"]
 
@@ -126,7 +125,7 @@ def _sharpe_ratio(equities: list[float]) -> float | None:
 def _max_drawdown(
     equities: list[float],
 ) -> tuple[float, int]:
-    """최대 낙폭(%) 및 MDD 지속 기간(일)."""
+    """최대 낙폭(%) 및 고점 아래인 가장 긴 구간의 점 수."""
     if not equities:
         return 0.0, 0
 

@@ -313,7 +313,10 @@ async def _validate_bot_change_strategy(
 async def _validate_bot_assign_strategy(
     s: ApprovalDeps, params: dict[str, Any]
 ) -> list[ValidationResult]:
-    """봇 전략 배정 사전 검증: 전략 adopted 상태 확인."""
+    """봇 전략 배정 사전 검증: 봇 존재, 전략 adopted 상태 확인."""
+    bot_id = params.get("bot_id", "")
+    if not s.bot_manager.get_bot(bot_id):
+        return [ValidationResult("fail", "봇이 존재하지 않음", "system:bot_manager")]
     strategy_id = str(params.get("strategy_id") or "")
     results = await _adopted_strategy_failures(s, strategy_id)
     return results or [ValidationResult("pass", "", "system:strategy_registry")]
