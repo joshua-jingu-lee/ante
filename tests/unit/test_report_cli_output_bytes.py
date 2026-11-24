@@ -362,9 +362,7 @@ _REPORT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("performance_empty", "text"): (
-        "{'message': '집계 데이터가 없습니다.', 'summaries': []}\n"
-    ),
+    ("performance_empty", "text"): ("집계 데이터가 없습니다.\n"),
     ("performance_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'

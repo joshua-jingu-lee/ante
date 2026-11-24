@@ -134,7 +134,7 @@ def _invoke_case(
 
 
 _TRADE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
-    ("list_empty", "text"): ("{'message': '거래 내역 없음', 'trades': []}\n"),
+    ("list_empty", "text"): ("거래 내역 없음\n"),
     ("list_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'

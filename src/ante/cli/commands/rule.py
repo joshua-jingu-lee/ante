@@ -170,8 +170,9 @@ def rule_list(
     result = _run(_run_list())
 
     if not result:
-        empty: dict[str, Any] = {"message": "등록된 룰이 없습니다.", "rules": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "등록된 룰이 없습니다."
+        empty: dict[str, Any] = {"message": message, "rules": []}
+        return CommandResult(data=empty, text=(message,))
 
     columns = ["rule_id", "name", "scope", "enabled", "priority"]
     return CommandResult(

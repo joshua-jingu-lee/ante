@@ -9,6 +9,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ante.account.errors import AccountDeletedError
+from ante.account.models import AccountStatus
 from ante.account.scoping import require_account_id
 from ante.bot.bot import Bot, _transition_status
 from ante.bot.config import (
@@ -27,6 +29,8 @@ from ante.bot.exceptions import (
     BotStrategyAlreadyRunningError,
     SignalKeyManagerNotConfigured,
 )
+from ante.core.account_id import AccountError
+from ante.strategy.exceptions import StrategyError
 
 if TYPE_CHECKING:
     from ante.account.service import AccountService
@@ -95,6 +99,25 @@ def _pick_persisted_runtime_control(config_data: dict[str, Any], name: str) -> A
     if value is None:
         raise ValueError(f"invalid persisted runtime control: {name} is null")
     return value
+
+
+def _bot_config_from_row(row: Any, config_data: dict[str, Any]) -> BotConfig:
+    """``bots`` 행과 해석한 ``config_json`` 으로 ``BotConfig`` 를 만든다."""
+    config_data.pop("bot_type", None)
+    config_data.pop("exchange", None)
+    return BotConfig(
+        bot_id=row["bot_id"],
+        strategy_id=row["strategy_id"],
+        name=row["name"] or config_data.get("name", row["bot_id"]),
+        account_id=row.get("account_id") or "",
+        **{
+            name: _pick_persisted_runtime_control(config_data, name)
+            for name in _PERSISTED_BOT_CONFIG_FIELDS
+        },
+    )
+
+
+_RESTORE_SKIP_ERRORS = (ValueError, AccountError, StrategyError, OSError)
 
 
 async def _cooldown_sleep(seconds: float) -> None:
@@ -192,34 +215,9 @@ class BotManager:
 
         for row in rows:
             config_data = json.loads(row["config_json"]) if row["config_json"] else {}
-            config_data.pop("bot_type", None)
-            config_data.pop("exchange", None)
             account_id = row.get("account_id") or ""
             try:
-                config = BotConfig(
-                    bot_id=row["bot_id"],
-                    strategy_id=row["strategy_id"],
-                    name=row["name"] or config_data.get("name", row["bot_id"]),
-                    account_id=account_id,
-                    interval_seconds=_pick_persisted_runtime_control(
-                        config_data, "interval_seconds"
-                    ),
-                    auto_restart=_pick_persisted_runtime_control(
-                        config_data, "auto_restart"
-                    ),
-                    max_restart_attempts=_pick_persisted_runtime_control(
-                        config_data, "max_restart_attempts"
-                    ),
-                    restart_cooldown_seconds=_pick_persisted_runtime_control(
-                        config_data, "restart_cooldown_seconds"
-                    ),
-                    step_timeout_seconds=_pick_persisted_runtime_control(
-                        config_data, "step_timeout_seconds"
-                    ),
-                    max_signals_per_step=_pick_persisted_runtime_control(
-                        config_data, "max_signals_per_step"
-                    ),
-                )
+                config = _bot_config_from_row(row, config_data)
             except InvalidAccountIdError as e:
                 logger.warning(
                     "BotManager.load_from_db: invalid account_id row skip"
@@ -253,6 +251,90 @@ class BotManager:
 
         logger.info("DB에서 봇 %d건 로드", len(self._bots))
         return len(self._bots)
+
+    async def restore_bots(self) -> int:
+        """서버 부팅 때 삭제되지 않은 봇을 시작 전 상태(``created``)로 복원한다.
+
+        전략은 ``create_bot`` 과 같은 길로 준비한다. 한 행의 준비가 실패하면
+        그 행만 경고 뒤 건너뛰고, 그 밖의 예외는 올린다. 봇을 시작하지 않고
+        룰·시그널 키·예산·``bots`` 행을 건드리지 않는다. 반환값은 복원 수.
+        """
+        factory = self._context_factory
+        if factory is None:
+            raise BotError("봇 복원에는 context_factory가 필요합니다")
+        rows = await self._db.fetch_all(
+            "SELECT bot_id, name, strategy_id, account_id, config_json"
+            " FROM bots WHERE status != 'deleted' ORDER BY bot_id"
+        )
+        restored = skipped = 0
+        for row in rows:
+            if row["bot_id"] in self._bots:
+                continue
+            try:
+                await self._restore_bot(row, factory)
+            except _RESTORE_SKIP_ERRORS as e:
+                skipped += 1
+                logger.warning(
+                    "봇 복원 건너뜀: bot_id=%s strategy_id=%s — %s: %s",
+                    row["bot_id"],
+                    row["strategy_id"],
+                    type(e).__name__,
+                    e,
+                )
+                continue
+            restored += 1
+        logger.info("DB에서 봇 %d건 복원(건너뜀 %d건)", restored, skipped)
+        return restored
+
+    async def _restore_bot(self, row: Any, factory: StrategyContextFactory) -> None:
+        """``bots`` 행 하나를 ``created`` 봇으로 등록한다(실패하면 흔적 없음)."""
+        config_data = json.loads(row["config_json"] or "{}")
+        if not isinstance(config_data, dict):
+            raise ValueError(f"config_json is not an object: {config_data!r}")
+        try:
+            config = _bot_config_from_row(row, config_data)
+        except TypeError as e:
+            raise ValueError(f"invalid bot config: {e}") from e
+        account = None
+        if self._account_service is not None:
+            account = await self._account_service.get(config.account_id)
+            if account.status == AccountStatus.DELETED:
+                raise AccountDeletedError(f"삭제된 계좌: {config.account_id}")
+        try:
+            strategy_cls = await self._prepare_strategy(
+                config.bot_id,
+                account_id=config.account_id,
+                strategy_id=config.strategy_id,
+            )
+            ctx = factory.create(config)
+        except _RESTORE_SKIP_ERRORS:
+            if self._snapshot is not None:
+                self._snapshot.cleanup(config.bot_id)
+            raise
+        self._register_new_bot(config, strategy_cls, ctx, account)
+        logger.info("봇 복원: %s (전략: %s)", config.bot_id, config.strategy_id)
+
+    def _register_new_bot(
+        self,
+        config: BotConfig,
+        strategy_cls: type[Strategy],
+        ctx: StrategyContext,
+        account: Any,
+    ) -> Bot:
+        """시작 전 ``Bot`` 을 만들어 이벤트 구독과 봇 목록에 등록한다."""
+        bot = Bot(
+            config=config,
+            strategy_cls=strategy_cls,
+            ctx=ctx,
+            eventbus=self._eventbus,
+            exchange=account.exchange if account else "",
+            trading_mode=account.trading_mode.value if account else "",
+            currency=account.currency if account else "",
+            signal_lock=self._get_signal_lock(config.bot_id),
+        )
+        self._register_bot_events(bot)
+        self._bots[config.bot_id] = bot
+        return bot
 
     def _subscribe_events(self) -> None:
         """시스템 이벤트 구독."""
@@ -359,19 +441,7 @@ class BotManager:
                 raise BotError(msg)
             ctx = self._context_factory.create(config)
 
-        bot = Bot(
-            config=config,
-            strategy_cls=strategy_cls,
-            ctx=ctx,
-            eventbus=self._eventbus,
-            exchange=account.exchange if account else "",
-            trading_mode=account.trading_mode.value if account else "",
-            currency=account.currency if account else "",
-            signal_lock=self._get_signal_lock(config.bot_id),
-        )
-
-        self._register_bot_events(bot)
-        self._bots[config.bot_id] = bot
+        bot = self._register_new_bot(config, strategy_cls, ctx, account)
         await self._save_bot_config(config)
 
         if (
