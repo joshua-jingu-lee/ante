@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, cast
 
@@ -283,7 +282,7 @@ class TelegramCommandReceiver:
 
     def _request_confirmation(self, command: str, args: list[str], user_id: int) -> str:
         """위험 명령에 대한 확인 요청."""
-        self._pending_confirm[user_id] = (command, args, clock.now(UTC).timestamp())
+        self._pending_confirm[user_id] = (command, args, clock.monotonic())
 
         if command == "halt":
             reason = " ".join(args) if args else ""
@@ -309,7 +308,7 @@ class TelegramCommandReceiver:
             return "확인 대기 중인 명령이 없습니다."
 
         command, args, timestamp = pending
-        elapsed = clock.now(UTC).timestamp() - timestamp
+        elapsed = clock.monotonic() - timestamp
 
         if elapsed > self._confirm_timeout:
             return "확인 시간이 초과되었습니다."

@@ -4522,3 +4522,63 @@ class TestBacktestOrderTypeGate:
         assert len(result.trades) == 0
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert any("order_type" in r.getMessage() for r in warnings)
+
+
+class TestBacktestTradeOrderType:
+    """체결 기록·거래 이력·결과 JSON이 체결된 주문의 유형을 적는다(#2633).
+
+    스톱은 라이브의 스톱 변환과 같은 규칙으로 적는다(stop → market,
+    stop_limit → limit). 네 유형 모두 매수로, 종가 100 단일 봉에서 체결된다.
+    """
+
+    @pytest.mark.parametrize(
+        ("signal_kwargs", "expected"),
+        [
+            ({"order_type": "market"}, "market"),
+            ({"order_type": "limit", "price": 101.0}, "limit"),
+            ({"order_type": "stop", "stop_price": 99.0}, "market"),
+            (
+                {"order_type": "stop_limit", "stop_price": 99.0, "price": 101.0},
+                "limit",
+            ),
+        ],
+        ids=["market", "limit", "stop", "stop_limit"],
+    )
+    async def test_filled_order_type_recorded(self, store, signal_kwargs, expected):
+        df = _make_ohlcv_df_with_closes([100.0])
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        signal = Signal(symbol="005930", side="buy", quantity=1, **signal_kwargs)
+        executor = BacktestExecutor(
+            strategy_cls=_make_one_signal_strategy(signal),
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        assert len(result.trades) == 1
+        assert getattr(result.trades[0], "order_type", None) == expected
+        assert result.to_dict()["trades"][0].get("order_type") == expected
+        ctx = BacktestStrategyContext(
+            bot_id="test", data_provider=provider, portfolio=executor
+        )
+        history = await ctx.get_trade_history()
+        assert [h["order_type"] for h in history] == [expected]
+
+    def test_trade_without_order_type_defaults_to_market(self):
+        trade = BacktestTrade(
+            timestamp=datetime(2026, 1, 1),
+            symbol="005930",
+            side="buy",
+            quantity=1,
+            price=100.0,
+            commission=0.0,
+            slippage=0.0,
+        )
+        assert getattr(trade, "order_type", None) == "market"

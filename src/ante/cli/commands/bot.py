@@ -145,8 +145,9 @@ def bot_list(ctx: click.Context, account_id: str | None) -> CommandResult:
     result = _run(_run_list())
 
     if not result:
-        empty: dict[str, Any] = {"message": "등록된 봇이 없습니다.", "bots": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "등록된 봇이 없습니다."
+        empty: dict[str, Any] = {"message": message, "bots": []}
+        return CommandResult(data=empty, text=(message,))
 
     columns = ["bot_id", "name", "strategy_id", "account_id", "status", "created_at"]
     return CommandResult(
@@ -511,8 +512,9 @@ def bot_positions(ctx: click.Context, bot_id: str) -> CommandResult:
         raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
 
     if not result:
-        empty: dict[str, Any] = {"message": "보유 포지션 없음", "positions": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "보유 포지션 없음"
+        empty: dict[str, Any] = {"message": message, "positions": []}
+        return CommandResult(data=empty, text=(message,))
 
     columns = ["symbol", "quantity", "avg_entry_price", "realized_pnl"]
     return CommandResult(

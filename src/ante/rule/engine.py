@@ -467,6 +467,13 @@ class RuleEngine:
         if parsed.tzinfo is None:
             return None
         age = (clock.now(UTC) - parsed).total_seconds()
+        if age < 0:
+            logger.warning(
+                "미회수 매수 가드: submitted_at=%s 이 현재보다 %.1f초 앞섬 "
+                "— 벽시계 역행으로 보고 age 0 처리",
+                submitted_at,
+                -age,
+            )
         return max(age, 0.0)
 
     async def _check_unrecovered_buy_guard(self, event: object) -> str | None:

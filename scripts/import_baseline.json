@@ -122,6 +122,6 @@
     "treasury->eventbus"
   ],
   "cycles": [],
-  "lazy_imports": 433,
+  "lazy_imports": 432,
   "sqlite_files": []
 }
