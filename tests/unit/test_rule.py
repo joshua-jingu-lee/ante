@@ -5715,10 +5715,8 @@ class TestRuleEngineManager:
             "dynamic이 비어 있으면 static config의 명시 비활성화가 유지되어야 한다"
         )
 
-    async def test_initialize_all_static_fallback_on_unrelated_dynamic_error(
-        self, manager
-    ):
-        """DynamicConfig 조회가 어떤 예외를 던져도 static config로 이어간다."""
+    async def test_initialize_all_blocks_account_on_dynamic_read_error(self, manager):
+        """DynamicConfig 조회가 예외면 static seed가 있어도 그 계좌는 막힌다."""
 
         class _UnrelatedError(Exception):
             pass
@@ -5762,11 +5760,10 @@ class TestRuleEngineManager:
 
         assert dyn_cfg.get_calls == 1
         engine = manager.get("domestic")
-        trading_hours_rules = [
-            r for r in engine._account_rules if type(r).__name__ == "TradingHoursRule"
-        ]
-        assert len(trading_hours_rules) == 1
-        assert trading_hours_rules[0].enabled is False
+        assert engine.rules_unavailable is True
+        assert engine.rules_unavailable_cause == "read_error"
+        assert engine._account_rules == []
+        assert manager.rules_unavailable_accounts() == {"domestic": "read_error"}
 
     async def test_initialize_all_default_when_neither_static_nor_dynamic(
         self, manager

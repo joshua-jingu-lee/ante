@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from ante.rule.config_update import account_rules_config_key
 from ante.rule.defaults import resolve_effective_rules
 from ante.rule.engine import RuleEngine
 
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
     from ante.treasury import TreasuryManager as TreasuryManagerType
 
 logger = logging.getLogger(__name__)
+
+_ABSENT = object()
 
 
 class RuleEngineManager:
@@ -121,18 +124,36 @@ class RuleEngineManager:
            않도록 ``static config``보다 우선한다.
         2. ``config`` (정적 YAML/TOML 등 startup snapshot).
         3. 둘 다 없으면 ``stored_rules=None`` → broker_type별 default만 적용.
+
+        ``dynamic_config`` 행의 값이 리스트가 아니거나 조회가 예외를 내면 그
+        계좌만 계좌 룰 없이 ``rules_unavailable`` 상태의 엔진으로 둔다.
         """
         for account in accounts:
-            key = f"accounts.{account.account_id}.rules"
+            key = account_rules_config_key(account.account_id)
             stored_rules: list[dict[str, Any]] | None = None
 
             if dynamic_config is not None:
+                cause: str | None = None
                 try:
-                    dyn_rules = await dynamic_config.get(key, default=None)
-                except Exception:
-                    dyn_rules = None
-                if isinstance(dyn_rules, list):
-                    stored_rules = dyn_rules
+                    dyn_rules = await dynamic_config.get(key, default=_ABSENT)
+                except Exception as exc:
+                    cause = f"read_error:{type(exc).__name__}"
+                else:
+                    if isinstance(dyn_rules, list):
+                        stored_rules = dyn_rules
+                    elif dyn_rules is not _ABSENT:
+                        cause = f"not_list:{type(dyn_rules).__name__}"
+                if cause is not None:
+                    logger.error(
+                        "계좌 룰 저장값을 읽지 못해 주문 차단: account=%s, cause=%s",
+                        account.account_id,
+                        cause,
+                    )
+                    engine = self.create_engine(
+                        account.account_id, None, account=account
+                    )
+                    engine.mark_rules_unavailable(cause.split(":", 1)[0])
+                    continue
 
             if stored_rules is None and config is not None and hasattr(config, "get"):
                 account_rules = config.get(key, None)
@@ -144,6 +165,14 @@ class RuleEngineManager:
             self.create_engine(account.account_id, rule_configs, account=account)
 
         logger.info("RuleEngineManager 초기화 완료: %d개 계좌", len(self._engines))
+
+    def rules_unavailable_accounts(self) -> dict[str, str]:
+        """저장된 계좌 룰을 읽지 못한 계좌 ID → 원인(``not_list`` | ``read_error``)."""
+        return {
+            account_id: engine.rules_unavailable_cause
+            for account_id, engine in self._engines.items()
+            if engine.rules_unavailable_cause is not None
+        }
 
     @property
     def engines(self) -> dict[str, RuleEngine]:
