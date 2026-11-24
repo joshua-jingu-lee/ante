@@ -68,3 +68,15 @@ Member (owner, agent-01, ...)         ← 여러 Account에 연결
 - **종속**: 계좌가 삭제되면 함께 삭제되어야 하는 데이터. 계좌 없이 존재할 수 없음.
 - **scoping**: 데이터 자체는 독립적이나 `account_id`로 범위가 지정됨. 조회·필터링·집계 시 계좌 단위로 분리.
 - **독립**: 계좌와 무관하거나, 여러 계좌가 공유하는 모듈. 계좌 생성 전에도 사용 가능.
+
+#### 1.0 시점 계좌 구성
+
+| | 테스트 계좌 | 국내 KIS 계좌 |
+|---|---|---|
+| 생성 경로 | `ante init`이 자동으로 만든다 | 서버 정지 상태에서 `ante account create`로 추가한다 ([D-ACC-05](02-design-decisions.md#d-acc-05-ante-init에서-계좌를-어떻게-다루는가)) |
+| `broker_type` / 계좌 id | `test` / `test`(고정 시드 — 새로 만들 수 없다) | `kis-domestic` / `--account-id`로 지정한다(예: `domestic`) |
+| 거래 모드 | 가상(`virtual`) 전용 | `--trading-mode`로 가상(`virtual`) 또는 실전(`live`) |
+| 인증 정보 | 프리셋의 필수 키(`app_key`·`app_secret`)를 `"test"` 값으로 채운다 | `app_key`·`app_secret`·`account_no` |
+| 계좌 안의 모듈 | Treasury·Rule Engine·Bot | Treasury·Rule Engine·Bot |
+
+거래소·통화·거래 시간·수수료 기본값은 [데이터 모델의 프리셋 표](03-data-model.md#broker_presets)를 따른다. Strategy Registry·Data Store·Backtest Engine은 두 계좌 밖에 있다.
