@@ -260,3 +260,209 @@ class TestRunnerEmitsSentinelLine:
         payload = result_lines[0][len(BACKTEST_RESULT_SENTINEL) :]
         # payload 는 단일 라인 JSON (indent 없음) → 그대로 round-trip.
         assert json.loads(payload) == result_dict
+
+
+# ── (e) 자식 실패의 message: 트레이스백 대신 종류·메시지·전략 줄 (#2734) ────
+
+_RAISING_STRATEGY = """\
+from typing import Any
+
+from ante.strategy.base import Signal, Strategy, StrategyMeta
+
+
+class RaisingStrategy(Strategy):
+    meta = StrategyMeta(name="raising", version="1.0", description="raises")
+
+    async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+        raise ValueError({arg})
+"""
+
+
+def _raise_line(source: str) -> int:
+    lines = source.splitlines()
+    return next(i for i, line in enumerate(lines, 1) if "raise ValueError" in line)
+
+
+def _assert_no_traceback(message: str, tmp_path: Path) -> None:
+    assert "Traceback" not in message
+    assert 'File "' not in message
+    assert str(tmp_path) not in message
+    assert str(tmp_path.resolve()) not in message
+
+
+def _failure_sentinel() -> str:
+    from ante.backtest import service
+
+    return service.BACKTEST_FAILURE_SENTINEL
+
+
+class TestSubprocessFailureMessage:
+    """자식 실패의 BacktestError message에 트레이스백 전문이 실리지 않는다."""
+
+    async def _run_raising(
+        self, tmp_path: Path, arg: str, *, relative: bool
+    ) -> tuple[str, int]:
+        source = _RAISING_STRATEGY.format(arg=arg)
+        strat = _write_strategy(tmp_path, source)
+        _write_ohlcv(tmp_path / "data", "005930")
+        svc = BacktestService(data_path=str(tmp_path / "data"))
+        cfg = _cfg(tmp_path, strat)
+        cfg["symbols"] = ["005930"]
+        if relative:
+            cfg["strategy_path"] = "strat.py"
+        with pytest.raises(BacktestError) as exc_info:
+            await svc.run_subprocess(cfg)
+        return str(exc_info.value), _raise_line(source)
+
+    @pytest.mark.asyncio
+    async def test_strategy_exception_reports_type_message_and_line(
+        self, tmp_path: Path
+    ) -> None:
+        message, line = await self._run_raising(tmp_path, '"boom"', relative=False)
+
+        assert message == (
+            f"Backtest subprocess failed: ValueError: boom (strat.py:{line})"
+        )
+        _assert_no_traceback(message, tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_relative_strategy_path_still_finds_strategy_frame(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        message, line = await self._run_raising(tmp_path, '"boom"', relative=True)
+
+        assert message == (
+            f"Backtest subprocess failed: ValueError: boom (strat.py:{line})"
+        )
+        _assert_no_traceback(message, tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_empty_exception_message_has_no_dangling_colon(
+        self, tmp_path: Path
+    ) -> None:
+        message, line = await self._run_raising(tmp_path, "", relative=False)
+
+        assert message == f"Backtest subprocess failed: ValueError (strat.py:{line})"
+
+    @pytest.mark.asyncio
+    async def test_validation_failure_has_type_and_message_without_location(
+        self, tmp_path: Path
+    ) -> None:
+        strat = _write_strategy(tmp_path, "# dummy")
+        svc = BacktestService(data_path=str(tmp_path / "data"))
+
+        with pytest.raises(BacktestError) as exc_info:
+            await svc.run_subprocess(_cfg(tmp_path, strat))
+
+        message = str(exc_info.value)
+        assert message.startswith(
+            "Backtest subprocess failed: BacktestConfigError: 전략 검증 실패"
+        )
+        assert not message.endswith(")")
+        _assert_no_traceback(message, tmp_path)
+
+
+class TestSubprocessFailureWithoutSentinel:
+    """실패 sentinel이 없거나 읽히지 않으면 종료 코드만 싣는다."""
+
+    _CFG = {
+        "strategy_path": "s.py",
+        "start_date": "2026-01-01",
+        "end_date": "2026-01-02",
+    }
+
+    def _patched_spawn(self, stdout: bytes, stderr: bytes, returncode: int):
+        mock_proc = MagicMock()
+
+        async def _fake_communicate(input=None):
+            return (stdout, stderr)
+
+        mock_proc.communicate = _fake_communicate
+        mock_proc.returncode = returncode
+
+        async def _fake_spawn(*args, **kwargs):
+            return mock_proc
+
+        return patch(
+            "ante.backtest.service.asyncio.create_subprocess_exec",
+            side_effect=_fake_spawn,
+        )
+
+    async def _message(self, stdout: bytes, stderr: bytes, returncode: int) -> str:
+        with self._patched_spawn(stdout, stderr, returncode):
+            with pytest.raises(BacktestError) as exc_info:
+                await BacktestService().run_subprocess(dict(self._CFG))
+        return str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_killed_child_reports_exit_code_only(self) -> None:
+        stderr = b'Traceback (most recent call last):\n  File "/home/x/a.py"\n'
+
+        message = await self._message(b"", stderr, -9)
+
+        assert message == "Backtest subprocess failed (exit code -9)"
+
+    @pytest.mark.asyncio
+    async def test_malformed_failure_sentinel_reports_exit_code_only(self) -> None:
+        stdout = f"{_failure_sentinel()}not json\n".encode()
+
+        message = await self._message(stdout, b"Traceback /home/x", 1)
+
+        assert message == "Backtest subprocess failed (exit code 1)"
+
+    @pytest.mark.asyncio
+    async def test_last_failure_sentinel_wins(self) -> None:
+        sentinel = _failure_sentinel()
+        fake = json.dumps({"type": "X", "message": "fake", "location": None})
+        real = json.dumps({"type": "Y", "message": "real", "location": "s.py:3"})
+        stdout = f"{sentinel}{fake}\npartial\n{sentinel}{real}\n".encode()
+
+        message = await self._message(stdout, b"", 1)
+
+        assert message == "Backtest subprocess failed: Y: real (s.py:3)"
+
+
+class TestRunnerFailureSentinel:
+    """runner.main()이 일반 예외를 실패 sentinel 한 줄과 exit 1로 바꾼다."""
+
+    def _stdin(self, monkeypatch) -> None:
+        cfg = {"strategy_path": "s.py", "start_date": "2026-01-01"}
+        monkeypatch.setattr(
+            "ante.backtest.runner.sys.stdin.read", lambda: json.dumps(cfg)
+        )
+
+    def test_exception_becomes_failure_sentinel_and_exit_1(
+        self, capsys, monkeypatch
+    ) -> None:
+        self._stdin(monkeypatch)
+
+        async def _boom(config: dict) -> dict:
+            raise RuntimeError("bad")
+
+        monkeypatch.setattr(runner, "run_backtest", _boom)
+        print("no newline noise", end="")
+
+        with pytest.raises(SystemExit) as exc_info:
+            runner.main()
+
+        assert exc_info.value.code == 1
+        lines = capsys.readouterr().out.splitlines()
+        sentinel = _failure_sentinel()
+        assert lines[-1].startswith(sentinel)
+        payload = json.loads(lines[-1][len(sentinel) :])
+        assert payload == {"type": "RuntimeError", "message": "bad", "location": None}
+        assert not any(line.startswith(BACKTEST_RESULT_SENTINEL) for line in lines)
+
+    def test_keyboard_interrupt_is_not_caught(self, capsys, monkeypatch) -> None:
+        self._stdin(monkeypatch)
+
+        async def _interrupt(config: dict) -> dict:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(runner, "run_backtest", _interrupt)
+
+        with pytest.raises(KeyboardInterrupt):
+            runner.main()
+
+        assert capsys.readouterr().out == ""

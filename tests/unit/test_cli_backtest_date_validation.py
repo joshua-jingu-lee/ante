@@ -106,6 +106,38 @@ class TestBacktestDateValidation:
         # 날짜 검증 에러가 아닌 것만 확인 (이후 단계에서 다른 에러 발생 가능)
         assert "시작일" not in result.output
 
+    def test_same_date_failure_envelope_has_no_traceback(self, tmp_path, monkeypatch):
+        """자식 실패는 BACKTEST_ERROR 봉투이고 message에 트레이스백이 없다 (#2734)."""
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path / "config"))
+        strategy = tmp_path / "test_strategy.py"
+        strategy.write_text("# dummy")
+        runner = _make_runner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "backtest",
+                "run",
+                str(strategy),
+                "--start",
+                "2025-06-01",
+                "--end",
+                "2025-06-01",
+                "--data-path",
+                str(tmp_path / "data"),
+                "--db-path",
+                str(tmp_path / "ante.db"),
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert '"code": "BACKTEST_ERROR"' in result.output
+        assert "Traceback" not in result.output
+        assert 'File \\"' not in result.output
+
     def test_invalid_date_format(self, tmp_path):
         """잘못된 날짜 형식이면 exit code 1."""
         strategy = tmp_path / "test_strategy.py"
