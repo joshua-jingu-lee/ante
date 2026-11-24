@@ -238,3 +238,64 @@ class TestDotenvParser:
         env_file.write_text("KEY=val=ue\n")
         config = Config.load(config_dir=tmp_path)
         assert config.secret("KEY") == "val=ue"
+
+
+# ── UTF-8이 아닌 secrets.env (#2918) ─────────────────────────
+
+_NON_UTF8_SECRETS = b"ANTE_X=fake-sec\xff\xfe-tail\n"
+_DECODE_TRACES = ("0xff", "0xfe", "codec", "position", "fake-sec")
+
+
+class TestNonUtf8SecretsEnv:
+    """UTF-8이 아닌 secrets.env는 멈추되 파일의 바이트·경로를 싣지 않는다."""
+
+    def test_load_raises_config_error_without_bytes_or_chain(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "secrets.env").write_bytes(_NON_UTF8_SECRETS)
+        with pytest.raises(ConfigError) as exc_info:
+            Config.load(config_dir=tmp_path)
+        message = str(exc_info.value)
+        assert message == "secrets.env 파일을 UTF-8로 읽을 수 없습니다."
+        for trace in (*_DECODE_TRACES, str(tmp_path)):
+            assert trace not in message
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__suppress_context__ is True
+
+    def test_utf8_value_is_read_as_utf8(self, tmp_path: Path) -> None:
+        (tmp_path / "secrets.env").write_bytes("KEY=가나다\n".encode())
+        config = Config.load(config_dir=tmp_path)
+        assert config.secret("KEY") == "가나다"
+
+    def test_daemon_startup_stderr_has_no_decode_trace(self, tmp_path: Path) -> None:
+        import os
+        import subprocess
+        import sys
+
+        import ante
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "system.toml").write_text("")
+        (config_dir / "secrets.env").write_bytes(_NON_UTF8_SECRETS)
+        home = tmp_path / "home"
+        home.mkdir()
+        src_dir = str(Path(ante.__file__).resolve().parent.parent)
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(home),
+            "ANTE_CONFIG_DIR": str(config_dir),
+            "PYTHONPATH": src_dir,
+        }
+        proc = subprocess.run(
+            [sys.executable, "-m", "ante.main"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode != 0
+        assert "secrets.env 파일을 UTF-8로 읽을 수 없습니다." in proc.stderr
+        for trace in (*_DECODE_TRACES, str(config_dir), "UnicodeDecodeError"):
+            assert trace not in proc.stderr, proc.stderr
