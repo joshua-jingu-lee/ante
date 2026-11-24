@@ -23,25 +23,33 @@ def _load_toml(path: Path) -> dict[str, Any]:
         return tomllib.load(f)
 
 
+def _read_secrets_env_text(path: Path) -> str:
+    """secrets.env를 UTF-8로 읽고, 디코딩 실패는 바이트 없는 ``ConfigError``로."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except UnicodeDecodeError:
+        raise ConfigError("secrets.env 파일을 UTF-8로 읽을 수 없습니다.") from None
+
+
 def _load_dotenv(path: Path) -> dict[str, str]:
     """간단한 .env 파일 파서. KEY=VALUE 형식."""
     if not path.exists():
         logger.warning(".env 파일 없음: %s", path)
         return {}
     result: dict[str, str] = {}
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
-                value = value[1:-1]
-            result[key] = value
+    for line in _read_secrets_env_text(path).split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        result[key] = value
     return result
 
 

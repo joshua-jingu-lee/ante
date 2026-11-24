@@ -426,7 +426,7 @@ _TREASURY_NOT_CONFIGURED_SPEC: Final[ErrorSpec] = ErrorSpec(
 
 _BROKER_AUTH_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="BROKER_AUTH_FAILED",
-    category="auth",
+    category="external",
 )
 
 _BROKER_API_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(

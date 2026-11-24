@@ -15,6 +15,7 @@ import pytest
 from ante.account.errors import InvalidAccountIdError
 from ante.approval.errors import ApprovalNotFoundError
 from ante.bot.exceptions import BotNotFoundError
+from ante.broker.exceptions import AuthenticationError, TokenRateLimitError
 from ante.contracts import (
     ErrorCategory,
     ErrorSpec,
@@ -88,6 +89,16 @@ class TestErrorSpecForException:
         spec = error_spec_for_exception(InvalidScopeError("sample:bad"))
         assert spec.code == "MEMBER_INVALID_SCOPE"
         assert spec.category == "permission"
+
+    @pytest.mark.parametrize(
+        "exc",
+        [AuthenticationError("token"), TokenRateLimitError("token")],
+        ids=["auth", "token_rate_limit"],
+    )
+    def test_broker_auth_failed_resolves_external(self, exc: Exception) -> None:
+        spec = error_spec_for_exception(exc)
+        assert spec.code == "BROKER_AUTH_FAILED"
+        assert spec.category == "external"
 
     def test_unknown_exception_returns_execution_error_internal(self) -> None:
         """registry miss + ``.code`` 없음 → ``EXECUTION_ERROR`` fallback."""

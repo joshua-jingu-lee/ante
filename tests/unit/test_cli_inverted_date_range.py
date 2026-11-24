@@ -36,7 +36,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-from unittest.mock import patch
+from contextlib import asynccontextmanager
+from datetime import date
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -786,3 +788,103 @@ class TestTradeListToEndOfDayBoundary:
         assert ids == ["88888888-8888-8888-8888-888888888888"], (
             f"--to 다음날 범위에 당일 장중 행이 포함돼야 한다. ids={ids}"
         )
+
+
+_FIXED_TODAY = date(2026, 6, 15)
+
+
+class TestEffectiveRangeAfterDefaults:
+    """#2875: 기본값을 채운 뒤의 실효 구간이 뒤집히면 INVALID_DATE_RANGE."""
+
+    @pytest.fixture(autouse=True)
+    def _fixed_today(self):
+        with patch(
+            "ante.cli.commands.treasury._today_kst", return_value=_FIXED_TODAY
+        ) as mock_today:
+            yield mock_today
+
+    @staticmethod
+    def _invoke(runner, args):
+        with patch("ante.cli.commands.treasury._run") as mock_run:
+            mock_run.side_effect = asyncio_run_returning(
+                {"data": [], "start_date": "", "end_date": ""}
+                if "portfolio" in args
+                else []
+            )
+            result = runner.invoke(cli, ["--format", "json", *args])
+        return result, mock_run
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["treasury", "snapshot", "--from", "2026-06-16"],
+            ["treasury", "snapshot", "--to", "1999-12-31"],
+            ["treasury", "portfolio", "history", "--from", "2026-06-16"],
+            ["treasury", "portfolio", "history", "--to", "2026-05-15"],
+        ],
+    )
+    def test_one_sided_inverted_rejected(self, runner, args):
+        result, mock_run = self._invoke(runner, [*args, "--account", "sample-paper"])
+        _assert_invalid_date_range_json(result)
+        mock_run.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["treasury", "snapshot", "--from", "2026-06-15"],
+            ["treasury", "snapshot", "--to", "2000-01-01"],
+            ["treasury", "portfolio", "history", "--from", "2026-06-15"],
+            ["treasury", "portfolio", "history", "--to", "2026-05-16"],
+        ],
+    )
+    def test_one_sided_boundary_passes(self, runner, args):
+        result, mock_run = self._invoke(runner, [*args, "--account", "sample-paper"])
+        assert result.exit_code == 0, _stdout(result)
+        mock_run.assert_called_once()
+
+    def test_message_labels_defaulted_side(self, runner):
+        result, _ = self._invoke(
+            runner,
+            ["treasury", "snapshot", "--to", "1999-12-31", "--account", "sample-paper"],
+        )
+        payload = json.loads(_stdout(result))
+        assert payload["message"] == (
+            "기본 시작일(2000-01-01)이(가) 종료일(1999-12-31) 이후입니다."
+        )
+
+    def test_snapshot_without_dates_skips_effective_check(self, runner, _fixed_today):
+        result, mock_run = self._invoke(
+            runner, ["treasury", "snapshot", "--account", "sample-paper"]
+        )
+        assert result.exit_code == 0, _stdout(result)
+        mock_run.assert_called_once()
+        _fixed_today.assert_not_called()
+
+    def test_snapshot_query_uses_checked_today(self, runner, _fixed_today):
+        """검사와 조회가 같은 「오늘」 값 하나를 쓴다."""
+        treasury_obj = MagicMock()
+        treasury_obj.get_snapshots = AsyncMock(return_value=[])
+
+        @asynccontextmanager
+        async def _fake_treasury(*_a, **_k):
+            yield treasury_obj, None
+
+        with patch(
+            "ante.cli.commands.treasury._create_treasury", side_effect=_fake_treasury
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "treasury",
+                    "snapshot",
+                    "--from",
+                    "2026-06-01",
+                    "--account",
+                    "sample-paper",
+                ],
+            )
+        assert result.exit_code == 0, _stdout(result)
+        treasury_obj.get_snapshots.assert_awaited_once_with("2026-06-01", "2026-06-15")
+        assert _fixed_today.call_count == 1

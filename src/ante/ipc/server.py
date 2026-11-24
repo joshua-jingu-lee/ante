@@ -52,19 +52,58 @@ def _field_path(loc: tuple[str | int, ...]) -> str:
     return ".".join(_escaped(part) for part in loc)
 
 
-def _validation_message(command: str, exc: ValidationError) -> str:
+def _json_bytes(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+
+
+def _text_bytes(text: str) -> int:
+    return _json_bytes(text) - _json_bytes("")
+
+
+def _message_budget(request_id: Any) -> int:
+    """검증 오류 응답이 한 프레임에 들도록 message에 남는 바이트 수."""
+    frame = {
+        "id": request_id,
+        "status": "error",
+        "error": {"code": RequestValidationError.code, "message": ""},
+    }
+    return protocol.MAX_MESSAGE_SIZE - _json_bytes(frame)
+
+
+def _shortened(head: str, fields: list[str], budget: int) -> str:
+    """앞에서부터 들어가는 필드만 싣고 나머지를 「외 N건」으로 센다."""
+    used = _text_bytes(head)
+    loaded = 0
+    for field in fields:
+        cost = _text_bytes(field) + (_text_bytes(", ") if loaded else 0)
+        tail = _text_bytes(f" 외 {len(fields) - loaded - 1}건")
+        if used + cost + tail > budget:
+            break
+        used += cost
+        loaded += 1
+    if not loaded:
+        return f"{head}외 {len(fields)}건"
+    return f"{head}{', '.join(fields[:loaded])} 외 {len(fields) - loaded}건"
+
+
+def _validation_message(command: str, exc: ValidationError, budget: int) -> str:
     errors = exc.errors(include_url=False, include_input=False, include_context=False)
-    fields = ", ".join(
+    fields = [
         f"{_field_path(error['loc']) or 'args'}({error['type']})" for error in errors
-    )
-    return f"{command} 인자 검증 실패: {fields}"
+    ]
+    head = f"{command} 인자 검증 실패: "
+    message = head + ", ".join(fields)
+    if _text_bytes(message) <= budget:
+        return message
+    return _shortened(head, fields, budget)
 
 
-def _validated_args(spec: CommandSpec, args: Any) -> Any:
+def _validated_args(spec: CommandSpec, args: Any, request_id: Any) -> Any:
     try:
         return spec.request_model.model_validate(args)
     except ValidationError as exc:
-        raise RequestValidationError(_validation_message(spec.name, exc)) from None
+        message = _validation_message(spec.name, exc, _message_budget(request_id))
+        raise RequestValidationError(message) from None
 
 
 def _logged_expected_reject(
@@ -91,7 +130,7 @@ def _encode_signal_frame(frame: dict[str, Any]) -> bytes:
 
 
 class IPCServerState(Enum):
-    """IPCServer lifecycle state.
+    """IPCServer lifecycle state. 표에 없는 전이는 상태를 바꾸지 않는다.
 
     * ``STOPPED`` → ``RUNNING``: ``start()`` 마지막에 전환.
     * ``RUNNING`` → ``SHUTTING_DOWN``: ``stop_accepting()`` 진입 직후
@@ -109,28 +148,19 @@ class IPCServerState(Enum):
 
 IPC_SERVER_STATE_TRANSITIONS: dict[IPCServerState, set[IPCServerState]] = {
     IPCServerState.RUNNING: {
-        IPCServerState.RUNNING,
         IPCServerState.SHUTTING_DOWN,
         IPCServerState.DRAINING,
         IPCServerState.STOPPED,
     },
     IPCServerState.SHUTTING_DOWN: {
-        IPCServerState.RUNNING,
-        IPCServerState.SHUTTING_DOWN,
         IPCServerState.DRAINING,
         IPCServerState.STOPPED,
     },
     IPCServerState.DRAINING: {
-        IPCServerState.RUNNING,
-        IPCServerState.SHUTTING_DOWN,
-        IPCServerState.DRAINING,
         IPCServerState.STOPPED,
     },
     IPCServerState.STOPPED: {
         IPCServerState.RUNNING,
-        IPCServerState.SHUTTING_DOWN,
-        IPCServerState.DRAINING,
-        IPCServerState.STOPPED,
     },
 }
 
@@ -161,7 +191,7 @@ class IPCServer:
         return self._state
 
     async def start(self) -> None:
-        """서버 시작. 기존 소켓 파일이 있으면 삭제 후 재생성.
+        """서버 시작(STOPPED에서만). 기존 소켓 파일이 있으면 삭제 후 재생성.
 
         Python 3.13의 ``asyncio.start_unix_server``는 ``cleanup_socket`` 인자를
         받으며 기본값이 ``True``이다. 본 메서드는 ``cleanup_socket=False``를
@@ -170,6 +200,8 @@ class IPCServer:
         shutdown 동안에도 'active runtime'을 정확히 판정할 수 있는 race window
         차단 의도가 유지된다.
         """
+        if IPCServerState.RUNNING not in IPC_SERVER_STATE_TRANSITIONS[self._state]:
+            return
         path = Path(self._socket_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
@@ -196,11 +228,12 @@ class IPCServer:
         'active runtime'으로 판정하도록, 소켓 파일은 ``unlink_socket()``이
         호출되기 전까지 유지된다.
 
-        listener close 호출 **전**에 state를 ``SHUTTING_DOWN``으로
-        전환한다. 이래야 close 진행 중에 들어오는 dispatch도 mutating이라면
-        ``SERVICE_UNAVAILABLE``로 거부된다.
+        listener close 호출 **전**에 state를 ``SHUTTING_DOWN``으로 전환해(표가
+        허용할 때만) close 중의 mutating dispatch를 ``SERVICE_UNAVAILABLE``로
+        거부한다. listener close는 상태와 관계없이 한다.
         """
-        self._state = IPCServerState.SHUTTING_DOWN
+        if IPCServerState.SHUTTING_DOWN in IPC_SERVER_STATE_TRANSITIONS[self._state]:
+            self._state = IPCServerState.SHUTTING_DOWN
 
         if self._server:
             self._closing_server = self._server
@@ -237,6 +270,8 @@ class IPCServer:
         disconnect/DB close 같은 리소스 종료 직전에는 read-only도 closed
         resource를 밟을 수 있으므로 이 메서드로 전 명령 reject 상태에 들어간다.
         """
+        if IPCServerState.DRAINING not in IPC_SERVER_STATE_TRANSITIONS[self._state]:
+            return
         self._state = IPCServerState.DRAINING
         logger.info("IPCServer dispatch 거부 시작: %s", self._socket_path)
 
@@ -245,6 +280,8 @@ class IPCServer:
 
         메서드 종료 시 state를 ``STOPPED``으로 전환한다.
         """
+        if IPCServerState.STOPPED not in IPC_SERVER_STATE_TRANSITIONS[self._state]:
+            return
         path = Path(self._socket_path)
         if path.exists():
             path.unlink()
@@ -413,7 +450,7 @@ class IPCServer:
             return self._service_not_configured(request_id, missing)
 
         try:
-            args = _validated_args(spec, args)
+            args = _validated_args(spec, args, request_id)
             result = await spec.handler(self._service_registry, args, actor)
             audit_detail: dict[str, Any] | None = None
             if isinstance(result, dict):

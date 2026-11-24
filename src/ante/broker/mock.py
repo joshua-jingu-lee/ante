@@ -252,15 +252,16 @@ class MockBrokerAdapter(BrokerAdapter):
             order_type=order_type,
             status="pending",
         )
-        self._orders[order_id] = order
 
         if self._fill_mode == FillMode.DELAYED:
+            self._orders[order_id] = order
             self._polls_left[order_id] = self._delay_polls
             logger.info("Mock 주문 접수(지연): %s %s %s", order_id, side, symbol)
             return order_id
 
         fill_qty = self._calculate_fill_quantity(quantity)
         self._execute_fill(order, fill_qty, exec_price)
+        self._orders[order_id] = order
 
         logger.info(
             "Mock 주문 체결: %s %s %s qty=%.1f filled=%.1f @ %.0f",
@@ -400,9 +401,7 @@ class MockBrokerAdapter(BrokerAdapter):
                 continue
             del self._polls_left[order_id]
             order = self._orders[order_id]
-            self._execute_fill(
-                order, self._calculate_fill_quantity(order.quantity), order.price
-            )
+            self._execute_fill(order, order.quantity, order.price)
 
     def _calculate_fill_quantity(self, quantity: float) -> float:
         """체결 모드에 따른 체결 수량 계산."""
@@ -413,7 +412,9 @@ class MockBrokerAdapter(BrokerAdapter):
     def _execute_fill(
         self, order: MockOrder, fill_qty: float, exec_price: float
     ) -> None:
-        """체결 처리: 잔고 및 포지션 업데이트."""
+        """체결 처리: 매도 보유를 먼저 검증한 뒤 잔고 및 포지션 업데이트."""
+        if order.side != "buy":
+            self._check_sellable(order.symbol, fill_qty)
         order.filled_quantity = fill_qty
         filled_value = fill_qty * exec_price
         commission = self._commission.calculate(order.side, filled_value)
@@ -444,8 +445,8 @@ class MockBrokerAdapter(BrokerAdapter):
             ) / total_qty
             pos.quantity = total_qty
 
-    def _update_position_sell(self, symbol: str, quantity: float) -> None:
-        """매도 시 포지션 업데이트."""
+    def _check_sellable(self, symbol: str, quantity: float) -> MockPosition:
+        """매도할 보유가 충분한지 검증하고 그 포지션을 돌려준다."""
         pos = self._positions.get(symbol)
         if pos is None:
             msg = f"매도할 포지션 없음: {symbol}"
@@ -453,4 +454,8 @@ class MockBrokerAdapter(BrokerAdapter):
         if pos.quantity < quantity:
             msg = f"보유 수량 부족: {symbol} (보유: {pos.quantity}, 매도: {quantity})"
             raise BrokerError(msg)
-        pos.quantity -= quantity
+        return pos
+
+    def _update_position_sell(self, symbol: str, quantity: float) -> None:
+        """매도 시 포지션 업데이트."""
+        self._check_sellable(symbol, quantity).quantity -= quantity
