@@ -309,7 +309,7 @@ def _invoke_case(
 
 
 _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
-    ("list_empty_ipc", "text"): ("{'message': '등록된 봇이 없습니다.', 'bots': []}\n"),
+    ("list_empty_ipc", "text"): ("등록된 봇이 없습니다.\n"),
     ("list_empty_ipc", "json"): (
         "{\n"
         '  "status": "ok",\n'
@@ -320,9 +320,7 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("list_empty_direct", "text"): (
-        "{'message': '등록된 봇이 없습니다.', 'bots': []}\n"
-    ),
+    ("list_empty_direct", "text"): ("등록된 봇이 없습니다.\n"),
     ("list_empty_direct", "json"): (
         "{\n"
         '  "status": "ok",\n'
@@ -609,9 +607,7 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("positions_empty_ipc", "text"): (
-        "{'message': '보유 포지션 없음', 'positions': []}\n"
-    ),
+    ("positions_empty_ipc", "text"): ("보유 포지션 없음\n"),
     ("positions_empty_ipc", "json"): (
         "{\n"
         '  "status": "ok",\n'
@@ -622,9 +618,7 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("positions_empty_direct", "text"): (
-        "{'message': '보유 포지션 없음', 'positions': []}\n"
-    ),
+    ("positions_empty_direct", "text"): ("보유 포지션 없음\n"),
     ("positions_empty_direct", "json"): (
         "{\n"
         '  "status": "ok",\n'
