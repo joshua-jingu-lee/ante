@@ -75,7 +75,6 @@ ROWS: tuple[Row, ...] = (
         "bot create",
         ("--name", "n", "--strategy", "s", "--account", ACCOUNT),
         ("--name", "n", "--strategy", "s", "--account", ACCOUNT, "--id", "b1"),
-        ("--name", "n", "--strategy", "s", "--account", ACCOUNT, "--param", "k=v"),
     ),
     *_rows("bot remove", ("b1", "--yes")),
     *_rows("bot start", ("b1",)),

@@ -119,5 +119,5 @@ class TestBotCreateParamRemoved:
     def test_param_rejected_as_usage_error_in_text_mode(self, runner):
         result, mock_client = self._invoke_with_param(runner, [])
         assert result.exit_code == 2, result.output
-        assert "--param" in result.stderr
+        assert "No such option: --param" in result.output
         mock_client.send.assert_not_called()

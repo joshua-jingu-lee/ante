@@ -658,22 +658,6 @@ def test_bot_positions_invalid_account(mode: str) -> None:
 
 
 @pytest.mark.parametrize("mode", _MODES)
-def test_bot_create_invalid_param(mode: str) -> None:
-    send = AsyncMock()
-    result = _invoke(
-        ["--format", mode, "bot", "create", "--name", "n", "--strategy", "s"]
-        + ["--account", "acct-1", "--param", "novalue"],
-        patch(_IPC_SEND, new=send),
-    )
-    message = "잘못된 파라미터 형식: 'novalue' (key=value 형태로 지정)"
-    if mode == "json":
-        _assert_json(result, _envelope("BOT_INVALID_PARAM", message))
-    else:
-        _assert_text(result, [f"Error: BOT_INVALID_PARAM: {message}"])
-    send.assert_not_called()
-
-
-@pytest.mark.parametrize("mode", _MODES)
 @pytest.mark.parametrize(
     ("accounts", "message"),
     [
@@ -780,11 +764,6 @@ _BOT_IPC_ARGS = [
         + ["--id", "b1"],
         id="create-id",
     ),
-    pytest.param(
-        ["bot", "create", "--name", "n", "--strategy", "s", "--account", "acct-1"]
-        + ["--param", "k=v"],
-        id="create-param",
-    ),
     pytest.param(["bot", "remove", "b1", "--yes"], id="remove"),
     pytest.param(["bot", "signal-key", "b1"], id="signal-key"),
 ]
@@ -858,7 +837,6 @@ def test_exceptions_raised_by_approval_and_bot_map_to_their_specs() -> None:
     classes = [
         cli_errors.ApprovalInvalidStatusError,
         cli_errors.ApprovalInvalidTypeError,
-        cli_errors.BotInvalidParamError,
         cli_errors.BotMissingRequiredAccountError,
         cli_errors.CliBotNotFoundError,
         cli_errors.CliConfirmationRequiredError,
@@ -876,7 +854,6 @@ def test_exceptions_raised_by_approval_and_bot_map_to_their_specs() -> None:
     assert table == {
         "ApprovalInvalidStatusError": ("APPROVAL_INVALID_STATUS", "validation", 1),
         "ApprovalInvalidTypeError": ("APPROVAL_INVALID_TYPE", "validation", 1),
-        "BotInvalidParamError": ("BOT_INVALID_PARAM", "validation", 1),
         "BotMissingRequiredAccountError": (
             "BOT_MISSING_REQUIRED_ACCOUNT",
             "validation",

@@ -27,8 +27,6 @@ R-case 매핑:
          ``BotManager.create_bot`` 가 duplicate id 시 typed raise
   R6 #1784 ``bot info <missing>`` → ``code="BOT_NOT_FOUND"`` (subprocess)
   R7 #1784 ``bot signal-key <missing>`` → ``code="BOT_NOT_FOUND"`` (subprocess)
-  R8 #1784 ``bot create --param invalid`` → ``code="BOT_INVALID_PARAM"``
-         (subprocess, param 파싱은 IPC 이전 단계)
   R9 #1784 ``instrument import <csv_missing_cols>`` →
          ``code="INSTRUMENT_MISSING_COLUMNS"`` (subprocess)
   R10 #1784 ``instrument import <directory>`` →
@@ -346,39 +344,6 @@ class TestBotSignalKeyMissingCodeContract:
         payload = _parse_json_last(result.stdout)
         assert payload.get("status") == "error", payload
         assert payload.get("code") == "BOT_NOT_FOUND", payload
-
-
-class TestBotCreateInvalidParamCodeContract:
-    """R8 #1784: ``bot create --param invalid`` → exit 1, code=BOT_INVALID_PARAM.
-
-    param 파싱은 IPC 이전 단계라 server 없이도 reproducer 가 된다.
-    """
-
-    def test_bot_create_invalid_param_emits_bot_invalid_param_code(
-        self, initialized_config: tuple[Path, str, str]
-    ) -> None:
-        config_dir, token, key = initialized_config
-        result = _run_cli(
-            config_dir,
-            [
-                "bot",
-                "create",
-                "--strategy",
-                "any-strategy",
-                "--name",
-                "sample-test",
-                "--param",
-                "not_key_value",  # = 미포함 → BadParameter
-            ],
-            token=token,
-            encryption_key=key,
-        )
-        assert result.returncode == 1, (
-            f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
-        )
-        payload = _parse_json_last(result.stdout)
-        assert payload.get("status") == "error", payload
-        assert payload.get("code") == "BOT_INVALID_PARAM", payload
 
 
 class TestInstrumentImportMissingColumnsCodeContract:
