@@ -93,6 +93,9 @@ executors = {
 
 | 유형 | 검증 내용 | 등급 | 검증 주체 |
 |------|----------|------|----------|
+| `strategy_adopt` | `params.strategy_id`의 전략이 있는가 | `fail` | StrategyRegistry |
+| `strategy_adopt` | `params.report_id`의 리포트가 있는가 | `fail` | ReportStore |
+| `strategy_retire` | `params.report_id`가 누락되었는가 | `fail` | ApprovalService(검증기) |
 | `strategy_retire` | 전략이 이미 ARCHIVED 상태인가 | `fail` | StrategyRegistry |
 | `bot_create` | `params.config`가 `BotConfig`로 변환 가능한가 | `fail` | BotManager |
 | `bot_create` | 전략이 adopted 상태인가 | `fail` | StrategyRegistry |
