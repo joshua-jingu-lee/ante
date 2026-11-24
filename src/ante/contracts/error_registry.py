@@ -16,6 +16,7 @@ from ante.account.errors import (
     AccountHasActiveBotsError,
     AccountImmutableFieldError,
     AccountNotFoundError,
+    AccountReconcileNotApplicableError,
     AccountStructuralChangeRequiresStoppedServerError,
     AccountSuspendedError,
     BrokerReconnectFailedError,
@@ -245,6 +246,12 @@ _ACCOUNT_DELETED_SPEC: Final[ErrorSpec] = ErrorSpec(
 _ACCOUNT_SUSPENDED_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="ACCOUNT_SUSPENDED",
     category="state_conflict",
+)
+
+_ACCOUNT_RECONCILE_NOT_APPLICABLE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_RECONCILE_NOT_APPLICABLE",
+    category="state_conflict",
+    description="가상 계좌(D-ACC-09 reconcile 면제)에 대한 수동 대사",
 )
 
 _ACCOUNT_IMMUTABLE_FIELD_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -1083,6 +1090,7 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     BrokerReconnectFailedError: _BROKER_RECONNECT_FAILED_SPEC,
     AccountStructuralChangeRequiresStoppedServerError: _ACCOUNT_STRUCTURAL_CHANGE_SPEC,
     AccountHasActiveBotsError: _ACCOUNT_HAS_ACTIVE_BOTS_SPEC,
+    AccountReconcileNotApplicableError: _ACCOUNT_RECONCILE_NOT_APPLICABLE_SPEC,
     PermissionDeniedError: _MEMBER_PERMISSION_DENIED_SPEC,
     MemberNotFoundError: _MEMBER_NOT_FOUND_SPEC,
     MemberStateConflictError: _MEMBER_STATE_CONFLICT_SPEC,

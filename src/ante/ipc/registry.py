@@ -1073,6 +1073,7 @@ async def _handle_broker_reconcile(
     account_id = request.account_id
     fix = request.fix
 
+    await svc.account.ensure_reconcile_applicable(account_id)
     broker = await svc.account.get_broker(account_id)
     broker_positions = await broker.get_account_positions()
 

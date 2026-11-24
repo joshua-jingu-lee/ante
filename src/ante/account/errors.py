@@ -159,4 +159,13 @@ class AccountHasActiveBotsError(AccountError):
         )
 
 
+class AccountReconcileNotApplicableError(AccountError):
+    """수동 대사를 할 수 없는 계좌(D-ACC-09 매트릭스의 reconcile 면제, 가상).
+
+    가상 계좌의 포지션은 내부 기록이 권위라 브로커와 비교하거나 덮어쓰지 않는다.
+    """
+
+    code: str = "ACCOUNT_RECONCILE_NOT_APPLICABLE"
+
+
 AccountDeletedException = AccountDeletedError
