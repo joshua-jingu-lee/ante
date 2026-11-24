@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -16,6 +15,7 @@ from ante.broker.base import BrokerAdapter
 from ante.broker.exceptions import BrokerError, OrderNotFoundError
 from ante.broker.models import CommissionInfo
 from ante.core import clock
+from ante.core.price import is_valid_price
 
 logger = logging.getLogger(__name__)
 
@@ -33,18 +33,12 @@ def _reject_json_constant(name: str) -> NoReturn:
 
 
 def _valid_price(value: object, where: str, prices_file: str) -> float:
-    price = math.nan
-    if isinstance(value, int | float) and not isinstance(value, bool):
-        try:
-            price = float(value)
-        except OverflowError:
-            price = math.inf
-    if not math.isfinite(price) or price <= 0:
+    if not is_valid_price(value):
         raise BrokerError(
             f"Mock 가격 파일의 {where} 값은 0보다 큰 유한한 수여야 함: "
             f"{value!r} ({prices_file})"
         )
-    return price
+    return float(value)
 
 
 def _load_prices_file(config: dict[str, Any]) -> tuple[dict[str, float], float | None]:
@@ -258,15 +252,16 @@ class MockBrokerAdapter(BrokerAdapter):
             order_type=order_type,
             status="pending",
         )
-        self._orders[order_id] = order
 
         if self._fill_mode == FillMode.DELAYED:
+            self._orders[order_id] = order
             self._polls_left[order_id] = self._delay_polls
             logger.info("Mock 주문 접수(지연): %s %s %s", order_id, side, symbol)
             return order_id
 
         fill_qty = self._calculate_fill_quantity(quantity)
         self._execute_fill(order, fill_qty, exec_price)
+        self._orders[order_id] = order
 
         logger.info(
             "Mock 주문 체결: %s %s %s qty=%.1f filled=%.1f @ %.0f",
@@ -406,9 +401,7 @@ class MockBrokerAdapter(BrokerAdapter):
                 continue
             del self._polls_left[order_id]
             order = self._orders[order_id]
-            self._execute_fill(
-                order, self._calculate_fill_quantity(order.quantity), order.price
-            )
+            self._execute_fill(order, order.quantity, order.price)
 
     def _calculate_fill_quantity(self, quantity: float) -> float:
         """체결 모드에 따른 체결 수량 계산."""
@@ -419,7 +412,9 @@ class MockBrokerAdapter(BrokerAdapter):
     def _execute_fill(
         self, order: MockOrder, fill_qty: float, exec_price: float
     ) -> None:
-        """체결 처리: 잔고 및 포지션 업데이트."""
+        """체결 처리: 매도 보유를 먼저 검증한 뒤 잔고 및 포지션 업데이트."""
+        if order.side != "buy":
+            self._check_sellable(order.symbol, fill_qty)
         order.filled_quantity = fill_qty
         filled_value = fill_qty * exec_price
         commission = self._commission.calculate(order.side, filled_value)
@@ -450,8 +445,8 @@ class MockBrokerAdapter(BrokerAdapter):
             ) / total_qty
             pos.quantity = total_qty
 
-    def _update_position_sell(self, symbol: str, quantity: float) -> None:
-        """매도 시 포지션 업데이트."""
+    def _check_sellable(self, symbol: str, quantity: float) -> MockPosition:
+        """매도할 보유가 충분한지 검증하고 그 포지션을 돌려준다."""
         pos = self._positions.get(symbol)
         if pos is None:
             msg = f"매도할 포지션 없음: {symbol}"
@@ -459,4 +454,8 @@ class MockBrokerAdapter(BrokerAdapter):
         if pos.quantity < quantity:
             msg = f"보유 수량 부족: {symbol} (보유: {pos.quantity}, 매도: {quantity})"
             raise BrokerError(msg)
-        pos.quantity -= quantity
+        return pos
+
+    def _update_position_sell(self, symbol: str, quantity: float) -> None:
+        """매도 시 포지션 업데이트."""
+        self._check_sellable(symbol, quantity).quantity -= quantity

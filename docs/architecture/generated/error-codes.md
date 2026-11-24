@@ -60,7 +60,7 @@
 | `BOT_STATE_CONFLICT` | `state_conflict` | 1 | `ante.bot.exceptions.BotStateConflict` | — |
 | `BOT_STRATEGY_ALREADY_RUNNING` | `state_conflict` | 1 | `ante.bot.exceptions.BotStrategyAlreadyRunningError` | — |
 | `BROKER_API_ERROR` | `external` | 1 | `ante.broker.exceptions.APIError` | — |
-| `BROKER_AUTH_FAILED` | `auth` | 1 | `ante.broker.exceptions.AuthenticationError` | — |
+| `BROKER_AUTH_FAILED` | `external` | 1 | `ante.broker.exceptions.AuthenticationError` | — |
 | `BROKER_CIRCUIT_OPEN` | `service_unavailable` | 1 | `ante.broker.exceptions.CircuitOpenError` | — |
 | `BROKER_INVALID_TYPE` | `validation` | 1 | `ante.broker.registry.InvalidBrokerTypeError` | — |
 | `BROKER_MODIFY_ORGNO_UNAVAILABLE` | `state_conflict` | 1 | `ante.broker.exceptions.ModifyOrgnoUnavailableError` | — |
@@ -168,7 +168,7 @@
 | `UPDATE_MIGRATION_FAILED` | `internal` | 1 | `ante.contracts.cli_errors.UpdateMigrationFailedError` | — |
 | `UPDATE_ROLLBACK_FAILED` | `internal` | 1 | `ante.contracts.cli_errors.UpdateRollbackFailedError` | — |
 | `UPDATE_SERVER_RUNNING` | `state_conflict` | 1 | `ante.contracts.cli_errors.UpdateServerRunningError` | `ante update --force` 없이 서버가 실행 중 |
-| `VALIDATION_ERROR` | `validation` | 1 | `ante.account.errors.InvalidExchangeError`<br>`ante.contracts.cli_errors.FeedInjectValidationError`<br>`ante.contracts.request_errors.RequestValidationError`<br>`ante.core.account_id.InvalidAccountIdError`<br>`ante.core.time.InvalidIsoDateError` | — |
+| `VALIDATION_ERROR` | `validation` | 1 | `ante.account.errors.InvalidBrokerConfigError`<br>`ante.account.errors.InvalidExchangeError`<br>`ante.contracts.cli_errors.FeedInjectValidationError`<br>`ante.contracts.request_errors.RequestValidationError`<br>`ante.core.account_id.InvalidAccountIdError`<br>`ante.core.time.InvalidIsoDateError` | — |
 | `auth_failed` | `auth` | 1 | `ante.contracts.cli_errors.CliAuthFailedError` | `ANTE_MEMBER_TOKEN`의 토큰 판정 거부와 DB `connect()` 실패 |
 | `auth_required` | `auth` | 1 | `ante.contracts.cli_errors.CliAuthRequiredError` | `@require_auth` 미충족 (`ctx.obj["member"] is None`) |
 | `permission_denied` | `permission` | 1 | `ante.contracts.cli_errors.CliPermissionDeniedError` | 인증 OK이나 scope 부족 |

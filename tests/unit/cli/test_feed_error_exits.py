@@ -308,6 +308,27 @@ def test_start_invalid_schedule_time(mode: str) -> None:
 
 
 @_MODES
+def test_start_cross_midnight_blocked_hours(mode: str) -> None:
+    _init(_BASE_CONFIG + '[guard]\nblocked_hours = ["23:00-02:00"]\n')
+    loop = AsyncMock()
+    with (
+        patch("ante.feed.cli_scheduler.run_scheduler_loop", loop),
+        patch("ante.cli.commands.feed._build_orchestrator") as build,
+    ):
+        result = _invoke(mode, ["feed", "start", "--data-path", _DATA], _no_nice())
+    _check(
+        mode,
+        result,
+        "CLI_INVALID_SCHEDULE_TIME",
+        "스케줄 시간 설정이 올바르지 않습니다: 잘못된 blocked_hours 항목: "
+        "'23:00-02:00' (시작이 끝보다 늦은 구간은 받지 않습니다 — 자정을 넘으면 "
+        "두 구간으로 나눠 적으세요, 예: 23:00-23:59, 00:00-02:00)",
+    )
+    loop.assert_not_called()
+    build.assert_not_called()
+
+
+@_MODES
 def test_start_unrelated_value_error_is_not_schedule_error(mode: str) -> None:
     _init()
     result = _invoke(
