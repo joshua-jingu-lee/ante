@@ -201,12 +201,17 @@ _APPROVAL_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "}\n"
     ),
     ("info", "text"): (
-        "{'id': 'abcd1234-aaaa-bbbb-cccc-1234567890ab', 'type': 'bot_create', 'stat"
-        "us': 'pending', 'requester': 'test-master', 'title': 'Test 결재', 'body': "
-        "'본문', 'params': {'bot_id': 'bot-1'}, 'reviews': [], 'history': [{'action"
-        "': 'created', 'actor': 'test-master'}], 'reference_id': '', 'expires_at': "
-        "'', 'created_at': '2026-01-01T00:00:00', 'resolved_at': '', 'resolved_by':"
-        " '', 'reject_reason': ''}\n"
+        "  id             : abcd1234-aaaa-bbbb-cccc-1234567890ab\n"
+        "  type           : bot_create\n"
+        "  status         : pending\n"
+        "  requester      : test-master\n"
+        "  title          : Test 결재\n"
+        "  body           : 본문\n"
+        "  params         :\n"
+        "    bot_id = bot-1\n"
+        "  history        :\n"
+        "    - action=created, actor=test-master\n"
+        "  created_at     : 2026-01-01T00:00:00\n"
     ),
     ("info", "json"): (
         "{\n"

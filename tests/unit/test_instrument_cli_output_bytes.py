@@ -200,7 +200,7 @@ def _invoke_case(
 
 
 _INSTRUMENT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
-    ("list_empty", "text"): ("{'instruments': [], 'count': 0}\n"),
+    ("list_empty", "text"): ("종목이 없습니다.\n"),
     ("list_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'
@@ -273,7 +273,7 @@ _INSTRUMENT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("search_empty", "text"): ("{'results': [], 'count': 0}\n"),
+    ("search_empty", "text"): ("검색 결과가 없습니다.\n"),
     ("search_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'

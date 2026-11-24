@@ -106,6 +106,29 @@ def table_lines(rows: list[dict[str, Any]], columns: list[str]) -> list[str]:
     return lines
 
 
+def _detail_item(item: object) -> str:
+    if isinstance(item, dict):
+        return ", ".join(f"{k}={v}" for k, v in item.items())
+    return str(item)
+
+
+def detail_lines(mapping: dict[str, Any], width: int = 15) -> list[str]:
+    """dict를 키·값 줄로 펼친다. 빈 값(None·""·빈 컨테이너)은 줄을 내지 않는다."""
+    lines: list[str] = []
+    for key, value in mapping.items():
+        if value is None or (isinstance(value, str | dict | list) and not value):
+            continue
+        if isinstance(value, dict):
+            lines.append(f"  {key:{width}s}:")
+            lines.extend(f"    {k} = {v}" for k, v in value.items())
+        elif isinstance(value, list):
+            lines.append(f"  {key:{width}s}:")
+            lines.extend(f"    - {_detail_item(item)}" for item in value)
+        else:
+            lines.append(f"  {key:{width}s}: {value}")
+    return lines
+
+
 def format_option(fn: Callable[..., Any]) -> Callable[..., Any]:
     """서브커맨드용 --format 옵션 데코레이터.
 
