@@ -673,6 +673,54 @@ async def test_a_valid_iso_date_next_to_a_rejected_one_reaches_the_broker(
 
 
 @pytest.mark.asyncio
+async def test_an_inverted_date_range_is_rejected_before_the_broker() -> None:
+    harness = _Harness()
+    response = await harness.send(
+        "broker.order_history",
+        {"account_id": ACCOUNT, "from_date": "2026-02-01", "to_date": "2026-01-01"},
+    )
+    assert response == _error(
+        "INVALID_DATE_RANGE",
+        "조회 시작일(2026-02-01)이(가) 조회 종료일(2026-01-01) 이후입니다.",
+    )
+    harness.account.get_broker.assert_not_awaited()
+    harness.broker.get_order_history.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("args", "passed"),
+    [
+        pytest.param(
+            {"from_date": "2026-01-01", "to_date": "2026-01-01"},
+            [("str", "20260101"), ("str", "20260101")],
+            id="same-day",
+        ),
+        pytest.param(
+            {"from_date": "2026-02-01"},
+            [("str", "20260201"), ("NoneType", None)],
+            id="from-only",
+        ),
+        pytest.param(
+            {"to_date": "2026-01-01"},
+            [("NoneType", None), ("str", "20260101")],
+            id="to-only",
+        ),
+    ],
+)
+async def test_a_range_that_is_not_inverted_reaches_the_broker(
+    args: dict[str, str], passed: list[tuple[str, Any]]
+) -> None:
+    harness = _Harness()
+    response = await harness.send(
+        "broker.order_history", {"account_id": ACCOUNT, **args}
+    )
+    assert response == _ok({"orders": ORDERS})
+    call = harness.broker.get_order_history.await_args
+    assert _typed(call.args) == passed
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("command", "args", "loc", "kind"),
     [
