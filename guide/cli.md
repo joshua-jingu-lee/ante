@@ -2,7 +2,7 @@
 
 Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
 
-> 마지막 갱신: 2026-11-23
+> 마지막 갱신: 2026-11-24
 
 > 이 문서는 `scripts/generate_cli_reference.py`로 자동 생성됩니다. 명령어 상세를 직접 편집하지 말고 Click 데코레이터나 생성 스크립트를 수정한 뒤 재생성하세요.
 
@@ -893,7 +893,6 @@ ante bot create --name <NAME> --strategy <STRATEGY> [OPTIONS]
 | `--account` | - | TEXT | — | 계좌 ID (미지정 시 단일 active 계좌 자동 선택, 0개/2개 이상 시 에러) |
 | `--interval` | - | INT (10~3600) | 60 | 실행 주기 (초, 10-3600) |
 | `--id` | - | TEXT |  | 봇 ID (미지정 시 자동 생성) |
-| `--param` | - | TEXT | — | 전략 파라미터 오버라이드 (key=value, 복수 지정 가능) |
 
 
 ### ante bot remove
