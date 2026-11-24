@@ -112,7 +112,7 @@ async def _pump_in(writer: asyncio.StreamWriter) -> None:
     stdin_protocol = asyncio.StreamReaderProtocol(reader)
     try:
         transport, _ = await loop.connect_read_pipe(lambda: stdin_protocol, stdin)
-    except (ValueError, OSError):
+    except (AttributeError, ValueError, OSError):
         await asyncio.Event().wait()
         return
 
