@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from ante.core import clock
-from ante.notification.telegram_receiver import TelegramCommandReceiver
+from ante.notification.telegram_receiver import (
+    _UPDATE_FAILURE_REPLY,
+    TelegramCommandReceiver,
+)
 from tests.conftest import DEFAULT_MANUAL_CLOCK_AT, ManualClock
 
 # ── Fixtures ──────────────────────────────────────
@@ -835,6 +839,297 @@ class TestPollingLoop:
         }
         await receiver._handle_update(update)
         receiver._reply.assert_not_called()
+
+
+# ── US-1: 묶음 안의 업데이트 단위 격리 (#3012) ──────
+
+
+_FAILURE_TEXT = "처리 중 오류가 발생했습니다"
+_SECRET = "SECRET-CAUSE-3012"
+
+
+class _FakeResponse:
+    def __init__(self, data: dict | None = None) -> None:
+        self.status = 200
+        self._data = data
+
+    async def json(self) -> dict | None:
+        return self._data
+
+    async def __aenter__(self) -> _FakeResponse:
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
+class _FakeTelegramSession:
+    """첫 getUpdates에 묶음을, 두 번째에 빈 결과를 주고 루프를 멈추는 가짜 세션."""
+
+    def __init__(self, receiver: TelegramCommandReceiver, batch: list) -> None:
+        self._receiver = receiver
+        self._batch = batch
+        self.get_params: list[dict] = []
+        self.posts: list[tuple[str, dict]] = []
+
+    async def __aenter__(self) -> _FakeTelegramSession:
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+    def get(self, url: str, params: dict | None = None, timeout: object = None):
+        self.get_params.append(dict(params or {}))
+        if len(self.get_params) == 1:
+            return _FakeResponse({"ok": True, "result": self._batch})
+        self._receiver._running = False
+        return _FakeResponse({"ok": True, "result": []})
+
+    def post(self, url: str, json: dict | None = None):
+        self.posts.append((url.rsplit("/", 1)[-1], dict(json or {})))
+        return _FakeResponse({"ok": True})
+
+    def sent(self, method: str = "sendMessage") -> list[dict]:
+        return [payload for name, payload in self.posts if name == method]
+
+
+def _msg(update_id: int, user_id: int, chat_id: int, text: str) -> dict:
+    return {
+        "update_id": update_id,
+        "message": {"text": text, "from": {"id": user_id}, "chat": {"id": chat_id}},
+    }
+
+
+class TestPollingBatchIsolation:
+    """한 업데이트의 예외가 같은 묶음의 뒤 업데이트를 버리지 않는다 (#3012)."""
+
+    @pytest.fixture
+    def poll_receiver(self, bot_manager, treasury_manager, account_service):
+        from ante.notification.telegram import TelegramAdapter
+
+        return TelegramCommandReceiver(
+            adapter=TelegramAdapter(bot_token="TEST", chat_id="0"),
+            allowed_user_ids=[12345, 67890],
+            polling_interval=0,
+            confirm_timeout=30.0,
+            bot_manager=bot_manager,
+            treasury_manager=treasury_manager,
+            account_service=account_service,
+        )
+
+    async def _run(self, receiver: TelegramCommandReceiver, batch: list):
+        session = _FakeTelegramSession(receiver, batch)
+        receiver._running = True
+        with patch("aiohttp.ClientSession", return_value=session):
+            await asyncio.wait_for(receiver._poll_loop(), timeout=5)
+        return session
+
+    async def test_halt_after_failing_command_gets_prompt(
+        self, poll_receiver, bot_manager
+    ):
+        """재현 1: [예외를 내는 /bots, /halt] → /halt의 확인 프롬프트가 간다."""
+        bot_manager.list_bots.side_effect = RuntimeError(_SECRET)
+        session = await self._run(
+            poll_receiver, [_msg(1, 12345, 100, "/bots"), _msg(2, 12345, 100, "/halt")]
+        )
+
+        sent = session.sent()
+        assert [p["chat_id"] for p in sent] == [100, 100]
+        assert sent[0]["text"] == _UPDATE_FAILURE_REPLY
+        assert "/confirm" in sent[1]["text"]
+        assert poll_receiver._pending_confirm[12345][0] == "halt"
+        assert all(_SECRET not in p["text"] for p in sent)
+        assert bot_manager.list_bots.call_count == 1
+
+    async def test_other_users_confirm_after_failing_confirm_runs_halt(
+        self, poll_receiver, bot_manager, account_service
+    ):
+        """재현 2: 예외를 내는 /confirm 뒤 다른 사용자의 /confirm이 halt를 실행한다."""
+        bot_manager.stop_bot.side_effect = RuntimeError(_SECRET)
+        now = clock.monotonic()
+        poll_receiver._pending_confirm[12345] = ("stop", ["bot-1"], now)
+        poll_receiver._pending_confirm[67890] = ("halt", [], now)
+
+        session = await self._run(
+            poll_receiver,
+            [_msg(1, 12345, 100, "/confirm"), _msg(2, 67890, 200, "/confirm")],
+        )
+
+        assert bot_manager.stop_bot.call_count == 1
+        account_service.suspend_all.assert_awaited_once()
+        sent = session.sent()
+        assert [p["chat_id"] for p in sent] == [100, 200]
+        assert _FAILURE_TEXT in sent[0]["text"]
+        assert "전체 거래가 중지되었습니다" in sent[1]["text"]
+        assert all(_SECRET not in p["text"] for p in sent)
+        assert poll_receiver._pending_confirm == {}
+
+    async def test_control_batch_replies_both(self, poll_receiver):
+        """대조군: [/help, /halt] → 두 답 모두 정상."""
+        session = await self._run(
+            poll_receiver, [_msg(1, 12345, 100, "/help"), _msg(2, 12345, 100, "/halt")]
+        )
+
+        sent = session.sent()
+        assert len(sent) == 2
+        assert "사용 가능한 명령어" in sent[0]["text"]
+        assert "/confirm" in sent[1]["text"]
+        assert session.sent("answerCallbackQuery") == []
+
+    async def test_offset_advances_once_and_nothing_reprocessed(
+        self, poll_receiver, bot_manager
+    ):
+        """offset은 묶음 끝 + 1로 오르고 어떤 업데이트도 두 번 처리되지 않는다."""
+        bot_manager.list_bots.side_effect = RuntimeError(_SECRET)
+        handled: list[int] = []
+        original = poll_receiver._handle_update
+
+        async def _spy(update):
+            handled.append(update["update_id"])
+            await original(update)
+
+        poll_receiver._handle_update = _spy
+        session = await self._run(
+            poll_receiver,
+            [_msg(7, 12345, 100, "/bots"), _msg(8, 12345, 100, "/help")],
+        )
+
+        assert [p["offset"] for p in session.get_params] == [0, 9]
+        assert handled == [7, 8]
+        assert len(session.sent()) == 2
+
+    async def test_failed_confirm_is_not_rerun_by_next_confirm(
+        self, poll_receiver, bot_manager
+    ):
+        """예외로 끝난 /confirm 뒤 같은 사용자의 /confirm은 대기 항목이 없다."""
+        bot_manager.stop_bot.side_effect = RuntimeError(_SECRET)
+        poll_receiver._pending_confirm[12345] = ("stop", ["bot-1"], clock.monotonic())
+
+        session = await self._run(
+            poll_receiver,
+            [_msg(1, 12345, 100, "/confirm"), _msg(2, 12345, 100, "/confirm")],
+        )
+
+        assert bot_manager.stop_bot.call_count == 1
+        sent = session.sent()
+        assert len(sent) == 2
+        assert _FAILURE_TEXT in sent[0]["text"]
+        assert sent[1]["text"] == "확인 대기 중인 명령이 없습니다."
+
+    async def test_failure_reply_error_does_not_block_next_update(
+        self, poll_receiver, bot_manager
+    ):
+        """실패 답의 전송이 예외를 내도 다음 업데이트는 처리된다."""
+        bot_manager.list_bots.side_effect = RuntimeError(_SECRET)
+        original_reply = poll_receiver._reply
+
+        async def _reply(chat_id, text):
+            if _FAILURE_TEXT in text:
+                raise RuntimeError("reply failed")
+            await original_reply(chat_id, text)
+
+        poll_receiver._reply = _reply
+        session = await self._run(
+            poll_receiver, [_msg(1, 12345, 100, "/bots"), _msg(2, 12345, 100, "/halt")]
+        )
+
+        sent = session.sent()
+        assert len(sent) == 1
+        assert "/confirm" in sent[0]["text"]
+
+    async def test_non_dict_update_does_not_drop_rest(self, poll_receiver):
+        """dict가 아닌 업데이트가 끼어도 뒤 업데이트는 처리되고 그것엔 답이 없다."""
+        session = await self._run(poll_receiver, [42, _msg(2, 12345, 100, "/help")])
+
+        sent = session.sent()
+        assert len(sent) == 1
+        assert "사용 가능한 명령어" in sent[0]["text"]
+        assert session.sent("answerCallbackQuery") == []
+
+    async def test_broken_callback_answers_with_failure(self, poll_receiver):
+        """콜백 업데이트의 예외에는 콜백 응답이 실패 문구로 간다."""
+        broken = {
+            "update_id": 1,
+            "callback_query": {
+                "id": "cb9",
+                "from": {"id": 12345},
+                "message": "broken",
+                "data": "approve:x",
+            },
+        }
+        session = await self._run(poll_receiver, [broken, _msg(2, 12345, 100, "/help")])
+
+        answers = session.sent("answerCallbackQuery")
+        assert len(answers) == 1
+        assert answers[0]["callback_query_id"] == "cb9"
+        assert _FAILURE_TEXT in answers[0]["text"]
+        sent = session.sent()
+        assert len(sent) == 1
+        assert "사용 가능한 명령어" in sent[0]["text"]
+
+    async def test_unauthorized_failing_updates_get_no_reply(self, poll_receiver):
+        """미인가 사용자의 예외로 끝난 업데이트에는 답이 없다."""
+        broken_callback = {
+            "update_id": 1,
+            "callback_query": {
+                "id": "cb9",
+                "from": {"id": 99999},
+                "message": "broken",
+                "data": "approve:x",
+            },
+        }
+        broken_message = {
+            "update_id": 2,
+            "message": {"text": "/bots", "from": {"id": 99999}, "chat": "broken"},
+        }
+        session = await self._run(
+            poll_receiver,
+            [broken_callback, broken_message, _msg(3, 12345, 100, "/help")],
+        )
+
+        assert session.sent("answerCallbackQuery") == []
+        sent = session.sent()
+        assert len(sent) == 1
+        assert sent[0]["chat_id"] == 100
+
+    async def test_cancelled_error_is_not_isolated(self, poll_receiver):
+        """업데이트 처리 중 작업 취소는 가둬지지 않고 루프 밖으로 나간다."""
+        poll_receiver._handle_update = AsyncMock(side_effect=asyncio.CancelledError)
+        session = _FakeTelegramSession(
+            poll_receiver,
+            [_msg(1, 12345, 100, "/help"), _msg(2, 12345, 100, "/help")],
+        )
+        poll_receiver._running = True
+        with patch("aiohttp.ClientSession", return_value=session):
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(poll_receiver._poll_loop(), timeout=5)
+
+        assert poll_receiver._handle_update.await_count == 1
+        assert session.sent() == []
+
+    async def test_stop_is_not_blocked_while_update_in_flight(self, poll_receiver):
+        """업데이트 처리 중 stop()은 남은 업데이트로 넘어가지 않고 끝난다."""
+        entered = asyncio.Event()
+        calls: list[int] = []
+
+        async def _blocking(update):
+            calls.append(update["update_id"])
+            entered.set()
+            await asyncio.Event().wait()
+
+        poll_receiver._handle_update = _blocking
+        session = _FakeTelegramSession(
+            poll_receiver,
+            [_msg(1, 12345, 100, "/help"), _msg(2, 12345, 100, "/help")],
+        )
+        with patch("aiohttp.ClientSession", return_value=session):
+            poll_receiver.start()
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            await asyncio.wait_for(poll_receiver.stop(), timeout=5)
+
+        assert poll_receiver._task is None
+        assert calls == [1]
+        assert session.sent() == []
 
 
 # ── 통합 흐름 ─────────────────────────────────────

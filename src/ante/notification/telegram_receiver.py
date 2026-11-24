@@ -25,6 +25,16 @@ logger = logging.getLogger(__name__)
 
 _DANGEROUS_COMMANDS = {"halt", "clear_halt", "stop"}
 
+_UPDATE_FAILURE_REPLY = (
+    "⚠️ 처리 중 오류가 발생했습니다. "
+    "명령이 일부 실행되었을 수 있으니 /status·/bots로 상태를 확인해 주세요."
+)
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    """dict가 아니면 빈 dict로 바꾼다."""
+    return value if isinstance(value, dict) else {}
+
 
 class TelegramCommandReceiver:
     """텔레그램 getUpdates 폴링으로 명령을 수신하고 실행한다."""
@@ -87,7 +97,16 @@ class TelegramCommandReceiver:
             try:
                 updates = await self._get_updates()
                 for update in updates:
-                    await self._handle_update(update)
+                    try:
+                        await self._handle_update(update)
+                    except Exception:
+                        logger.exception(
+                            "텔레그램 업데이트 처리 실패: update_id=%s",
+                            update.get("update_id")
+                            if isinstance(update, dict)
+                            else None,
+                        )
+                        await self._reply_update_failure(update)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -241,6 +260,29 @@ class TelegramCommandReceiver:
         await self._adapter.answer_callback_query(callback_id, result_msg)
         if chat_id:
             await self._reply(chat_id, result_msg)
+
+    async def _reply_update_failure(self, update: Any) -> None:
+        """예외로 끝난 업데이트의 허용 사용자에게 원인 없는 실패 답을 보낸다."""
+        try:
+            await self._send_update_failure(update)
+        except Exception:
+            logger.exception("텔레그램 실패 답 전송 실패")
+
+    async def _send_update_failure(self, update: Any) -> None:
+        """메시지면 그 chat에, 콜백이면 콜백 응답과 그 chat에 실패 문구를 보낸다."""
+        callback = _as_dict(update).get("callback_query")
+        if callback is None:
+            source = _as_dict(_as_dict(update).get("message"))
+        else:
+            source = _as_dict(callback)
+        if not self._is_authorized(_as_dict(source.get("from")).get("id", 0)):
+            return
+        if callback is not None:
+            await self._adapter.answer_callback_query(
+                source.get("id", ""), _UPDATE_FAILURE_REPLY
+            )
+            source = _as_dict(source.get("message"))
+        await self._reply(_as_dict(source.get("chat")).get("id"), _UPDATE_FAILURE_REPLY)
 
     def _is_authorized(self, user_id: int) -> bool:
         """화이트리스트 인증 확인."""
