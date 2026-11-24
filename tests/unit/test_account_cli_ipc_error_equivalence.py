@@ -315,7 +315,7 @@ class TestAccountAlreadySuspendedEquivalence:
     """``AccountAlreadySuspendedError`` 는 양쪽에서 ``ACCOUNT_ALREADY_SUSPENDED``.
 
     CLI direct path: ``account suspend`` 는 ``ipc_send`` 위임. ``ipc_send``
-    를 raise 하도록 patch 한 뒤 generic except → emit_cli_error 흐름이
+    를 raise 하도록 patch 한 뒤 예외가 전파되어 ``AuthenticatedGroup.main`` 이
     registry-first 로 typed code 를 surface 함을 확인한다.
 
     IPC path: 실제 ``account.suspend`` handler 를 ``IPCServer`` 위에서 실행해
@@ -495,8 +495,8 @@ class TestBrokerReconnectFailedEquivalence:
 
     def test_cli_direct_broker_reconnect_failed(self, runner: CliRunner) -> None:
         exc = BrokerReconnectFailedError("재연결 실패")
-        # set-credentials 표면 — service.update 가 raise → generic except →
-        # emit_cli_error 로 typed code surface.
+        # set-credentials 표면 — service.update 가 raise → 예외가 전파되어
+        # AuthenticatedGroup.main 이 typed code surface.
         svc = AsyncMock()
 
         # _resolve_credentials 가 도달하기 전 svc.get 으로 broker_type 을 알아야
@@ -577,8 +577,9 @@ class TestAccountDeleteSurfaceOverride:
     위해 typed except 로 ``ACCOUNT_ALREADY_DELETED`` 코드를 surface 한다
     (errors.py:96-100 NOTE / #1812 sweep).
 
-    emit_cli_error 정렬 후에도 typed except 가 generic 분기보다 먼저 매치
-    하므로 override 가 보존됨을 lock 한다.
+    에러 출구가 ``AuthenticatedGroup.main`` 으로 모인 뒤에도 typed except 가
+    ``AccountAlreadyDeletedError`` 로 바꿔 올리므로 override 가 보존됨을 lock
+    한다.
     """
 
     def test_account_delete_preserves_already_deleted_code(

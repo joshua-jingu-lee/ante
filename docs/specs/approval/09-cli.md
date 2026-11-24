@@ -24,13 +24,13 @@ ante approval request \
 ### `ante approval list`
 
 ```
-ante approval list [--status pending|approved|rejected|on_hold|expired] [--type budget_change] [--format json]
+ante approval list [--status pending|approved|rejected|cancelled|on_hold|expired|execution_failed] [--type budget_change] [--db-path <path>] [--format json]
 ```
 
 ### `ante approval info <id>`
 
 ```
-ante approval info <id> [--format json]
+ante approval info <id> [--db-path <path>] [--format json]
 ```
 
 ### `ante approval review <id>`
@@ -41,6 +41,7 @@ ante approval info <id> [--format json]
 ante approval review <id> \
   --result pass \
   --detail "리스크 허용 범위 내, 변동성 지표 안정적" \
+  [--db-path <path>] \
   [--format json]
 ```
 
