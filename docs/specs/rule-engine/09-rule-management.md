@@ -65,6 +65,14 @@ CLI `rule update`는 stored rules만 갱신한다. effective rules의 별도 노
 유지하고, 그 항목이 없으면 `true`다(데몬 없이 직접 실행할 때 동적 설정이 비어 있으면
 정적 TOML seed에 있는 같은 type 항목의 값을 쓴다).
 
+`rule update`의 params(CLI `--param`·`--params-json`, IPC `rule.update.params`)는 규칙
+항목의 `type`·`id`·`enabled`를 담을 수 없다 — 담으면 저장하지 않고 요청을 거부한다(규칙
+종류는 명령의 인자로, 켜고 끄기는 `enabled`로 지정한다). 이 세 key는 API 응답에서 params와
+분리되는 key와 같다.
+
+params의 `priority`는 규칙의 평가 순서([03-two-layer-evaluation.md](03-two-layer-evaluation.md))로
+항목에 저장되며, 정수(bool 제외)가 아니면 저장하지 않고 거부한다.
+
 ### Static TOML seed
 
 정적 TOML은 운영 중 룰 수정의 저장소가 아니다. 초기 계좌 seed나 복구용 기본값이 필요할
