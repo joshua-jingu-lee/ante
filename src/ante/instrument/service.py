@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from ante.core import clock
-from ante.core.database import OperationalError
+from ante.core.database import OperationalError, is_missing_table
 from ante.instrument.models import Instrument
 
 if TYPE_CHECKING:
@@ -55,14 +55,14 @@ class InstrumentService:
         ``instruments`` 테이블이 부재한 (부트스트랩 안 된) DB 는 정의상 종목
         마스터 부재와 동치이므로 빈 캐시로 graceful 정규화한다 — 이후
         ``get_name(symbol)`` 은 symbol fallback 을 반환한다. malformed/locked DB
-        같은 다른 ``OperationalError`` 까지 삼키지 않도록 ``"no such table"``
-        메시지로만 좁혀 그 외는 호출 표면으로 재전파한다 (``backtest history``
+        같은 다른 ``OperationalError`` 까지 삼키지 않도록 ``is_missing_table``
+        판별로만 좁혀 그 외는 호출 표면으로 재전파한다 (``backtest history``
         의 ``list_by_strategy`` 가드 동형).
         """
         try:
             await self._warm_cache()
         except OperationalError as e:
-            if "no such table" in str(e).lower():
+            if is_missing_table(e):
                 self._cache = {}
                 logger.info("instruments 테이블 부재 — 빈 캐시로 정규화 (read-only DB)")
                 return

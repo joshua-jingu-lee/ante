@@ -30,6 +30,11 @@ def _is_ro_fallback_error(exc: sqlite3.OperationalError) -> bool:
     return any(sig in message for sig in _RO_IMMUTABLE_FALLBACK_SIGNATURES)
 
 
+def is_missing_table(exc: BaseException) -> bool:
+    """예외 메시지가 SQLite의 「테이블 없음」 오류를 뜻하는지 판별한다."""
+    return "no such table" in str(exc).lower()
+
+
 class ReadOnlyDatabaseError(RuntimeError):
     """read-only ``Database`` 에서 write 연산을 시도했을 때 발생한다.
 

@@ -25,7 +25,7 @@ from ante.contracts.cli_errors import (
 from ante.contracts.error_registry import EXECUTION_ERROR_SPEC
 from ante.contracts.helpers import error_spec_for_exception
 from ante.core import clock
-from ante.core.database import OperationalError
+from ante.core.database import OperationalError, is_missing_table
 from ante.report.models import ReportStatus
 from ante.report.validation import ReportSubmitRequest
 
@@ -198,7 +198,7 @@ def report_list(
             try:
                 reports = await store.list_reports(status=report_status)
             except OperationalError as exc:
-                if "no such table" not in str(exc).lower():
+                if not is_missing_table(exc):
                     raise
                 logger.debug(
                     "reports 테이블 부재 — 빈 목록으로 graceful 처리", exc_info=True
@@ -352,7 +352,7 @@ def report_view(
             try:
                 r = await store.get(report_id)
             except OperationalError as exc:
-                if "no such table" not in str(exc).lower():
+                if not is_missing_table(exc):
                     raise
                 logger.debug(
                     "reports 테이블 부재 — 미발견(None)으로 graceful 처리",
