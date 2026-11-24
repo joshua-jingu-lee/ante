@@ -20,8 +20,10 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -533,6 +535,54 @@ class TestUnrecoveredBuyGuard:
         assert len(cap2.validated) == 0
         assert "preflight error" in cap2.rejected[0].reason
 
+    @pytest.mark.asyncio
+    async def test_future_submitted_at_allows_and_warns(
+        self,
+        eventbus: EventBus,
+        manual_clock: Any,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """미래 submitted_at(시계 역행)은 지금처럼 통과하고 경고를 한 번 남긴다."""
+        future = (manual_clock.now(UTC) + timedelta(seconds=300)).isoformat()
+        tracker = FakeOrderTracker(
+            {
+                (ACCOUNT, BOT, SYMBOL, "buy"): [
+                    FakeOrderRecord(
+                        order_id="o1",
+                        ordered_qty=1.0,
+                        recorded_filled_qty=0.0,
+                        status="open",
+                        submitted_at=future,
+                    )
+                ]
+            }
+        )
+        trade = FakeTradeService({ACCOUNT: []})
+        engine = _build_engine(eventbus, order_tracker=tracker, trade_service=trade)
+        engine.start()
+        cap = _capture(eventbus)
+
+        with caplog.at_level(logging.WARNING, logger=ENGINE_LOGGER):
+            await eventbus.publish(_buy_order())
+
+        assert len(tracker.calls) == 1
+        assert len(cap.rejected) == 0
+        assert len(cap.validated) == 1
+        warnings = [r for r in _engine_warnings(caplog) if future in r.getMessage()]
+        assert len(warnings) == 1
+
+
+ENGINE_LOGGER = "ante.rule.engine"
+
+
+def _engine_warnings(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """``ante.rule.engine``의 WARNING 레코드만 고른다."""
+    return [
+        r
+        for r in caplog.records
+        if r.name == ENGINE_LOGGER and r.levelno == logging.WARNING
+    ]
+
 
 class TestUnrecoveredBuyAgeHelper:
     """`_unrecovered_buy_age_seconds` 의 age 산정 불가 케이스 회귀."""
@@ -560,6 +610,43 @@ class TestUnrecoveredBuyAgeHelper:
         """미래 timestamp(음수 age)는 0.0 으로 클램프되어 threshold 를 넘지 않는다."""
         future = (datetime.now(UTC) + timedelta(seconds=300)).isoformat()
         assert RuleEngine._unrecovered_buy_age_seconds(future) == 0.0
+
+    def test_future_timestamp_logs_warning_and_clamps(
+        self, manual_clock: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """미래 timestamp는 0.0을 돌려주고 제출 시각을 담은 경고를 한 번 남긴다."""
+        future = (manual_clock.now(UTC) + timedelta(seconds=300)).isoformat()
+        with caplog.at_level(logging.WARNING, logger=ENGINE_LOGGER):
+            assert RuleEngine._unrecovered_buy_age_seconds(future) == 0.0
+        warnings = _engine_warnings(caplog)
+        assert len(warnings) == 1
+        assert future in warnings[0].getMessage()
+
+    @pytest.mark.parametrize(
+        "submitted_at",
+        [
+            "past",
+            "now",
+            None,
+            "",
+            "not-a-timestamp",
+            "2026-01-02T03:00:00",
+        ],
+    )
+    def test_past_or_unknown_timestamp_no_clock_warning(
+        self,
+        manual_clock: Any,
+        caplog: pytest.LogCaptureFixture,
+        submitted_at: str | None,
+    ) -> None:
+        """과거·지금 시각이나 산정 불가 값에는 시계 역행 경고를 남기지 않는다. #2936."""
+        if submitted_at == "past":
+            submitted_at = (manual_clock.now(UTC) - timedelta(seconds=100)).isoformat()
+        elif submitted_at == "now":
+            submitted_at = manual_clock.now(UTC).isoformat()
+        with caplog.at_level(logging.WARNING, logger=ENGINE_LOGGER):
+            RuleEngine._unrecovered_buy_age_seconds(submitted_at)
+        assert _engine_warnings(caplog) == []
 
 
 class TestRuleEngineManagerPropagatesGuardConfig:
