@@ -55,16 +55,16 @@
 | `pbr` | Float64 | PBR (null 허용) | O (계산) |
 | `eps` | Float64 | 주당순이익 (null 허용) | O (계산) |
 | `bps` | Float64 | 주당순자산 (null 허용) | O (계산) |
-| `roe` | Float64 | 자기자본이익률 | — |
-| `debt_to_equity` | Float64 | 부채비율 | — |
-| `revenue` | Int64 | 매출액 | — |
-| `net_income` | Int64 | 순이익 | — |
+| `roe` | Float64 | 자기자본이익률 | O (계산) |
+| `debt_to_equity` | Float64 | 부채비율 | O (계산) |
+| `revenue` | Int64 | 매출액 | O |
+| `net_income` | Int64 | 순이익 | O |
 | `div_yield` | Float64 | 배당수익률 | — |
 | `dps` | Float64 | 주당배당금 | — |
 | `source` | Utf8 | 데이터 소스 | O |
 
 > Phase 1에서 제공되지 않는 필드는 null 허용.
-> PER/PBR/EPS/BPS는 data.go.kr(시가총액, 상장주식수) + DART(순이익, 자본총계)로 **직접 계산**.
+> PER/PBR/EPS/BPS/ROE/부채비율은 data.go.kr(시가총액, 상장주식수) + DART(순이익, 자본총계, 부채총계)로 **직접 계산**해 일별 행에 기록한다. `net_income`은 DART 분기 행에 있고, 지표 계산에 결합한 분기 행의 값이 일별 행에도 그대로 기록된다. `revenue`는 DART 분기 행에만 기록된다. 결합 규칙과 null 조건은 [data-feed 05-data-sources.md](../data-feed/05-data-sources.md) §DART OpenAPI 「지표 계산 규칙」을 따른다.
 
 > canonical symbol/timeframe 계약 SSOT: [core.md `## Canonical Symbol/Timeframe Vocabulary`](../core/core.md#canonical-symboltimeframe-vocabulary).
 > 아래 `TIMEFRAMES: list[str]`의 OHLCV bar timeframe vocabulary(`1m, 5m, 15m, 1h, 1d`) 계약 본문은
