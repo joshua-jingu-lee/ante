@@ -162,6 +162,10 @@ _UNKNOWN_RECORDED: list[tuple[str, Outcome, int]] = [
     ("502_plain", _status(502, "Bad Gateway"), 502),
     ("503_rt_cd_0", _status(503, json.dumps({"rt_cd": "0"})), 503),
     ("500_unregistered", _status(500, _kis_body("ZZZZ9999")), 500),
+    ("200_rt_cd_absent", _status(200, json.dumps({})), 0),
+    ("200_rt_cd_absent_output", _status(200, json.dumps({"output": {}})), 0),
+    ("200_rt_cd_empty", _status(200, json.dumps({"rt_cd": ""})), 0),
+    ("200_rt_cd_none", _status(200, json.dumps({"rt_cd": None})), 0),
 ]
 
 _UNKNOWN_NOT_RECORDED: list[tuple[str, Outcome, int]] = [
@@ -175,6 +179,11 @@ _UNKNOWN_NOT_RECORDED: list[tuple[str, Outcome, int]] = [
         0,
     ),
     ("payload_error", _raise(lambda: aiohttp.ClientPayloadError("fake")), 0),
+    (
+        "200_rt_cd_absent_APBK0919",
+        _status(200, json.dumps({"msg_cd": "APBK0919"})),
+        0,
+    ),
 ]
 
 
@@ -246,6 +255,7 @@ _CLEAR_REJECTIONS: list[tuple[str, Outcome]] = [
     ("500_EGW00133", _status(500, _kis_body("EGW00133"))),
     ("200_APBK0600", _status(200, _kis_body("APBK0600"))),
     ("200_unregistered", _status(200, _kis_body("ZZZZ9999"))),
+    ("200_rt_cd_1_no_msg_cd", _status(200, json.dumps({"rt_cd": "1"}))),
 ]
 
 
@@ -355,6 +365,67 @@ class TestOtherTrsUnchanged:
 
         assert session.sends == 1
         assert getattr(exc_info.value, "error_code", "") != UNKNOWN
+
+
+_MISSING_RT_CD_BODIES: list[tuple[str, str]] = [
+    ("absent", json.dumps({})),
+    ("empty", json.dumps({"rt_cd": ""})),
+    ("none", json.dumps({"rt_cd": None})),
+]
+
+
+class TestOtherTrsMissingRtCdUnchanged:
+    @pytest.mark.parametrize(
+        ("tr_id", "max_retries"), [(CANCEL_TR, MAX_ORDER), (QUERY_TR, MAX_QUERY)]
+    )
+    @pytest.mark.parametrize(
+        ("case", "body"),
+        _MISSING_RT_CD_BODIES,
+        ids=[c[0] for c in _MISSING_RT_CD_BODIES],
+    )
+    async def test_missing_rt_cd_retries_with_same_error(
+        self, tr_id: str, max_retries: int, case: str, body: str
+    ) -> None:
+        adapter, session = _make([_status(200, body)])
+
+        with pytest.raises(APIError) as exc_info:
+            await _send(adapter, tr_id)
+
+        error = exc_info.value
+        assert session.sends == max_retries + 1
+        assert type(error) is APIError
+        assert error.error_code == ""
+        assert error.status_code == 0
+        assert error.retryable is True
+        assert str(error) == "KIS API Error []: 알 수 없는 에러 ()"
+
+
+class TestHandleResponseRtCdMissingMark:
+    @pytest.mark.parametrize(
+        "body",
+        [{"rt_cd": "1"}, {"rt_cd": "1", "msg_cd": "APBK0600"}],
+        ids=["rejection_no_msg_cd", "rejection_APBK0600"],
+    )
+    async def test_rejection_is_not_marked(self, body: dict[str, Any]) -> None:
+        adapter, _ = _make([_status(200, _SUCCESS)])
+
+        with pytest.raises(APIError) as exc_info:
+            await adapter._handle_response(_Resp(200, json.dumps(body)))
+
+        assert not hasattr(exc_info.value, kis_module._RT_CD_MISSING_ATTR)
+
+    @pytest.mark.parametrize(
+        ("case", "body"),
+        _MISSING_RT_CD_BODIES,
+        ids=[c[0] for c in _MISSING_RT_CD_BODIES],
+    )
+    async def test_missing_rt_cd_is_marked(self, case: str, body: str) -> None:
+        adapter, _ = _make([_status(200, _SUCCESS)])
+
+        with pytest.raises(APIError) as exc_info:
+            await adapter._handle_response(_Resp(200, body))
+
+        assert hasattr(exc_info.value, kis_module._RT_CD_MISSING_ATTR)
 
 
 class TestPublicPath:
