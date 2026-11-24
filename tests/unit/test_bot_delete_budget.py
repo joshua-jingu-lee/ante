@@ -232,7 +232,7 @@ class TestDeleteBotBudgetRelease:
         await manager.create_bot(config, SimpleStrategy, ctx)
         await treasury.allocate("bot1", 200_000)
 
-        await manager.delete_bot("bot1")
+        await manager.delete_bot("bot1", hard=True)
 
         # 동일 bot_id로 재생성
         ctx2 = StrategyContext(

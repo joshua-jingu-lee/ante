@@ -245,7 +245,7 @@ async def _validate_bot_create(
         return [ValidationResult("fail", str(e), "system:bot_manager")]
 
     bot_id = config.bot_id
-    if bot_id and s.bot_manager.get_bot(bot_id):
+    if bot_id and await s.bot_manager.is_bot_id_taken(bot_id):
         results.append(
             ValidationResult(
                 "fail",
