@@ -34,8 +34,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 BACKTEST_RESULT_SENTINEL = "__ANTE_BACKTEST_RESULT__"
+BACKTEST_FAILURE_SENTINEL = "__ANTE_BACKTEST_FAILURE__"
 
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _subprocess_failure_message(stdout: bytes, returncode: int | None) -> str:
+    """마지막 실패 sentinel로 문구를 만들고, 없거나 깨졌으면 종료 코드만 싣는다."""
+    fallback = f"Backtest subprocess failed (exit code {returncode})"
+    lines = [
+        line
+        for line in stdout.decode(errors="replace").splitlines()
+        if line.startswith(BACKTEST_FAILURE_SENTINEL)
+    ]
+    if not lines:
+        return fallback
+    try:
+        payload = json.loads(lines[-1][len(BACKTEST_FAILURE_SENTINEL) :])
+    except ValueError:
+        return fallback
+    if not isinstance(payload, dict):
+        return fallback
+    exc_type = payload.get("type")
+    exc_message = payload.get("message")
+    location = payload.get("location")
+    if not isinstance(exc_type, str) or not exc_type:
+        return fallback
+    if not isinstance(exc_message, str) or not isinstance(location, (str, type(None))):
+        return fallback
+    head = f"{exc_type}: {exc_message}" if exc_message else exc_type
+    tail = f" ({location})" if location else ""
+    return f"Backtest subprocess failed: {head}{tail}"
 
 
 class BacktestService:
@@ -162,6 +191,8 @@ class BacktestService:
         ante.backtest.runner`` 자식 프로세스를 띄워 stdin 으로 JSON config 를
         전달하고, stdout 의 ``BACKTEST_RESULT_SENTINEL`` 라인만 파싱한 dict 를
         반환한다. returncode≠0 또는 sentinel 라인 부재는 ``BacktestError`` 다.
+        returncode≠0의 message에는 stderr 대신 실패 sentinel의 종류·메시지·
+        전략 파일 위치만 싣고, 그것이 없으면 종료 코드만 싣는다.
         """
         self._validate_config(config)
 
@@ -173,13 +204,14 @@ class BacktestService:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate(
+        stdout, _stderr = await proc.communicate(
             input=json.dumps(config).encode(),
         )
 
         if proc.returncode != 0:
-            msg = f"Backtest subprocess failed: {stderr.decode()}"
-            raise BacktestError(msg)
+            raise BacktestError(
+                _subprocess_failure_message(stdout, proc.returncode),
+            )
 
         stdout_text = stdout.decode()
         for line in stdout_text.splitlines():

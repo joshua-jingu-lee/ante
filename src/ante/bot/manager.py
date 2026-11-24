@@ -354,6 +354,21 @@ class BotManager:
         self._eventbus.subscribe(BotStartedEvent, self._on_bot_started)
         self._eventbus.subscribe(BotStoppedEvent, self._on_bot_stopped)
 
+    async def is_bot_id_taken(self, bot_id: str) -> bool:
+        """봇 생성이 이 id 를 거부하는가.
+
+        메모리에 있거나 ``deleted`` 행으로 남은 id 면 참이다.
+        """
+        return bot_id in self._bots or await self._is_deleted_bot_id(bot_id)
+
+    async def _is_deleted_bot_id(self, bot_id: str) -> bool:
+        """``bots`` 에 이 id 의 ``deleted`` 행이 있는가."""
+        row = await self._db.fetch_one(
+            "SELECT 1 FROM bots WHERE bot_id = ? AND status = 'deleted'",
+            (bot_id,),
+        )
+        return row is not None
+
     async def create_bot(
         self,
         config: BotConfig,
@@ -379,6 +394,10 @@ class BotManager:
 
         if config.bot_id in self._bots:
             raise BotAlreadyExistsError(f"Bot already exists: {config.bot_id}")
+        if await self._is_deleted_bot_id(config.bot_id):
+            raise BotAlreadyExistsError(
+                f"Bot already exists (deleted): {config.bot_id}"
+            )
 
         active_statuses = {BotStatus.RUNNING, BotStatus.STOPPING}
         for existing_bot in self._bots.values():
@@ -495,7 +514,7 @@ class BotManager:
                 raise BotImmutableFieldError(
                     "account_id 는 생성 후 변경할 수 없습니다 (treasury 예산·"
                     "broker credential·포지션이 account-bound). 변경하려면 봇을 "
-                    f"삭제 후 재생성하세요: {bot_id} "
+                    f"삭제한 뒤 새 bot_id로 다시 만드세요: {bot_id} "
                     f"(현재: {bot.config.account_id}, 요청: {new_account_id})"
                 )
 

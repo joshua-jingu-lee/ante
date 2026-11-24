@@ -1059,6 +1059,7 @@ def _broker_reconcile_envelope(
     *,
     account_id: str,
     fix: bool,
+    fix_applied: bool,
     bot_count: int,
     adjustments: list[dict[str, Any]],
     mismatches: list[dict[str, Any]],
@@ -1073,7 +1074,7 @@ def _broker_reconcile_envelope(
         "total_symbols": len(mismatches),
         "discrepancies": mismatches,
         "match": len(mismatches) == 0,
-        "fix_applied": fix,
+        "fix_applied": fix_applied,
         "corrections": len(adjustments),
     }
 
@@ -1085,6 +1086,7 @@ async def _handle_broker_reconcile(
     account_id = request.account_id
     fix = request.fix
 
+    await svc.account.ensure_reconcile_applicable(account_id)
     broker = await svc.account.get_broker(account_id)
     broker_positions = await broker.get_account_positions()
 
@@ -1115,6 +1117,7 @@ async def _handle_broker_reconcile(
         return _broker_reconcile_envelope(
             account_id=account_id,
             fix=fix,
+            fix_applied=fix,
             bot_count=bot_count,
             adjustments=adjustments,
             mismatches=mismatches,
@@ -1126,6 +1129,7 @@ async def _handle_broker_reconcile(
     return _broker_reconcile_envelope(
         account_id=account_id,
         fix=fix,
+        fix_applied=False,
         bot_count=bot_count,
         adjustments=[],
         mismatches=mismatches,

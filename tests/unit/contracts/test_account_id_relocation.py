@@ -26,6 +26,7 @@ ACCOUNT_ERROR_SUBCLASSES = [
     "AccountHasActiveBotsError",
     "AccountImmutableFieldError",
     "AccountNotFoundError",
+    "AccountReconcileNotApplicableError",
     "AccountStructuralChangeRequiresStoppedServerError",
     "AccountSuspendedError",
     "BrokerReconnectFailedError",
