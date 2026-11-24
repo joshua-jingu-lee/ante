@@ -314,4 +314,6 @@ class TestSystemOutputBytes:
         self, branch: str, method: str, params: dict[str, Any]
     ) -> None:
         _, ipc_send, _ = _invoke_case(branch, "json")
-        ipc_send.assert_awaited_once_with(method, params, actor="test-master")
+        ipc_send.assert_awaited_once_with(
+            method, params, actor="test-master", required=("accounts_changed",)
+        )
