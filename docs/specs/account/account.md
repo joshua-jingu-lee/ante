@@ -18,7 +18,6 @@
 | [04-account-service.md](04-account-service.md) | AccountService 인터페이스 |
 | [05-eventbus-integration.md](05-eventbus-integration.md) | EventBus 연동 |
 | [06-database-schema.md](06-database-schema.md) | 데이터베이스 스키마 |
-| [07-account-layout-v1.md](07-account-layout-v1.md) | 1.0 시점 계좌 구성 |
 | [08-config-migration.md](08-config-migration.md) | config/defaults.py 마이그레이션 |
 | [09-cli.md](09-cli.md) | CLI 인터페이스 |
 | [11-scope-out.md](11-scope-out.md) | Scope Out (1.0에서 제외) |
@@ -155,7 +154,7 @@
 
 ## 1.0 시점 계좌 구성
 
-상세 내용: [07-account-layout-v1.md](07-account-layout-v1.md)
+상세 내용: [01-overview.md — 1.0 시점 계좌 구성](01-overview.md#10-시점-계좌-구성)
 
 ## config/defaults.py 마이그레이션
 
