@@ -66,6 +66,11 @@ def test_boot_and_stop(daemon: DaemonHarness) -> None:
     assert not daemon.socket_path.exists()
     assert not daemon.pid_path.exists()
 
+    unexpected = [
+        a for a in daemon.net_attempts() if UPDATE_CHECKER_MODULE not in a["modules"]
+    ]
+    assert unexpected == []
+
 
 def _wait_for_fills(daemon: DaemonHarness, count: int) -> dict[str, Any]:
     deadline = time.monotonic() + FILL_DEADLINE_SECONDS

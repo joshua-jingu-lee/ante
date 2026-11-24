@@ -181,6 +181,7 @@ strategy.on_stop()
 | `slippage` | `float` | 슬리피지 금액 |
 | `reason` | `str` | Signal의 reason (기본값: `""`) |
 | `exchange` | `str` | 거래소 (기본값: `"KRX"`) |
+| `order_type` | `str` | 체결된 주문의 유형 `"market"` / `"limit"` — 스톱은 라이브의 스톱 변환과 같은 규칙(`stop` → `"market"`, `stop_limit` → `"limit"`) (기본값: `"market"`) |
 
 ### 성과 지표 계산 (metrics.py)
 
@@ -196,7 +197,7 @@ strategy.on_stop()
 | 연환산 수익률 | `annual_return` | `((1+r)^(252/days) - 1) × 100` |
 | Sharpe Ratio | `sharpe_ratio` | 일간 수익률 기준, `√252` 연환산, 무위험 이자율 0 |
 | 최대 낙폭 (MDD) | `max_drawdown` | peak-to-trough 비율 (%) |
-| MDD 지속 기간 | `max_drawdown_duration` | drawdown 지속 일수 |
+| MDD 지속 기간 | `max_drawdown_duration` | 일별 곡선(날짜별 마지막 점)에서 고점 아래인 날의 수(가장 긴 구간). 비율(`max_drawdown`)은 원본 봉 기준 |
 | 총 거래 횟수 | `total_trades` | 매도 거래 기준 |
 | 승리 거래 | `winning_trades` | PnL > 0 |
 | 패배 거래 | `losing_trades` | PnL < 0 |

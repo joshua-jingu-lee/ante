@@ -20,7 +20,8 @@ import pytest
 from click.testing import CliRunner, Result
 
 from ante.cli.main import cli
-from ante.core.database import OperationalError
+from ante.core.account_id import InvalidAccountIdError
+from ante.core.database import OperationalError, ReadOnlyDatabaseError
 from ante.member.models import Member, MemberRole, MemberType
 
 _MASTER = Member(
@@ -492,4 +493,122 @@ class TestReportView:
         result = _invoke(["--format", "text", "report", "view", "r-404"], *_no_report())
         _assert_text(
             result, ["Error: REPORT_NOT_FOUND: 리포트를 찾을 수 없습니다: r-404"]
+        )
+
+
+_INJECTED_MESSAGE = "주입된 실패"
+
+_KINDS = ["registered", "read-only", "unclassified"]
+
+
+def _injected(kind: str) -> BaseException:
+    if kind == "registered":
+        return InvalidAccountIdError(_INJECTED_MESSAGE)
+    if kind == "read-only":
+        return ReadOnlyDatabaseError(_INJECTED_MESSAGE)
+    return RuntimeError(_INJECTED_MESSAGE)
+
+
+def _expected_code(kind: str, bundle: str) -> str:
+    return "VALIDATION_ERROR" if kind == "registered" else bundle
+
+
+def _report_store(**methods: Any) -> Any:
+    store = MagicMock()
+    store.return_value.initialize = AsyncMock(return_value=None)
+    for name, mock in methods.items():
+        setattr(store.return_value, name, mock)
+    return patch("ante.report.ReportStore", new=store)
+
+
+def _report_db() -> Any:
+    return patch("ante.cli.commands.report.open_cli_db", new=_db_yielding(MagicMock()))
+
+
+class TestBroadCatchKeepsRegisteredCodes:
+    """레지스트리에 코드가 있는 예외는 묶음 코드로 덮이지 않는다 (#2674)."""
+
+    @pytest.mark.parametrize("kind", _KINDS)
+    def test_trade_info_json(self, kind: str) -> None:
+        db = MagicMock()
+        db.fetch_one = AsyncMock(side_effect=_injected(kind))
+        result = _invoke(
+            ["--format", "json", "trade", "info", "t-1"],
+            patch("ante.cli.commands.trade.open_cli_db", new=_db_yielding(db)),
+        )
+        _assert_json(
+            result,
+            {
+                "status": "error",
+                "code": _expected_code(kind, "TRADE_ERROR"),
+                "message": _INJECTED_MESSAGE,
+            },
+        )
+
+    @pytest.mark.parametrize("kind", _KINDS)
+    def test_report_submit_json(
+        self, kind: str, report_file: Callable[[str], str], tmp_path: Path
+    ) -> None:
+        result = _invoke(
+            [
+                "--format",
+                "json",
+                "report",
+                "submit",
+                report_file(json.dumps(_VALID_REPORT)),
+                "--db-path",
+                str(tmp_path / "r.db"),
+            ],
+            _report_store(submit=AsyncMock(side_effect=_injected(kind))),
+        )
+        _assert_json(
+            result,
+            {
+                "status": "error",
+                "code": _expected_code(kind, "REPORT_ERROR"),
+                "message": _INJECTED_MESSAGE,
+            },
+        )
+
+    @pytest.mark.parametrize("kind", _KINDS)
+    def test_report_list_json(self, kind: str) -> None:
+        result = _invoke(
+            ["--format", "json", "report", "list"],
+            _report_db(),
+            _report_store(list_reports=AsyncMock(side_effect=_injected(kind))),
+        )
+        _assert_json(
+            result,
+            {
+                "status": "error",
+                "code": _expected_code(kind, "REPORT_ERROR"),
+                "message": _INJECTED_MESSAGE,
+            },
+        )
+
+    @pytest.mark.parametrize("kind", _KINDS)
+    def test_report_list_lines_text(self, kind: str) -> None:
+        result = _invoke(
+            ["--format", "text", "report", "list"],
+            _report_db(),
+            _report_store(list_reports=AsyncMock(return_value=[])),
+            patch("ante.cli.commands.report.table_lines", side_effect=_injected(kind)),
+        )
+        code = _expected_code(kind, "REPORT_ERROR")
+        _assert_text(result, [f"Error: {code}: {_INJECTED_MESSAGE}"])
+
+    @pytest.mark.parametrize("kind", _KINDS)
+    def test_report_view_json(self, kind: str) -> None:
+        result = _invoke(
+            ["--format", "json", "report", "view", "r-1"],
+            _report_db(),
+            _report_store(get=AsyncMock(side_effect=_injected(kind))),
+        )
+        _assert_json(
+            result,
+            {
+                "status": "error",
+                "code": _expected_code(kind, "REPORT_ERROR"),
+                "message": _INJECTED_MESSAGE,
+            },
         )

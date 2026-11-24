@@ -408,6 +408,40 @@ class TestCalculateMetricsDailyResample:
         )
         # raw 봉 peak=10.0M, trough=9.0M → MDD=10% (일별 리샘플이면 0%가 됨)
         assert metrics["max_drawdown"] == pytest.approx(10.0)
+        assert metrics["max_drawdown_duration"] == 0
+
+    def test_max_drawdown_duration_counts_days_not_bars(self):
+        """MDD 지속 기간은 일별 곡선에서 고점 아래인 날의 수다(#2634)."""
+        equity_curve = [
+            {"timestamp": "2024-01-01T09:00:00", "equity": 100},
+            {"timestamp": "2024-01-01T15:30:00", "equity": 100},
+            {"timestamp": "2024-01-02T09:00:00", "equity": 90},
+            {"timestamp": "2024-01-02T15:30:00", "equity": 90},
+            {"timestamp": "2024-01-03T09:00:00", "equity": 90},
+            {"timestamp": "2024-01-03T15:30:00", "equity": 101},
+        ]
+        metrics = calculate_metrics(
+            trades=[],
+            equity_curve=equity_curve,
+            initial_balance=100,
+            final_balance=101,
+        )
+        assert metrics["max_drawdown"] == pytest.approx(10.0)
+        assert metrics["max_drawdown_duration"] == 1
+
+    def test_max_drawdown_duration_daily_bars_unchanged(self):
+        """일봉 곡선의 MDD 지속 기간은 점의 수와 같다(#2634 회귀 잠금)."""
+        equity_curve = [
+            {"timestamp": f"2024-01-0{d}T15:30:00", "equity": e}
+            for d, e in zip(range(1, 6), [100, 110, 100, 95, 105], strict=True)
+        ]
+        metrics = calculate_metrics(
+            trades=[],
+            equity_curve=equity_curve,
+            initial_balance=100,
+            final_balance=105,
+        )
+        assert metrics["max_drawdown_duration"] == 3
 
 
 # ── Trade PnL Estimation ──────────────────────
