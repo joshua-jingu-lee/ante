@@ -296,18 +296,20 @@ _MOCK_LIVE_PROBE = """
     from ante.account import presets, service
     from ante.account.errors import InvalidBrokerTypeError
     from ante.account.models import Account, TradingMode
-    account = Account(
-        account_id="probe", name="probe", exchange="TEST", currency="KRW",
-        trading_mode=TradingMode.LIVE, broker_type="mock",
-    )
-    try:
-        service._reject_virtual_only_broker_in_live(account)
-        rejected = False
-    except InvalidBrokerTypeError:
-        rejected = True
+    def rejects(broker_type):
+        account = Account(
+            account_id="probe", name="probe", exchange="TEST", currency="KRW",
+            trading_mode=TradingMode.LIVE, broker_type=broker_type,
+        )
+        try:
+            service._reject_virtual_only_broker_in_live(account)
+        except InvalidBrokerTypeError:
+            return True
+        return False
     print(json.dumps({
         "pid": os.getpid(),
-        "rejected": rejected,
+        "rejected": rejects("mock"),
+        "test_rejected": rejects("test"),
         "presets": sorted(presets.VIRTUAL_ONLY_BROKER_TYPES),
         "service": sorted(service.VIRTUAL_ONLY_BROKER_TYPES),
     }))
@@ -349,8 +351,11 @@ class TestMockLiveInjection:
 
     def test_without_flag_product_still_rejects(self, env: DaemonHarness) -> None:
         result, stderr = self._probe(env)
+        from ante.account.presets import VIRTUAL_ONLY_BROKER_TYPES
+
         assert result["rejected"] is True
-        assert result["service"] == ["mock"]
+        assert result["test_rejected"] is True
+        assert result["service"] == sorted(VIRTUAL_ONLY_BROKER_TYPES)
         assert env.mock_live_pids() == set()
         assert "sitecustomize" not in stderr
 
@@ -360,6 +365,7 @@ class TestMockLiveInjection:
         env.allow_mock_live = True
         result, stderr = self._probe(env)
         assert result["rejected"] is False
+        assert result["test_rejected"] is True
         expected = sorted(VIRTUAL_ONLY_BROKER_TYPES - {"mock"})
         assert result["presets"] == expected
         assert result["service"] == expected

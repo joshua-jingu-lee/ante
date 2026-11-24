@@ -46,4 +46,4 @@ BROKER_PRESETS: dict[str, BrokerPreset] = {
     ),
 }
 
-VIRTUAL_ONLY_BROKER_TYPES: frozenset[str] = frozenset({"mock"})
+VIRTUAL_ONLY_BROKER_TYPES: frozenset[str] = frozenset({"mock", "test"})

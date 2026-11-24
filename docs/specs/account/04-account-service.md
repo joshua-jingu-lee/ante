@@ -13,7 +13,7 @@
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `initialize` | — | `None` | 스키마 생성 + DB에서 계좌 목록 로드 |
-| `create` | `account: Account` | `Account` | 계좌 생성. **cold-path 전용**. account_id 형식/정책 검증은 [`validate_new_account_id`](14-account-id-contract.md) helper에 위임 (``"test"``, ``"default"``, ``None``, ``""``, 패턴 위반 거부). 우회 플래그를 노출하지 않으므로 외부 호출자는 RESTRICTED ( ``"test"`` ) 예약어를 신규 생성할 수 없다 (#1216 P2). account_id 중복 시 `AccountAlreadyExistsError`. broker_type 유효성 검증. 가상 전용 브로커 타입(`mock`)을 `trading_mode=live`로 만들면 `InvalidBrokerTypeError`(`ACCOUNT_INVALID_BROKER_TYPE`, 아래 「가상 전용 브로커 타입」). seed 자동 생성은 :meth:`create_default_test_account` 가 private helper :meth:`_create_seed_account` 를 통해서만 수행한다 |
+| `create` | `account: Account` | `Account` | 계좌 생성. **cold-path 전용**. account_id 형식/정책 검증은 [`validate_new_account_id`](14-account-id-contract.md) helper에 위임 (``"test"``, ``"default"``, ``None``, ``""``, 패턴 위반 거부). 우회 플래그를 노출하지 않으므로 외부 호출자는 RESTRICTED ( ``"test"`` ) 예약어를 신규 생성할 수 없다 (#1216 P2). account_id 중복 시 `AccountAlreadyExistsError`. broker_type 유효성 검증. 가상 전용 브로커 타입(`mock`, `test`)을 `trading_mode=live`로 만들면 `InvalidBrokerTypeError`(`ACCOUNT_INVALID_BROKER_TYPE`, 아래 「가상 전용 브로커 타입」). seed 자동 생성은 :meth:`create_default_test_account` 가 private helper :meth:`_create_seed_account` 를 통해서만 수행한다 |
 | `get` | `account_id: str` | `Account` | 계좌 조회. 없으면 `AccountNotFoundError`. DELETED 상태도 조회 가능 |
 | `get_sync` | `account_id: str` | `Account \| None` | 인메모리 캐시에서 동기적으로 계좌 조회. ContextFactory 등 동기 컨텍스트용. 없으면 `None` 반환 |
 | `list` | `status: AccountStatus \| None` | `list[Account]` | 계좌 목록 조회. status 필터 가능. DELETED 제외가 기본 |
@@ -46,14 +46,14 @@
 
 #### 가상 전용 브로커 타입
 
-`mock`은 가상 전용 브로커 타입이다. `(mock, live)` 조합은 두 곳에서 `InvalidBrokerTypeError`(`ACCOUNT_INVALID_BROKER_TYPE`)로 거부한다. 메시지는 타입이 틀린 것이 아니라 `trading_mode`와의 조합이 허용되지 않는다는 것을 밝힌다.
+`mock`과 `test`는 가상 전용 브로커 타입이다. `(mock, live)`와 `(test, live)` 조합은 두 곳에서 `InvalidBrokerTypeError`(`ACCOUNT_INVALID_BROKER_TYPE`)로 거부한다. 메시지는 타입이 틀린 것이 아니라 `trading_mode`와의 조합이 허용되지 않는다는 것을 밝힌다.
 
 - **계좌 생성**: `_persist_account`(`create`와 seed가 공유하는 단일 지점)에서 거부한다. `trading_mode`와 `broker_type`은 불변 필드라 수정 경로는 따로 막지 않는다.
 - **어댑터 조립**: `_build_broker_adapter`가 같은 조합이면 같은 오류를 낸다. DB를 직접 고친 행에 대한 방어다.
 
-판정은 `Account.trading_mode`로 한다. 어댑터 config의 `trading_mode`는 `broker_config`가 덮어쓸 수 있으므로 쓰지 않는다. 가상 전용 타입의 집합은 한 곳에 두고 두 지점이 함께 쓴다. 상세는 [broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#브로커-타입-mock)를 따른다.
+판정은 `Account.trading_mode`로 한다. 어댑터 config의 `trading_mode`는 `broker_config`가 덮어쓸 수 있으므로 쓰지 않는다. 가상 전용 타입의 집합은 한 곳에 두고 두 지점이 함께 쓴다. 상세는 [broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#가상-전용)를 따른다.
 
-제품에는 이 거부를 끄는 스위치가 없다. 데몬 구동 시나리오의 하네스는 자기 하위 프로세스에 싣는 테스트 주입으로 이 조합을 연다([broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#가상-전용)).
+제품에는 이 거부를 끄는 스위치가 없다. 데몬 구동 시나리오의 하네스는 자기 하위 프로세스에 싣는 테스트 주입으로 `(mock, live)`만 연다([broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#가상-전용)).
 
 ### 런타임 구조 변경 차단
 
