@@ -40,6 +40,14 @@ def _hhmm(value: datetime) -> str:
     return value.strftime("%H:%M")
 
 
+def _cross_midnight_error(window: str) -> str:
+    return (
+        f"잘못된 blocked_hours 항목: '{window}' "
+        "(시작이 끝보다 늦은 구간은 받지 않습니다 — 자정을 넘으면 "
+        "두 구간으로 나눠 적으세요, 예: 23:00-23:59, 00:00-02:00)"
+    )
+
+
 # ── _is_valid_hhmm 단위 ──────────────────────────────────────────────────
 
 
@@ -128,10 +136,27 @@ class TestValidateScheduleTimes:
         with pytest.raises(ValueError, match="blocked_hours"):
             _validate_schedule_times("16:00", "01:00", [window])
 
-    def test_cross_midnight_format_is_valid(self) -> None:
-        # 자정跨ぎ window 의 비교 의미 정정은 범위 밖 — 형식만 검증하므로
-        # 정상 형식이면 통과한다(별도 이슈).
-        _validate_schedule_times("16:00", "01:00", ["23:00-02:00"])
+    @pytest.mark.parametrize("window", ["23:00-02:00", "15:31-09:00", "23:59-00:00"])
+    def test_cross_midnight_window_rejected(self, window: str) -> None:
+        with pytest.raises(ValueError) as exc_info:
+            _validate_schedule_times("16:00", "01:00", [window])
+        assert str(exc_info.value) == _cross_midnight_error(window)
+
+    def test_ordered_windows_pass(self) -> None:
+        _validate_schedule_times(
+            "16:00",
+            "01:00",
+            ["09:00-15:30", "09:00-09:00", "23:00-23:59", "00:00-02:00"],
+        )
+
+    def test_format_and_order_errors_are_joined(self) -> None:
+        with pytest.raises(ValueError) as exc_info:
+            _validate_schedule_times("16:00", "01:00", ["25:00-15:30", "23:00-02:00"])
+        assert str(exc_info.value) == (
+            "잘못된 blocked_hours 항목: '25:00-15:30' "
+            "(양 끝점 모두 zero-padded HH:MM 필요, 예: 09:00-15:30); "
+            + _cross_midnight_error("23:00-02:00")
+        )
 
 
 class TestValidateSchedule:
@@ -151,6 +176,13 @@ class TestValidateSchedule:
     def test_invalid_daily_at_raises(self) -> None:
         with pytest.raises(ValueError, match="잘못된 daily_at 형식: '25:00'"):
             validate_schedule({}, "25:00", "01:00")
+
+    def test_cross_midnight_blocked_hours_raises(self) -> None:
+        with pytest.raises(ValueError) as exc_info:
+            validate_schedule(
+                {"guard": {"blocked_hours": ["23:00-02:00"]}}, "16:00", "01:00"
+            )
+        assert str(exc_info.value) == _cross_midnight_error("23:00-02:00")
 
 
 # ── run_scheduler_loop 진입 fail-fast ────────────────────────────────────
@@ -208,6 +240,33 @@ class TestSchedulerLoopFailFast:
                     backfill_at="01:00",
                 )
             )
+
+    def test_cross_midnight_blocked_hours_fails_fast(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran: list[str] = []
+
+        async def _track_backfill(*_a: Any, **_k: Any) -> None:
+            ran.append("backfill")
+
+        async def _instant_wait(stop_event: asyncio.Event, *, timeout: float) -> None:
+            stop_event.set()
+
+        monkeypatch.setattr(cli_scheduler, "_run_backfill_job", _track_backfill)
+        monkeypatch.setattr(cli_scheduler, "_run_daily_job", _track_backfill)
+        monkeypatch.setattr(cli_scheduler, "_wait_or_stop", _instant_wait)
+        with pytest.raises(ValueError) as exc_info:
+            asyncio.run(
+                run_scheduler_loop(
+                    orchestrator=MagicMock(),
+                    data_path="data/",
+                    config={"guard": {"blocked_hours": ["23:00-02:00"]}},
+                    daily_at="16:00",
+                    backfill_at="01:00",
+                )
+            )
+        assert str(exc_info.value) == _cross_midnight_error("23:00-02:00")
+        assert ran == []
 
 
 # ── loop 순서: backfill 우선 (#2031) ─────────────────────────────────────
