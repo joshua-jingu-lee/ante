@@ -7,7 +7,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_error_codes.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_error_codes.py --check`
 
-- 코드: **158**개 (예외 클래스 매핑 있음 **150** / 없음 **8**)
+- 코드: **157**개 (예외 클래스 매핑 있음 **149** / 없음 **8**)
 
 코드·분류·종료 코드·의미는 그 코드의 `ErrorSpec`의 `code`·`category`·`exit_code`·`description`에서, 예외 클래스는 `EXCEPTION_TO_SPEC`에서 그 코드를 가진 `ErrorSpec`에 연결된 클래스에서 얻습니다. 예외 클래스가 `—`인 코드는 `EXCEPTION_TO_SPEC`에 연결된 클래스가 없고, 의미가 `—`인 코드는 `description`이 비어 있습니다. 분류의 뜻과 명명 규칙은 [error-taxonomy.md](../../specs/contracts/error-taxonomy.md)에서 봅니다.
 
@@ -52,7 +52,6 @@
 | `BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED` | `validation` | 1 | `ante.bot.exceptions.BotAccountCredentialsNotConfigured` | — |
 | `BOT_ALREADY_EXISTS` | `state_conflict` | 1 | `ante.bot.exceptions.BotAlreadyExistsError` | — |
 | `BOT_IMMUTABLE_FIELD` | `validation` | 1 | `ante.bot.exceptions.BotImmutableFieldError` | — |
-| `BOT_INVALID_PARAM` | `validation` | 1 | `ante.contracts.cli_errors.BotInvalidParamError` | — |
 | `BOT_MISSING_REQUIRED_ACCOUNT` | `validation` | 1 | `ante.contracts.cli_errors.BotMissingRequiredAccountError` | `--account` 생략 시 active 계좌가 0개 또는 2개 이상 |
 | `BOT_NOT_ACCEPTING_SIGNALS` | `state_conflict` | 1 | `ante.bot.exceptions.BotNotAcceptingSignals` | — |
 | `BOT_NOT_FOUND` | `not_found` | 1 | `ante.bot.exceptions.BotNotFoundError`<br>`ante.contracts.cli_errors.CliBotNotFoundError` | — |

@@ -19,14 +19,14 @@ KIS 실전 API 없이 시스템 전체 흐름을 검증할 수 있는 테스트 
 | 특성 | TestBrokerAdapter | MockBrokerAdapter |
 |------|-------------------|-------------------|
 | **용도** | 개발/검증 (현실적 시뮬레이션) | 가상 계좌 시나리오 검증 (가격 고정) |
-| **브로커 타입** | `test` | `mock` (가상 계좌 전용) |
+| **브로커 타입** | `test` (가상 계좌 전용) | `mock` (가상 계좌 전용) |
 | **가격** | GBM 기반 랜덤 시뮬레이션 (조회할 때마다 움직임) | 정적 가격. 가격 주입 파일(`prices_file`) 또는 생성자 `prices`·`default_price` |
 | **슬리피지** | 0.1~0.3% 자동 적용 | 없음 |
 | **부분 체결** | 확률적 (수량 ≥ 100 시 30% 확률) | FillMode enum으로 결정적 제어. 가상 경로에서는 쓰이지 않음 (아래 「실전 경로의 체결 모드」) |
 | **종목** | 가상 종목 6개 프리셋 | `get_instruments`는 하드코딩 2개. 가격은 주입한 종목 코드 |
 | **재현성** | 시드 기반 동일 시퀀스 | 같은 가격 주입이면 같은 가격 |
 
-두 브로커 모두 가상 계좌에서는 체결을 하지 않는다. 가상 계좌의 주문은 `VirtualExecutor`가 게이트웨이 가격으로 체결하고 브로커로 보내지 않는다([api-gateway.md](../api-gateway/api-gateway.md) "Virtual 주문 라우팅"). 그래서 가상 경로에서 어댑터가 정하는 것은 사실상 `get_current_price`가 돌려주는 가격이고, 위 표의 슬리피지·부분 체결 행은 실전 경로에만 해당한다. `mock`의 체결 모드가 실전 경로에서 뜻하는 것은 아래 「실전 경로의 체결 모드」를 따른다.
+두 브로커 모두 가상 계좌에서는 체결을 하지 않는다. 가상 계좌의 주문은 `VirtualExecutor`가 게이트웨이 가격으로 체결하고 브로커로 보내지 않는다([api-gateway.md](../api-gateway/api-gateway.md) "Virtual 주문 라우팅"). 그래서 가상 경로에서 어댑터가 정하는 것은 사실상 `get_current_price`가 돌려주는 가격이고, 위 표의 슬리피지·부분 체결 행은 실전 경로에만 해당한다. `test`는 가상 전용이라(아래 「가상 전용」) `test`의 슬리피지·부분 체결은 제품 경로에서 쓰이지 않는다. `mock`의 체결 모드가 실전 경로에서 뜻하는 것은 아래 「실전 경로의 체결 모드」를 따른다.
 
 ### 생성자 파라미터
 
@@ -70,7 +70,7 @@ GBM 모델로 현실적 가격 변동을 시뮬레이션한다. 일별 변동성
 
 ### 가상 전용
 
-`mock`은 `trading_mode`가 `virtual`인 계좌에만 쓴다. `(mock, live)` 조합은 아래 두 곳에서 `InvalidBrokerTypeError`(`ACCOUNT_INVALID_BROKER_TYPE`)로 거부한다. 오류 메시지는 타입이 틀린 것이 아니라 `trading_mode`와의 조합이 허용되지 않는다는 것을 밝힌다.
+`mock`과 `test`는 `trading_mode`가 `virtual`인 계좌에만 쓴다. `(mock, live)`와 `(test, live)` 조합은 아래 두 곳에서 `InvalidBrokerTypeError`(`ACCOUNT_INVALID_BROKER_TYPE`)로 거부한다. 오류 메시지는 타입이 틀린 것이 아니라 `trading_mode`와의 조합이 허용되지 않는다는 것을 밝힌다.
 
 | 지점 | 시점 | 비고 |
 |------|------|------|
@@ -79,10 +79,10 @@ GBM 모델로 현실적 가격 변동을 시뮬레이션한다. 일별 변동성
 
 - 판정은 `Account.trading_mode`로 한다. 어댑터 config의 `trading_mode`는 `broker_config`가 덮어쓸 수 있으므로 판정에 쓰지 않는다.
 - 가상 전용 브로커 타입의 집합은 한 곳에 두고 두 지점이 함께 쓴다.
-- 런타임 준비 상태의 면제 매트릭스에는 `(mock, virtual)`만 둔다([account/02-design-decisions.md](../account/02-design-decisions.md) D-ACC-09).
-- 필수 자격증명이 빈 목록이므로 계좌 생성 때 credential을 넘기면 `ACCOUNT_UNKNOWN_CREDENTIAL_KEY`로 거부된다([cli/03-commands.md](../cli/03-commands.md) `account create` 입력 계약).
+- 런타임 준비 상태의 면제 매트릭스에는 두 타입 모두 `virtual` 행만 둔다(`(mock, virtual)`, `(test, virtual)` — [account/02-design-decisions.md](../account/02-design-decisions.md) D-ACC-09).
+- `mock`은 필수 자격증명이 빈 목록이므로 계좌 생성 때 credential을 넘기면 `ACCOUNT_UNKNOWN_CREDENTIAL_KEY`로 거부된다([cli/03-commands.md](../cli/03-commands.md) `account create` 입력 계약).
 
-제품은 `(mock, live)`를 거부한다. 운영 코드에는 이 조합을 여는 스위치가 없다. 데몬 구동 시나리오의 하네스가 자기가 띄운 하위 프로세스(CLI와 데몬)에 싣는 테스트 전용 코드가, 하네스가 넣은 환경 변수가 있을 때만 그 프로세스의 가상 전용 집합에서 `mock`을 뺀다. 다른 가상 전용 타입은 빼지 않는다. 주입이 효력을 내지 못하면 위 두 지점의 거부가 그대로 남는다. 그렇게 열린 계좌의 런타임 준비 상태는 면제 매트릭스의 기본 정책(넷 다 요구)을 따른다.
+제품은 `(mock, live)`를 거부한다. 운영 코드에는 이 조합을 여는 스위치가 없다. 데몬 구동 시나리오의 하네스가 자기가 띄운 하위 프로세스(CLI와 데몬)에 싣는 테스트 전용 코드가, 하네스가 넣은 환경 변수가 있을 때만 그 프로세스의 가상 전용 집합에서 `mock`을 뺀다. 다른 가상 전용 타입(`test`)은 빼지 않는다. 주입이 효력을 내지 못하면 위 두 지점의 거부가 그대로 남는다. 그렇게 열린 계좌의 런타임 준비 상태는 면제 매트릭스의 기본 정책(넷 다 요구)을 따른다.
 
 ### 실전 경로의 체결 모드
 

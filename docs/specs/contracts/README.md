@@ -49,7 +49,7 @@ shape을 추가하거나 기존 4형태를 변경하려면 envelopes.md 자체�
 [`src/ante/contracts/vocab.py`](../../../src/ante/contracts/vocab.py)가 2개
 Literal type alias의 단일 코드 SSOT다.
 
-- `ContractKind = Literal["entity", "operation", "collection", "raw", "stream"]`
+- `ContractKind = Literal["envelope", "stream"]`
 - `AuthMode = Literal["public", "authenticated", "scoped", "master"]`
 
 본 모듈은 runtime behavior를 가지지 않고 Literal type alias만 export한다.
@@ -62,8 +62,8 @@ CLI 계약의 `OutputContract.kind` 가운데 동작에 닿는 값은 `stream` �
 훅이 `kind`에서 읽는 것은 `stream`인가뿐이다. 스트림 계약의 명령은 성공 출력으로
 envelope을 내지 않고, 실패는 CLI error envelope을 따른다
 ([envelopes.md](envelopes.md)의 「CLI 성공 출력과 계약」). 훅은 이와 별도로
-`data_key`를 읽는다(배열 payload를 감쌀 키). `kind`의 나머지 값
-(`entity`·`operation`·`collection`·`raw`)은 문서 값이며 출력을 바꾸지 않는다.
+`data_key`를 읽는다(배열 payload를 감쌀 키). `kind`는 `envelope`(성공 출력이
+CLI success envelope)과 `stream` 둘이다.
 
 ### Drift helper skeleton (#1823)
 

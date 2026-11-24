@@ -22,7 +22,6 @@ from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
-    BotInvalidParamError,
     BotMissingRequiredAccountError,
     CliBotNotFoundError,
     CliConfirmationRequiredError,
@@ -196,21 +195,6 @@ def bot_info(ctx: click.Context, bot_id: str) -> CommandResult:
     )
 
 
-def _parse_param(value: str) -> tuple[str, object]:
-    """key=value 형식의 파라미터 파싱. 값은 JSON 파싱 시도."""
-    import json as _json
-
-    if "=" not in value:
-        msg = f"잘못된 파라미터 형식: '{value}' (key=value 형태로 지정)"
-        raise click.BadParameter(msg)
-    key, raw = value.split("=", 1)
-    try:
-        parsed = _json.loads(raw)
-    except _json.JSONDecodeError:
-        parsed = raw
-    return key.strip(), parsed
-
-
 def _resolve_account_non_interactive(accounts: list[Any]) -> str:
     """활성 계좌 목록에서 비대화형으로 계좌를 선택한다."""
     if len(accounts) == 1:
@@ -242,12 +226,6 @@ def _resolve_account_non_interactive(accounts: list[Any]) -> str:
     help="실행 주기 (초, 10-3600)",
 )
 @click.option("--id", "bot_id", default="", help="봇 ID (미지정 시 자동 생성)")
-@click.option(
-    "--param",
-    "params",
-    multiple=True,
-    help="전략 파라미터 오버라이드 (key=value, 복수 지정 가능)",
-)
 @click.pass_context
 @require_auth
 @require_scope("bot:admin")
@@ -258,19 +236,10 @@ def bot_create(
     account_id: str | None,
     interval: int,
     bot_id: str,
-    params: tuple[str, ...],
 ) -> CommandResult:
     """봇 생성."""
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
-
-    param_dict: dict[str, Any] = {}
-    for p in params:
-        try:
-            key, value = _parse_param(p)
-            param_dict[key] = value
-        except click.BadParameter as e:
-            raise BotInvalidParamError(str(e)) from e
 
     if account_id is not None:
         account_id = reject_invalid_account_id(
