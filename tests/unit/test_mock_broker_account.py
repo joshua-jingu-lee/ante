@@ -15,7 +15,7 @@ from ante.account.models import Account, TradingMode
 from ante.account.presets import BROKER_PRESETS, VIRTUAL_ONLY_BROKER_TYPES
 from ante.account.readiness import ReadinessFlag, RuntimeReadinessRegistry
 from ante.account.service import AccountService
-from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
+from ante.bot.providers.virtual import VirtualExecutor
 from ante.broker.mock import MockBrokerAdapter
 from ante.broker.registry import BROKER_REGISTRY
 from ante.core.database import Database
@@ -183,9 +183,7 @@ async def _run_market_orders(tmp_path: Path, prices_file: str) -> list[tuple]:
             runtime_readiness=registry,
             account_service=svc,
         )
-        executor.register_bot(
-            "bot1", VirtualPortfolioView(bot_id="bot1", initial_balance=10_000_000.0)
-        )
+        executor.register_bot("bot1")
         executor.subscribe()
 
         filled: list[OrderFilledEvent] = []

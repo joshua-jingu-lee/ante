@@ -7,7 +7,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_error_codes.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_error_codes.py --check`
 
-- 코드: **157**개 (예외 클래스 매핑 있음 **149** / 없음 **8**)
+- 코드: **158**개 (예외 클래스 매핑 있음 **150** / 없음 **8**)
 
 코드·분류·종료 코드·의미는 그 코드의 `ErrorSpec`의 `code`·`category`·`exit_code`·`description`에서, 예외 클래스는 `EXCEPTION_TO_SPEC`에서 그 코드를 가진 `ErrorSpec`에 연결된 클래스에서 얻습니다. 예외 클래스가 `—`인 코드는 `EXCEPTION_TO_SPEC`에 연결된 클래스가 없고, 의미가 `—`인 코드는 `description`이 비어 있습니다. 분류의 뜻과 명명 규칙은 [error-taxonomy.md](../../specs/contracts/error-taxonomy.md)에서 봅니다.
 
@@ -31,6 +31,7 @@
 | `ACCOUNT_MISSING_CREDENTIALS` | `validation` | 1 | `ante.account.errors.MissingCredentialsError` | — |
 | `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` | `validation` | 1 | `ante.contracts.cli_errors.AccountMissingRequiredCredentialError` | `BrokerPreset.required_credentials`에 정의된 credential key 누락 |
 | `ACCOUNT_NOT_FOUND` | `not_found` | 1 | `ante.account.errors.AccountNotFoundError` | — |
+| `ACCOUNT_RECONCILE_NOT_APPLICABLE` | `state_conflict` | 1 | `ante.account.errors.AccountReconcileNotApplicableError` | 가상 계좌(D-ACC-09 reconcile 면제)에 대한 수동 대사 |
 | `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` | `state_conflict` | 1 | `ante.account.errors.AccountStructuralChangeRequiresStoppedServerError` | — |
 | `ACCOUNT_SUSPENDED` | `state_conflict` | 1 | `ante.account.errors.AccountSuspendedError` | — |
 | `ACCOUNT_TEST_CREATE_FAILED` | `internal` | 1 | `ante.contracts.cli_errors.AccountTestCreateFailedError` | — |
@@ -168,7 +169,7 @@
 | `UPDATE_MIGRATION_FAILED` | `internal` | 1 | `ante.contracts.cli_errors.UpdateMigrationFailedError` | — |
 | `UPDATE_ROLLBACK_FAILED` | `internal` | 1 | `ante.contracts.cli_errors.UpdateRollbackFailedError` | — |
 | `UPDATE_SERVER_RUNNING` | `state_conflict` | 1 | `ante.contracts.cli_errors.UpdateServerRunningError` | `ante update --force` 없이 서버가 실행 중 |
-| `VALIDATION_ERROR` | `validation` | 1 | `ante.account.errors.InvalidExchangeError`<br>`ante.contracts.cli_errors.FeedInjectValidationError`<br>`ante.contracts.request_errors.RequestValidationError`<br>`ante.core.account_id.InvalidAccountIdError`<br>`ante.core.time.InvalidIsoDateError` | — |
+| `VALIDATION_ERROR` | `validation` | 1 | `ante.account.errors.InvalidBrokerConfigError`<br>`ante.account.errors.InvalidExchangeError`<br>`ante.contracts.cli_errors.FeedInjectValidationError`<br>`ante.contracts.request_errors.RequestValidationError`<br>`ante.core.account_id.InvalidAccountIdError`<br>`ante.core.time.InvalidIsoDateError` | — |
 | `auth_failed` | `auth` | 1 | `ante.contracts.cli_errors.CliAuthFailedError` | `ANTE_MEMBER_TOKEN`의 토큰 판정 거부와 DB `connect()` 실패 |
 | `auth_required` | `auth` | 1 | `ante.contracts.cli_errors.CliAuthRequiredError` | `@require_auth` 미충족 (`ctx.obj["member"] is None`) |
 | `permission_denied` | `permission` | 1 | `ante.contracts.cli_errors.CliPermissionDeniedError` | 인증 OK이나 scope 부족 |

@@ -7,9 +7,10 @@ import math
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
+from ante.bot.providers.live import LivePortfolioView
 from ante.broker.models import CommissionInfo
 from ante.core import clock
-from ante.strategy.base import OrderView, PortfolioView
+from ante.strategy.base import OrderView
 
 if TYPE_CHECKING:
     from ante.account.readiness import RuntimeReadinessRegistry
@@ -31,124 +32,20 @@ def _is_valid_market_price(x: object) -> bool:
         return False
 
 
-class VirtualPortfolioView(PortfolioView):
-    """Virtual 계좌 봇용 PortfolioView. 인메모리 가상 잔고/포지션 관리."""
+class VirtualPortfolioView(LivePortfolioView):
+    """Virtual 계좌 봇용 PortfolioView. live 와 같이 Treasury + Trade 경유.
 
-    def __init__(self, bot_id: str, initial_balance: float) -> None:
-        self._bot_id = bot_id
-        self._initial_balance = initial_balance
-        self._balance = initial_balance
-        self._reserved: float = 0.0
-        self._positions: dict[str, dict[str, Any]] = {}
-        self._pending_orders: dict[str, dict[str, Any]] = {}
-
-    def get_positions(self, bot_id: str) -> dict[str, Any]:
-        """현재 보유 포지션 조회."""
-        return {
-            symbol: dict(pos)
-            for symbol, pos in self._positions.items()
-            if pos["quantity"] > 0
-        }
-
-    def get_balance(self, bot_id: str) -> dict[str, float]:
-        """가상 자금 현황 조회."""
-        return {
-            "allocated": self._initial_balance,
-            "available": self._balance - self._reserved,
-            "reserved": self._reserved,
-        }
-
-    def apply_fill(
-        self,
-        symbol: str,
-        side: str,
-        quantity: float,
-        price: float,
-        commission: float,
-    ) -> None:
-        """가상 체결 결과를 포지션/잔고에 반영."""
-        pos = self._positions.get(
-            symbol,
-            {
-                "symbol": symbol,
-                "quantity": 0.0,
-                "avg_entry_price": 0.0,
-                "realized_pnl": 0.0,
-            },
-        )
-
-        if side == "buy":
-            total_cost = pos["avg_entry_price"] * pos["quantity"]
-            new_cost = price * quantity
-            new_qty = pos["quantity"] + quantity
-            new_avg = (total_cost + new_cost) / new_qty if new_qty > 0 else 0.0
-
-            pos["quantity"] = new_qty
-            pos["avg_entry_price"] = new_avg
-            self._balance -= price * quantity + commission
-
-        elif side == "sell":
-            pnl = (price - pos["avg_entry_price"]) * quantity - commission
-            new_qty = pos["quantity"] - quantity
-
-            pos["quantity"] = max(new_qty, 0.0)
-            if new_qty <= 0:
-                pos["avg_entry_price"] = 0.0
-            pos["realized_pnl"] += pnl
-            self._balance += price * quantity - commission
-
-        self._positions[symbol] = pos
-
-    def check_balance(self, amount: float) -> bool:
-        """잔고 충분 여부 확인."""
-        return (self._balance - self._reserved) >= amount
-
-    def reserve(self, order_id: str, amount: float) -> None:
-        """주문용 자금 예약."""
-        self._reserved += amount
-        self._pending_orders[order_id] = {"amount": amount}
-
-    def release_reservation(self, order_id: str) -> None:
-        """예약 해제."""
-        order = self._pending_orders.pop(order_id, None)
-        if order:
-            self._reserved -= order["amount"]
+    가상 체결도 ``FillApplier.apply_direct_fill`` 이 positions 표에, Treasury 가
+    봇 예산에 정산하므로 재시작·재조립 뒤에도 같은 값을 본다.
+    """
 
 
 class VirtualOrderView(OrderView):
-    """Virtual 계좌 봇용 OrderView. VirtualPortfolioView의 미체결 주문 추적.
-
-    VirtualExecutor 는 ``OrderApprovedEvent`` 를 즉시 가상 체결하고
-    ``OrderSubmittedEvent`` 를 발행하지 않으므로(발행처는 live gateway 단독),
-    virtual 주문은 OrderTracker 에 들어가지 않는다 → OrderTracker 백엔드 미사용.
-    virtual 은 즉시 체결로 open window 가 사실상 없어
-    ``_pending_orders`` (프로덕션 대개 빈)를 **통일 OpenOrder dict 스키마**로
-    best-effort 매핑한다. amount(예약 금액)는 OrderView 스키마에서 제외한다.
-    """
-
-    def __init__(self, portfolio: VirtualPortfolioView) -> None:
-        self._portfolio = portfolio
+    """Virtual 계좌 봇용 OrderView. 가상 주문은 즉시 체결되므로 늘 빈 목록."""
 
     def get_open_orders(self, bot_id: str) -> list[dict[str, Any]]:
-        """미체결 주문 목록 조회 (통일 OpenOrder dict 스키마)."""
-        result: list[dict[str, Any]] = []
-        for oid, info in self._portfolio._pending_orders.items():
-            ordered_qty = float(info.get("ordered_qty", 0.0))
-            recorded = float(info.get("recorded_filled_qty", 0.0))
-            remaining = ordered_qty - recorded
-            result.append(
-                {
-                    "order_id": oid,
-                    "symbol": info.get("symbol", ""),
-                    "side": info.get("side", ""),
-                    "ordered_qty": ordered_qty,
-                    "recorded_filled_qty": recorded,
-                    "remaining_qty": remaining if remaining > 0 else 0.0,
-                    "status": info.get("status", "open"),
-                    "submitted_at": info.get("submitted_at"),
-                }
-            )
-        return result
+        """미체결 주문 목록 조회 (즉시 체결이라 늘 빈 목록)."""
+        return []
 
 
 class VirtualExecutor:
@@ -176,20 +73,20 @@ class VirtualExecutor:
             sell_commission_rate=commission_rate + sell_tax_rate,
         )
         self._slippage_rate = slippage_rate
-        self._portfolios: dict[str, VirtualPortfolioView] = {}
+        self._bot_ids: set[str] = set()
         self._bot_configs: dict[str, Any] = {}
         self._runtime_readiness = runtime_readiness
         self._account_service = account_service
         self._fill_applier = fill_applier
 
-    def register_bot(self, bot_id: str, portfolio: VirtualPortfolioView) -> None:
-        """Virtual 계좌 봇의 PortfolioView 등록."""
-        self._portfolios[bot_id] = portfolio
+    def register_bot(self, bot_id: str) -> None:
+        """Virtual 계좌 봇을 체결 대상으로 등록."""
+        self._bot_ids.add(bot_id)
         logger.info("VirtualExecutor: 봇 등록 %s", bot_id)
 
     def unregister_bot(self, bot_id: str) -> None:
         """Virtual 계좌 봇 등록 해제."""
-        self._portfolios.pop(bot_id, None)
+        self._bot_ids.discard(bot_id)
         logger.info("VirtualExecutor: 봇 해제 %s", bot_id)
 
     _ORDER_APPROVED_PRIORITY = 60
@@ -309,8 +206,7 @@ class VirtualExecutor:
         if event.order_type in ("stop", "stop_limit"):
             return
 
-        portfolio = self._portfolios.get(event.bot_id)
-        if portfolio is None:
+        if event.bot_id not in self._bot_ids:
             return
 
         object.__setattr__(event, "_virtual_handled", True)
@@ -398,12 +294,10 @@ class VirtualExecutor:
                 return
             if not recorded:
                 logger.warning(
-                    "Virtual 체결 중복 — 포트폴리오 반영·발행 생략 (order_id=%s)",
+                    "Virtual 체결 중복 — 발행 생략 (order_id=%s)",
                     order_id,
                 )
                 return
-
-        portfolio.apply_fill(symbol, side, quantity, fill_price, commission)
 
         await self._eventbus.publish(
             OrderFilledEvent(

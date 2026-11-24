@@ -444,21 +444,24 @@ def snapshot(
             "--date와 --from/--to 옵션은 동시에 사용할 수 없습니다."
         )
 
-    reject_inverted_date_range(
-        from_date,
-        to_date,
-        fmt,
-        from_label="시작일",
-        to_label="종료일",
-    )
+    start: str | None = None
+    end: str | None = None
+    if from_date or to_date:
+        start = from_date or "2000-01-01"
+        end = to_date or _today_kst().isoformat()
+        reject_inverted_date_range(
+            start,
+            end,
+            fmt,
+            from_label="시작일" if from_date else "기본 시작일",
+            to_label="종료일" if to_date else "기본 종료일",
+        )
 
     async def _run_snapshot() -> dict[str, Any] | list[dict[str, Any]] | None:
         async with _create_treasury(account_id, ctx=ctx) as (t, _):
             if date_str:
                 return await t.get_daily_snapshot(date_str)
-            if from_date or to_date:
-                start = from_date or "2000-01-01"
-                end = to_date or _today_kst().isoformat()
+            if start is not None and end is not None:
                 return await t.get_snapshots(start, end)
             return await t.get_latest_snapshot()
 
@@ -574,11 +577,16 @@ def portfolio_history(
         account_id = reject_invalid_account_id(
             account_id, fmt, context="cli.treasury.portfolio.history"
         )
-    reject_inverted_date_range(from_date, to_date, fmt)
-
     today = _today_kst()
     end_date = to_date or today.isoformat()
     start_date = from_date or (today - timedelta(days=30)).isoformat()
+    reject_inverted_date_range(
+        start_date,
+        end_date,
+        fmt,
+        from_label="시작일" if from_date else "기본 시작일",
+        to_label="종료일" if to_date else "기본 종료일",
+    )
 
     async def _run_history() -> dict[str, Any]:
         async def _collect_history(treasuries: list[Treasury]) -> dict[str, Any]:

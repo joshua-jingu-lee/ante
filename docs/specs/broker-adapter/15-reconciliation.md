@@ -87,6 +87,16 @@ ambiguity 판정 count 는 **status 무관**이다(#2119). 즉 `stopped`/`error`
 사용한다. 서버 밖에서 별도 BrokerAdapter를 직접 생성해 대사하면 서버가 보유한
 연결 상태, circuit breaker, TradeService 인메모리 상태와 어긋날 수 있다.
 
+**가상 계좌의 수동 대사 거부 (#2818)**: 수동 대사는 D-ACC-09 면제 매트릭스
+([02-design-decisions.md](../account/02-design-decisions.md))에서 reconcile 이 면제인 계좌(가상)를
+브로커 조회 전에 `ACCOUNT_RECONCILE_NOT_APPLICABLE`(state_conflict)로 거부한다. 가상 계좌의
+포지션은 내부 기록이 권위이고, 브로커의 잔고와 비교하거나 그 값으로 덮어쓰지 않는다. 판정은
+`AccountService.ensure_reconcile_applicable()` 한 곳에 있고, IPC `broker.reconcile`과 서버가 꺼졌을
+때의 CLI 경로가 같이 지난다. `--fix` 유무와 계좌의 봇 수와 무관하다. 판정이 매트릭스를 따르므로
+매트릭스에 없는 브로커 타입의 가상 계좌는 거부되지 않는다 — 지금 등록된 브로커 타입(`test`,
+`kis-domestic`, `mock`)은 모두 매트릭스에 있어 해당하는 계좌가 없고, 새 브로커 타입을 등록할 때
+다시 살핀다.
+
 **blast radius 경계 (normative, #2350)**: 이 공유 circuit breaker 는 어댑터
 인스턴스(=계좌)당 단일이며, 같은 계좌의 `FillReconcileScheduler`(체결 폴)와
 treasury 실전 동기화(`get_account_balance`/`get_positions`)가 동일 어댑터를

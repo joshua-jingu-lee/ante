@@ -14,6 +14,7 @@ from tests.e2e.harness import DaemonHarness, wait_until
 STRATEGIES = Path(__file__).resolve().parent / "strategies"
 BOT_ID = "e2e-switch"
 FILL_SECONDS = 30.0
+UPDATE_CHECKER_MODULE = "ante.update.checker"
 
 
 def _submit(daemon: DaemonHarness, filename: str) -> str:
@@ -41,6 +42,7 @@ def test_assign_and_update_switch_running_code(daemon: DaemonHarness) -> None:
     one = _submit(daemon, "market_buy.py")
     two = _submit(daemon, "market_buy_two.py")
     daemon.start()
+    assert daemon.daemon_pid in daemon.guarded_pids()
     adopted = daemon.cli("strategy", "set-status", two, "--status", "adopted")
     assert adopted["data"]["status"] == "adopted"
 
@@ -92,3 +94,8 @@ def test_assign_and_update_switch_running_code(daemon: DaemonHarness) -> None:
 
     daemon.cli("bot", "stop", BOT_ID)
     assert daemon.stop() == 0
+
+    unexpected = [
+        a for a in daemon.net_attempts() if UPDATE_CHECKER_MODULE not in a["modules"]
+    ]
+    assert unexpected == []

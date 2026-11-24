@@ -166,6 +166,14 @@ credentials 복호화, 연결 세션, rate limit, circuit breaker, audit 경로�
 않으면 그 코드로 끝난다. `broker order`와 `broker stream prices`는 일반 운영 IPC 대상이 아니며 별도
 maintenance/test 스펙 없이는 제공하지 않는다.
 
+`broker.reconcile` 응답의 `fix`는 요청의 플래그이고, `fix_applied`는 보정 경로를
+탔는가다. `fix`이고 계좌의 봇이 정확히 하나이면 `true`이며, 보정 건수가 0이어도
+`true`다. 봇이 0개이거나 둘 이상인 계좌는 감지만 하므로
+([15-reconciliation.md](../broker-adapter/15-reconciliation.md)) `false`다.
+`corrections`는 실제 보정 건수(`adjustments`의 길이)다. `ante broker reconcile --fix`의
+사람용 출력은 `fix_applied`가 `false`이면 보정 건수 대신 자동 보정을 하지 않았다는 한
+줄을 낸다(#2632).
+
 #### Signal
 
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
@@ -291,6 +299,8 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 `broker.reconcile`은 CLI `--fix=False` 경로에서도 같은 IPC command를 사용하지만, 한 command
 이름에 mutating/read-only 의미를 섞지 않고 일괄 mutating으로 분류한다. dry-run 전용
 IPC command 분리는 별도 이슈 범위다.
+가상 계좌에 대한 `broker.reconcile`은 브로커 조회 전에 `ACCOUNT_RECONCILE_NOT_APPLICABLE`로
+거부된다([15-reconciliation.md](../broker-adapter/15-reconciliation.md)).
 
 `account.delete`처럼 1.0 IPC 계약에서 제외되어 `CommandRegistry`에 등록되지 않는 명령은
 taxonomy 대상이 아니다. `member.*` 9개(`member.update_scopes` + admin mutation 8개)는 모두
@@ -557,7 +567,7 @@ drift다.
 | 그 밖의 연결 실패 (권한 거부 등) | 감싸지 않고 올려 명령의 미분류 예외 출구로 끝난다(기본 `EXECUTION_ERROR`. `rule update`·`strategy set-status`는 각각의 도메인 코드). 폴백 없음 |
 | 서버 내부 에러 | 응답 `status: "error"` 반환. CLI는 `error.code` + `error.message` 출력 |
 | 미등록 커맨드 | `_dispatch`에서 `UNKNOWN_COMMAND` 에러 응답 |
-| 인자 검증 실패 | 모든 명령은 요청 모델을 가진다. 인자가 모델을 통과하지 못하면 핸들러를 부르지 않고 `VALIDATION_ERROR` 에러 응답. 메시지는 명령 이름과 필드 경로·검증 종류만 싣는다(`<명령> 인자 검증 실패: <필드 경로>(<검증 종류>), …`). 모르는 키의 이름은 필드 경로로 실리고(인쇄 가능하지 않은 문자는 이스케이프한다), 키 이름 외의 입력값은 싣지 않는다 |
+| 인자 검증 실패 | 모든 명령은 요청 모델을 가진다. 인자가 모델을 통과하지 못하면 핸들러를 부르지 않고 `VALIDATION_ERROR` 에러 응답. 메시지는 명령 이름과 필드 경로·검증 종류만 싣는다(`<명령> 인자 검증 실패: <필드 경로>(<검증 종류>), …`). 모르는 키의 이름은 필드 경로로 실리고(인쇄 가능하지 않은 문자는 이스케이프한다), 키 이름 외의 입력값은 싣지 않는다. 전체 응답이 메시지 최대 크기(1MB)를 넘게 되면 앞에서부터 들어가는 필드만 싣고 나머지는 `외 N건`으로 줄인다 |
 | 뒤집힌 날짜 범위 (`broker.order_history`) | 요청 모델은 두 날짜의 형식만 본다. 순서는 핸들러가 브로커를 부르기 전에 검사해 `INVALID_DATE_RANGE` 에러 응답을 낸다(#2736). |
 | shutdown 중 mutating 명령 | `SHUTTING_DOWN` 상태의 mutating 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
 | 리소스 drain 중 dispatch | `DRAINING` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
@@ -584,7 +594,7 @@ drift다.
   직후 `audit_logger`가 구성된 경우에만 getattr-safe하게 1회 수행한다
 - **요청 크기 제한**: 메시지 최대 크기 1MB — 과도한 페이로드 차단
 - **인자 검증 실패의 입력 비노출**: 요청 모델 검증 실패의 응답과 서버 로그에는 필드 경로와
-  검증 종류만 실린다. 모르는 키의 이름은 필드 경로로 실리고(인쇄 가능하지 않은 문자는 이스케이프한다),
+  검증 종류만 실린다(로그 한 줄도 같은 메시지다). 모르는 키의 이름은 필드 경로로 실리고(인쇄 가능하지 않은 문자는 이스케이프한다),
   키 이름 외의 입력값은 싣지 않는다. 검증 실패는 경고 수준 한 줄로 남고 traceback을 남기지 않는다
 
 > `signal.connect` 보안 불변(키 검증 daemon-side·키 비노출·account_id/bot_id LIVE-only·

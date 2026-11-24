@@ -428,9 +428,7 @@ async def test_virtual_order_fills_when_main_marked_ready(
         "test", broker_type="test", trading_mode=TradingMode.VIRTUAL
     )
     await _fund(s, "test", "bot-1")
-    s.virtual_executor.register_bot(
-        "bot-1", SimpleNamespace(apply_fill=lambda *args: None)
-    )
+    s.virtual_executor.register_bot("bot-1")
     cap = _capture(s, OrderFilledEvent, OrderRejectedEvent, OrderFailedEvent)
 
     await s.eventbus.publish(_request("test"))
@@ -450,9 +448,7 @@ async def test_virtual_fill_is_recorded_through_main_fill_applier(
     assert s.fill_applier is not None
     assert s.virtual_executor._fill_applier is s.fill_applier
     await _fund(s, "test", "bot-1")
-    s.virtual_executor.register_bot(
-        "bot-1", SimpleNamespace(apply_fill=lambda *args: None)
-    )
+    s.virtual_executor.register_bot("bot-1")
     cap = _capture(s, OrderFilledEvent, OrderFailedEvent)
 
     await s.eventbus.publish(_request("test"))

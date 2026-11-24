@@ -20,8 +20,8 @@ sub-PR 3 (bot) / sub-PR 4 (treasury) 의 1:1 동형 패턴.
 broker CLI 표면 (``balance``/``positions``/``reconcile``) 은 IPC 우선 →
 ``except IPCServerNotRunningError`` 로 fallback path 에 진입한다. fallback
 의 ``_get_broker``/``_run_balance``/``_run_positions``/``_run_reconcile``
-이 broker typed exception 을 raise 하면 ``except Exception`` 분기의
-``emit_cli_error(fmt, e)`` 가 registry MRO lookup 으로 ``BROKER_*`` 안정
+이 broker typed exception 을 raise 하면 예외가 전파되어
+``AuthenticatedGroup.main`` 이 registry MRO lookup 으로 ``BROKER_*`` 안정
 코드를 surface 한다 — 본 test 는 그 경로를 mock 으로 단언한다.
 
 IPC path 는 ``ante.contracts.ipc_error_payload`` helper (server.py:322 의
@@ -116,8 +116,8 @@ def _patch_balance_fallback_raises(exc: BaseException):  # noqa: ANN202
     mock — CLI ``balance`` 의 ``except IPCServerNotRunningError`` 분기가 fallback
     path 에 진입한다. fallback 의 ``_get_broker`` 가 mock adapter (raise 하는
     ``get_account_balance``) 를 반환하면, ``_run_balance`` 가 broker exception
-    을 전파하고 ``except Exception → emit_cli_error`` 가 안정 코드를 surface
-    한다.
+    을 전파하고 ``AuthenticatedGroup.main`` 이 registry MRO lookup 으로 안정
+    코드를 surface 한다.
     """
     from ante.broker.base import BrokerAdapter
     from ante.cli.commands import broker as broker_cmd
@@ -133,7 +133,7 @@ def _patch_balance_fallback_raises(exc: BaseException):  # noqa: ANN202
     mock_adapter.get_account_positions = AsyncMock(side_effect=exc)
     mock_adapter.disconnect = AsyncMock(return_value=None)
 
-    async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+    async def _fake_get_broker(account_id=None, *, reconcile=False):  # noqa: ANN001, ANN202
         return mock_adapter, None
 
     return patch.object(
@@ -148,8 +148,8 @@ class TestBrokerApiErrorEquivalence:
     """``APIError`` 는 양쪽에서 ``BROKER_API_ERROR``.
 
     CLI direct path: ``broker balance`` fallback path 에서 broker adapter
-    가 raise → ``emit_cli_error`` 가 registry MRO lookup 으로
-    ``BROKER_API_ERROR`` 를 surface.
+    가 raise → 예외가 전파되어 ``AuthenticatedGroup.main`` 이 registry MRO
+    lookup 으로 ``BROKER_API_ERROR`` 를 surface.
 
     원천 KIS ``msg_cd`` (``APIError.error_code``) 는 envelope public surface
     에 노출되지 않는다 — round-trip 분리 회귀는
@@ -197,7 +197,8 @@ class TestBrokerAuthFailedEquivalence:
     """``AuthenticationError`` 는 양쪽에서 ``BROKER_AUTH_FAILED``.
 
     CLI direct path: ``broker balance`` fallback path 에서 broker adapter
-    가 raise → ``emit_cli_error`` 가 ``BROKER_AUTH_FAILED`` 를 surface.
+    가 raise → 예외가 전파되어 ``AuthenticatedGroup.main`` 이
+    ``BROKER_AUTH_FAILED`` 를 surface.
     """
 
     def test_cli_direct_auth_failed_via_balance(self, runner: CliRunner) -> None:
@@ -233,11 +234,11 @@ class TestBrokerOrderNotFoundEquivalence:
     """``OrderNotFoundError`` 는 양쪽에서 ``BROKER_ORDER_NOT_FOUND``.
 
     CLI direct path: ``broker balance`` fallback path 에서 broker adapter
-    가 raise (예: 보유 조회 시 cross-fault 시나리오) → ``emit_cli_error`` 가
-    ``BROKER_ORDER_NOT_FOUND`` 를 surface. ``broker`` CLI 자체에는 단일
-    order 조회 표면이 없지만 contract-level equivalence 는 fallback path
-    에서 typed exception 이 ``emit_cli_error`` 를 통해 동일 코드를 raise
-    함을 lock 한다.
+    가 raise (예: 보유 조회 시 cross-fault 시나리오) → 예외가 전파되어
+    ``AuthenticatedGroup.main`` 이 ``BROKER_ORDER_NOT_FOUND`` 를 surface.
+    ``broker`` CLI 자체에는 단일 order 조회 표면이 없지만 contract-level
+    equivalence 는 fallback path 에서 typed exception 이
+    ``AuthenticatedGroup.main`` 을 통해 동일 코드를 raise 함을 lock 한다.
     """
 
     def test_cli_direct_order_not_found_via_balance(self, runner: CliRunner) -> None:
@@ -273,7 +274,8 @@ class TestBrokerRateLimitedEquivalence:
     """``RateLimitError`` 는 양쪽에서 ``BROKER_RATE_LIMITED``.
 
     CLI direct path: ``broker balance`` fallback path 에서 broker adapter
-    가 raise → ``emit_cli_error`` 가 ``BROKER_RATE_LIMITED`` 를 surface.
+    가 raise → 예외가 전파되어 ``AuthenticatedGroup.main`` 이
+    ``BROKER_RATE_LIMITED`` 를 surface.
     """
 
     def test_cli_direct_rate_limited_via_balance(self, runner: CliRunner) -> None:
@@ -309,8 +311,8 @@ class TestBrokerCircuitOpenEquivalence:
     """``CircuitOpenError`` 는 양쪽에서 ``BROKER_CIRCUIT_OPEN``.
 
     CLI direct path: ``broker balance`` fallback path 에서 broker adapter
-    가 raise (circuit breaker OPEN) → ``emit_cli_error`` 가
-    ``BROKER_CIRCUIT_OPEN`` 을 surface.
+    가 raise (circuit breaker OPEN) → 예외가 전파되어
+    ``AuthenticatedGroup.main`` 이 ``BROKER_CIRCUIT_OPEN`` 을 surface.
     """
 
     def test_cli_direct_circuit_open_via_balance(self, runner: CliRunner) -> None:
@@ -419,7 +421,7 @@ class TestOrderHistoryErrorSurface:
 
         adapter = _raising_adapter(APIError("KIS API Error", status_code=500))
 
-        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+        async def _fake_get_broker(account_id=None, *, reconcile=False):  # noqa: ANN001, ANN202
             return adapter, None
 
         with (
@@ -482,7 +484,7 @@ class TestReconcileOfflineErrorSurface:
         (tmp_path / "db").mkdir()
         adapter = _raising_adapter(exc)
 
-        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+        async def _fake_get_broker(account_id=None, *, reconcile=False):  # noqa: ANN001, ANN202
             return adapter, None
 
         ipc_send = AsyncMock(side_effect=_ipc_click_exc("IPC_SERVER_NOT_RUNNING", "x"))
@@ -507,3 +509,49 @@ class TestReconcileOfflineErrorSurface:
         adapter.get_account_positions.assert_awaited_once()
         payload = _cli_envelope_payload(result.output)
         assert payload["code"] == expected
+
+
+class TestReconcileNotApplicableEquivalence:
+    """가상 계좌의 대사 거부는 양쪽에서 ``ACCOUNT_RECONCILE_NOT_APPLICABLE`` (#2818)."""
+
+    def test_cli_offline_reconcile_rejected_before_the_broker(
+        self, runner: CliRunner
+    ) -> None:
+        from ante.account.errors import AccountReconcileNotApplicableError
+        from ante.cli.commands import broker as broker_cmd
+
+        db = MagicMock()
+        db.close = AsyncMock()
+        service = MagicMock()
+        service.ensure_reconcile_applicable = AsyncMock(
+            side_effect=AccountReconcileNotApplicableError("가상 계좌")
+        )
+        service.get_broker = AsyncMock()
+
+        async def _fake_create_service():  # noqa: ANN202
+            return service, db
+
+        ipc_send = AsyncMock(side_effect=_ipc_click_exc("IPC_SERVER_NOT_RUNNING", "x"))
+        with (
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=ipc_send),
+            patch.object(
+                broker_cmd, "_create_account_service", new=_fake_create_service
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "broker", "reconcile", "--account", "acc-1"],
+            )
+
+        assert result.exit_code == 1, result.output
+        payload = _cli_envelope_payload(result.output)
+        assert payload["code"] == "ACCOUNT_RECONCILE_NOT_APPLICABLE"
+        service.ensure_reconcile_applicable.assert_awaited_once_with("acc-1")
+        service.get_broker.assert_not_awaited()
+        db.close.assert_awaited_once()
+
+    def test_ipc_envelope_reconcile_not_applicable(self) -> None:
+        from ante.account.errors import AccountReconcileNotApplicableError
+
+        exc = AccountReconcileNotApplicableError("가상 계좌")
+        assert _ipc_envelope_code(exc) == "ACCOUNT_RECONCILE_NOT_APPLICABLE"

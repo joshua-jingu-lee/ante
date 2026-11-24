@@ -271,4 +271,6 @@ def test_clear_halt_cli_success_output(argv: list[str], output: str) -> None:
 )
 def test_clear_halt_cli_sends_reason(argv: list[str], args: dict[str, str]) -> None:
     _code, _out, send = _invoke_clear_halt(["system", "clear-halt", *argv])
-    send.assert_awaited_once_with("system.clear_halt", args, actor=ACTOR)
+    send.assert_awaited_once_with(
+        "system.clear_halt", args, actor=ACTOR, required=("accounts_changed",)
+    )

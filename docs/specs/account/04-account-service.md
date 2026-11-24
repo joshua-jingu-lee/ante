@@ -23,6 +23,7 @@
 | `delete` | `account_id: str, deleted_by: str` | `None` | 소프트 딜리트 (status=DELETED). **cold-path 전용**. active Ante runtime이 살아 있으면 거부. 진입 직후 `bots` 테이블을 검사해 동일 `account_id`의 활성(non-deleted) 봇이 남아 있으면 `AccountHasActiveBotsError`로 차단(orphan bot 무결성). `bots` 조회가 실패하면 테이블이 없는 경우(`no such table` — 봇이 없다)만 0건으로 보고, 그 밖의 오류는 그대로 올려 삭제하지 않는다. 1.0 정책상 `AccountDeletedEvent`는 발행하지 않는다 |
 | `get_broker` | `account_id: str` | `BrokerAdapter` | 계좌의 BrokerAdapter 인스턴스 반환. lazy init. 최초 호출 시 생성하고 `connect()`를 수행하여 **연결에 성공한 경우에만 캐싱**한다. 연결 실패 시 캐시에 남기지 않고 예외를 전파하므로(미연결 어댑터 잔존 차단), 일시적 인증/네트워크 실패는 다음 호출에서 자연 회복한다. cache-hit은 connect 없이 즉시 반환. cache-miss는 per-account lock으로 직렬화하여 동시 호출 시에도 단일 인스턴스·단일 connect를 보장한다 |
 | `get_cached_broker` | `account_id: str` | `BrokerAdapter \| None` | 이미 캐시된 BrokerAdapter만 반환(build/connect 없음). 미캐시면 `None`. 종료 루프처럼 "이미 연결된 어댑터만 끊는" 경로 전용 — 미캐시 계좌를 끊기 위해 새로 연결하는 회귀를 차단한다. **async 메서드**: per-account lock으로 in-flight 초기 연결을 drain한 뒤 조회하므로, 종료 중 in-flight connect가 끝난 직후 캐시되어 disconnect를 놓치는 세션 잔존을 막는다 |
+| `ensure_reconcile_applicable` | `account_id: str` | `None` | 수동 대사를 할 수 있는 계좌인지 판정한다. 계좌를 조회해(없으면 `AccountNotFoundError`) D-ACC-09 매트릭스에서 reconcile 이 면제인 계좌(가상)면 `AccountReconcileNotApplicableError`를 낸다. 브로커를 만들거나 연결하지 않는다([15-reconciliation.md](../broker-adapter/15-reconciliation.md)) |
 | `create_default_test_account` | — | `Account` | 테스트 계좌 자동 생성 (`ante init` 시 호출). 이미 존재하면 스킵 |
 | `suspend_all` | `reason: str, suspended_by: str` | `list[dict]` | 모든 ACTIVE 계좌를 SUSPENDED로 전환 (시스템 전체 Kill Switch). DELETED를 뺀 ACTIVE·SUSPENDED 계좌별 결과(`account_id`·`previous_status`·`status`·`changed`)를 반환한다. 이미 목표 상태인 계좌는 `changed: false` |
 | `activate_all` | `activated_by: str` | `list[dict]` | 모든 SUSPENDED 계좌를 ACTIVE로 복구. DELETED를 뺀 ACTIVE·SUSPENDED 계좌별 결과(`account_id`·`previous_status`·`status`·`changed`)를 반환한다. 이미 목표 상태인 계좌는 `changed: false` |
@@ -87,7 +88,7 @@
 
 #### 안정 에러 코드 (#1144 S5)
 
-`AccountStructuralChangeRequiresStoppedServerError`는 클래스 레벨 속성 `code: str = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"`를 노출한다. IPC 서버는 모든 핸들러 예외에 대해 `getattr(e, "code", "EXECUTION_ERROR")`로 안정 코드를 우선 사용하며(없으면 기본 `EXECUTION_ERROR`), 기존 예외(`AccountAlreadySuspendedError` 등)는 `code` 속성이 없으므로 자동으로 `EXECUTION_ERROR`로 폴백되어 회귀가 발생하지 않는다.
+IPC 서버(`_dispatch`)는 `ipc_error_payload` → `error_spec_for_exception`으로 코드를 정한다. 에러 레지스트리(`EXCEPTION_TO_SPEC`)를 MRO로 찾는 것이 먼저이고, 그다음이 SCREAMING_SNAKE 모양의 `code` 속성이며, 둘 다 없으면 `EXECUTION_ERROR`다(정본: `src/ante/contracts/helpers.py`의 `error_spec_for_exception`). `AccountStructuralChangeRequiresStoppedServerError`(클래스 레벨 속성 `code: str = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"`도 노출한다)와 `AccountAlreadySuspendedError`는 레지스트리에 각자의 코드로 올라 있다.
 
 #### CLI / 다중 active runtime 정책
 
@@ -105,3 +106,4 @@ CLI cold-path 명령(`ante account create/delete/set-credentials`)은 `_assert_n
 - `AccountAlreadySuspendedError`: 이미 정지된 계좌 재정지 시도 시 (409)
 - `AccountStructuralChangeRequiresStoppedServerError`: 런타임 구조 변경 차단
 - `AccountHasActiveBotsError`: delete() 시 활성(non-deleted) 봇 잔존 시 (orphan bot 무결성)
+- `AccountReconcileNotApplicableError`: reconcile 이 면제인 계좌(가상)에 대한 수동 대사 시도 시 (`ensure_reconcile_applicable`)

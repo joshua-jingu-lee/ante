@@ -880,14 +880,33 @@ class TestBotValidators:
         ]
 
     @pytest.mark.parametrize(
+        "params",
+        [
+            {},
+            {"strategy_id": "s-adopted"},
+            {"bot_id": "b-x", "strategy_id": "s-adopted"},
+            {"bot_id": "b-x", "strategy_id": "s-x"},
+        ],
+    )
+    async def test_assign_strategy_requires_existing_bot(
+        self, env: _Env, params: dict[str, Any]
+    ) -> None:
+        assert await _validate(env, "bot_assign_strategy", params) == [
+            ("fail", "봇이 존재하지 않음", "system:bot_manager")
+        ]
+        assert env.log.calls == [
+            ("bot_manager.get_bot", (params.get("bot_id", ""),), {})
+        ]
+
+    @pytest.mark.parametrize(
         ("params", "expected"),
         [
             (
-                {},
+                {"bot_id": "b-stopped"},
                 ("fail", "전략을 찾을 수 없습니다: ", "system:strategy_registry"),
             ),
             (
-                {"bot_id": "b-x", "strategy_id": "s-x"},
+                {"bot_id": "b-stopped", "strategy_id": "s-x"},
                 ("fail", "전략을 찾을 수 없습니다: s-x", "system:strategy_registry"),
             ),
             (
@@ -910,6 +929,10 @@ class TestBotValidators:
                 {"bot_id": "b-running", "strategy_id": "s-adopted"},
                 ("pass", "", "system:strategy_registry"),
             ),
+            (
+                {"bot_id": "b-stopped", "strategy_id": "s-adopted"},
+                ("pass", "", "system:strategy_registry"),
+            ),
         ],
     )
     async def test_assign_strategy_requires_adopted_strategy(
@@ -917,7 +940,8 @@ class TestBotValidators:
     ) -> None:
         assert await _validate(env, "bot_assign_strategy", params) == [expected]
         assert env.log.calls == [
-            ("strategy_registry.get", (params.get("strategy_id", ""),), {})
+            ("bot_manager.get_bot", (params["bot_id"],), {}),
+            ("strategy_registry.get", (params.get("strategy_id", ""),), {}),
         ]
 
     @pytest.mark.parametrize(

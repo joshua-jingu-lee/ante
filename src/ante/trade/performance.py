@@ -19,6 +19,8 @@ from ante.trade.models import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from ante.core.database import Database
 
 logger = logging.getLogger(__name__)
@@ -50,11 +52,11 @@ class PerformanceTracker:
         strategy_id: str | None = None,
         from_date: datetime | None = None,
         to_date: datetime | None = None,
-        bot_allocated_budget: float = 0.0,
+        allocated_budgets: Mapping[str, float] | None = None,
     ) -> PerformanceMetrics:
         """성과 지표 계산.
 
-        account_id는 필수. 계좌를 섞어 계산한 성과 지표는 의미가 없다.
+        account_id는 필수. allocated_budgets(봇별 할당 예산)는 MDD의 시작 자본이다.
         """
         trades = await self._get_filled_trades(
             account_id=account_id,
@@ -82,7 +84,7 @@ class PerformanceTracker:
         total_commission = sum(t.commission for t in trades)
 
         max_drawdown, max_drawdown_amount = self._calculate_mdd(
-            pnl_list, bot_allocated_budget
+            pnl_list, self._starting_capital(trades, allocated_budgets)
         )
 
         return PerformanceMetrics(
@@ -314,32 +316,44 @@ class PerformanceTracker:
         ]
 
     @staticmethod
+    def _starting_capital(
+        trades: list[TradeRecord],
+        allocated_budgets: Mapping[str, float] | None,
+    ) -> float | None:
+        """거래한 봇들의 할당 예산 합. 예산 없는 봇이 끼거나 합이 0 이하면 None."""
+        if allocated_budgets is None:
+            return None
+        bot_ids = {t.bot_id for t in trades}
+        if not bot_ids.issubset(allocated_budgets):
+            return None
+        total = sum(allocated_budgets[b] for b in bot_ids)
+        return total if total > 0 else None
+
+    @staticmethod
     def _calculate_mdd(
         pnl_list: list[float],
-        bot_allocated_budget: float = 0.0,
-    ) -> tuple[float, float]:
+        starting_capital: float | None,
+    ) -> tuple[float | None, float]:
         """MDD를 (비율, 금액) 튜플로 계산한다."""
         if not pnl_list:
             return 0.0, 0.0
 
-        equity: list[float] = []
-        running = 0.0
-        for pnl in pnl_list:
-            running += pnl
-            equity.append(bot_allocated_budget + running)
-
-        peak = equity[0]
+        capital = (
+            starting_capital if starting_capital and starting_capital > 0 else None
+        )
+        value = capital if capital is not None else 0.0
+        peak = value
         max_dd_amount = 0.0
+        max_dd_rate = 0.0
 
-        for value in equity:
-            if value > peak:
-                peak = value
-            drawdown = peak - value
-            if drawdown > max_dd_amount:
-                max_dd_amount = drawdown
+        for pnl in pnl_list:
+            value += pnl
+            peak = max(peak, value)
+            max_dd_amount = max(max_dd_amount, peak - value)
+            if peak > 0:
+                max_dd_rate = max(max_dd_rate, (peak - value) / peak)
 
-        max_dd_rate = max_dd_amount / peak if peak > 0 else 0.0
-        return max_dd_rate, max_dd_amount
+        return (max_dd_rate if capital is not None else None), max_dd_amount
 
     @staticmethod
     def _calculate_sharpe(

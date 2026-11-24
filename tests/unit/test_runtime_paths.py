@@ -229,7 +229,6 @@ def test_account_cold_path_guard_uses_runtime_resolver_under_chdir(
 ) -> None:
     """cwd 이동 후에도 cold-path guard가 ``config_dir`` 기준 socket을 본다."""
     from ante.cli.commands.account import _assert_no_active_runtime
-    from ante.cli.formatter import OutputFormatter
 
     tmp_config = tmp_path / "ante-config"
     tmp_config.mkdir()
@@ -246,13 +245,11 @@ def test_account_cold_path_guard_uses_runtime_resolver_under_chdir(
     # 현재 cwd(tmp_other)에는 run/ante.sock 없음 → guard가 cwd 무관임을 입증
     assert not (tmp_other / "run" / "ante.sock").exists()
 
-    fmt = OutputFormatter(fmt="text")
-
     with patch("ante.main.read_pid_file", return_value=os.getpid()):
         with pytest.raises(
             AccountStructuralChangeRequiresStoppedServerError
         ) as exc_info:
-            _assert_no_active_runtime(fmt)
+            _assert_no_active_runtime()
 
     assert exc_info.value.code == _GUARD_CODE
 
@@ -265,7 +262,6 @@ def test_account_cold_path_guard_blocks_during_booting_with_matching_marker(
 ) -> None:
     """PID alive + socket absent여도 matching marker가 있으면 starting으로 차단."""
     from ante.cli.commands.account import _assert_no_active_runtime
-    from ante.cli.formatter import OutputFormatter
     from ante.main import _write_pid_file, _write_starting_marker
 
     monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path))
@@ -275,9 +271,8 @@ def test_account_cold_path_guard_blocks_during_booting_with_matching_marker(
 
     assert not config.runtime_socket_path().exists()
 
-    fmt = OutputFormatter(fmt="text")
     with pytest.raises(AccountStructuralChangeRequiresStoppedServerError) as exc_info:
-        _assert_no_active_runtime(fmt)
+        _assert_no_active_runtime()
 
     assert exc_info.value.code == _GUARD_CODE
 
@@ -287,7 +282,6 @@ def test_account_cold_path_guard_passes_when_marker_has_different_pid(
 ) -> None:
     """다른 PID가 적힌 marker는 stale/recycled marker로 보고 통과한다."""
     from ante.cli.commands.account import _assert_no_active_runtime
-    from ante.cli.formatter import OutputFormatter
     from ante.main import _starting_marker_path, _write_pid_file
 
     monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path))
@@ -299,7 +293,7 @@ def test_account_cold_path_guard_passes_when_marker_has_different_pid(
 
     assert not config.runtime_socket_path().exists()
 
-    _assert_no_active_runtime(OutputFormatter(fmt="text"))
+    _assert_no_active_runtime()
 
 
 def test_account_cold_path_guard_passes_when_neither_socket_nor_marker(
@@ -307,7 +301,6 @@ def test_account_cold_path_guard_passes_when_neither_socket_nor_marker(
 ) -> None:
     """PID alive지만 socket/marker가 모두 없으면 기존 stale 판정을 유지한다."""
     from ante.cli.commands.account import _assert_no_active_runtime
-    from ante.cli.formatter import OutputFormatter
     from ante.main import _write_pid_file
 
     monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path))
@@ -316,7 +309,7 @@ def test_account_cold_path_guard_passes_when_neither_socket_nor_marker(
 
     assert not config.runtime_socket_path().exists()
 
-    _assert_no_active_runtime(OutputFormatter(fmt="text"))
+    _assert_no_active_runtime()
 
 
 def test_account_cold_path_guard_passes_when_marker_corrupt(
@@ -324,7 +317,6 @@ def test_account_cold_path_guard_passes_when_marker_corrupt(
 ) -> None:
     """손상된 marker는 stale marker로 보고 차단하지 않는다."""
     from ante.cli.commands.account import _assert_no_active_runtime
-    from ante.cli.formatter import OutputFormatter
     from ante.main import _starting_marker_path, _write_pid_file
 
     monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path))
@@ -336,7 +328,7 @@ def test_account_cold_path_guard_passes_when_marker_corrupt(
 
     assert not config.runtime_socket_path().exists()
 
-    _assert_no_active_runtime(OutputFormatter(fmt="text"))
+    _assert_no_active_runtime()
 
 
 # ── Codex attempt 1 P1 회귀: --config-dir 경로 PID 격리 ─────────────
@@ -445,7 +437,6 @@ def test_account_cold_path_guard_uses_explicit_config_dir_pid(
     import click
 
     from ante.cli.commands.account import _assert_no_active_runtime
-    from ante.cli.formatter import OutputFormatter
 
     cfg_a = tmp_path / "config-a"
     cfg_a.mkdir()
@@ -466,19 +457,17 @@ def test_account_cold_path_guard_uses_explicit_config_dir_pid(
     assert not (cfg_default / "run" / "ante.pid").exists()
     assert not (cfg_default / "run" / "ante.sock").exists()
 
-    fmt = OutputFormatter(fmt="text")
-
     # ctx.obj["config_dir"]에 A를 넣어 get_config_dir()이 A를 반환하도록 한다.
     @click.command()
     def _runner() -> None:
-        _assert_no_active_runtime(fmt)
+        _assert_no_active_runtime()
 
     runner_ctx = click.Context(_runner, obj={"config_dir": cfg_a})
     with runner_ctx:
         with pytest.raises(
             AccountStructuralChangeRequiresStoppedServerError
         ) as exc_info:
-            _assert_no_active_runtime(fmt)
+            _assert_no_active_runtime()
 
     assert exc_info.value.code == _GUARD_CODE, (
         f"cold-path guard가 A의 active runtime을 감지하지 못했다 — "
