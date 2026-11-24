@@ -117,16 +117,10 @@ class RuleEngineManager:
     ) -> None:
         """시스템 시작 시 모든 계좌의 RuleEngine 초기화.
 
-        Stored rules 우선순위 (명시 우선 정책):
-
-        1. ``dynamic_config`` (런타임 PUT으로 저장된 override). 재시작 시
-           사용자가 명시적으로 비활성화한 룰이 default 재주입으로 되살아나지
-           않도록 ``static config``보다 우선한다.
-        2. ``config`` (정적 YAML/TOML 등 startup snapshot).
-        3. 둘 다 없으면 ``stored_rules=None`` → broker_type별 default만 적용.
-
-        ``dynamic_config`` 행의 값이 리스트가 아니거나 조회가 예외를 내면 그
-        계좌만 계좌 룰 없이 ``rules_unavailable`` 상태의 엔진으로 둔다.
+        Stored rules 우선순위: ``dynamic_config`` 행(사용자가 명시적으로 비활성화한
+        룰이 default 재주입으로 되살아나지 않도록 static보다 우선) → 정적 ``config``
+        seed → broker_type별 default. ``dynamic_config`` 행의 값이 리스트가 아니거나
+        조회가 예외를 내면 그 계좌만 계좌 룰 없이 ``rules_unavailable`` 엔진으로 둔다.
         """
         for account in accounts:
             key = account_rules_config_key(account.account_id)

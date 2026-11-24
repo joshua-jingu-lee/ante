@@ -1205,6 +1205,17 @@ class RuleEngine:
             )
             object.__setattr__(event, "_consumed", True)
 
+    def _release_rules_unavailable(self, category: str) -> None:
+        """``rule`` category 재로드가 성공했으면 룰 로드 실패 상태를 푼다."""
+        if category != "rule" or not self.rules_unavailable:
+            return
+        self._rules_unavailable_cause = None
+        logger.info(
+            "계좌 룰 로드 실패 상태 해제: account=%s, rules=%s",
+            self._account_id,
+            [rule.config.get("type") for rule in self._account_rules],
+        )
+
     async def _on_config_changed(self, event: object) -> None:
         """설정 변경 시 룰 재로딩."""
         import json
@@ -1243,13 +1254,7 @@ class RuleEngine:
             else:
                 self.load_rules_from_config(new_rules)
             logger.info("계좌 룰 재로드 완료: %d건", len(self._account_rules))
-            if event.category == "rule" and self.rules_unavailable:
-                self._rules_unavailable_cause = None
-                logger.info(
-                    "계좌 룰 로드 실패 상태 해제: account=%s, rules=%s",
-                    self._account_id,
-                    [rule.config.get("type") for rule in self._account_rules],
-                )
+            self._release_rules_unavailable(event.category)
         elif event.category == "strategy_rule":
             parts = event.key.rsplit(".", 1)
             strategy_id = parts[-1] if len(parts) > 1 else event.key
