@@ -1502,7 +1502,7 @@ class TestPerformanceTracker:
 
     async def test_mdd_empty(self, performance):
         """빈 리스트 MDD = 0."""
-        rate, amount = performance._calculate_mdd([])
+        rate, amount = performance._calculate_mdd([], None)
         assert rate == 0.0
         assert amount == 0.0
 
@@ -1512,24 +1512,161 @@ class TestPerformanceTracker:
         assert amount == 0.0
 
     async def test_mdd_all_loss(self, performance):
-        """전 구간 손실 케이스 — equity curve 기반 MDD."""
+        """#2626: 전 구간 손실 — 시작 자본 1000이 첫 고점이다."""
         budget = 1000.0
         pnl_list = [-100, -200, -150]
         rate, amount = performance._calculate_mdd(pnl_list, budget)
-        # equity: [900, 700, 550]
-        # peak: 900 (첫 값), trough: 550, drawdown: 350
-        assert amount == pytest.approx(350.0)
-        assert rate == pytest.approx(350.0 / 900.0)
+        # equity: [1000, 900, 700, 550] → peak 1000, trough 550
+        assert amount == pytest.approx(450.0)
+        assert rate == pytest.approx(0.45)
 
     async def test_mdd_no_budget_backward_compat(self, performance):
-        """bot_allocated_budget=0 (기본값) 시 기존 누적PnL 기반 동작."""
+        """#2626: 시작 자본을 모르면 비율은 None, 금액은 0에서 시작한 곡선."""
         pnl_list = [100, 50, -200, 150, -300]
-        rate, amount = performance._calculate_mdd(pnl_list)
-        # equity (budget=0): [100, 150, -50, 100, -200]
-        # peak: 150, trough: -200, drawdown amount: 350
+        rate, amount = performance._calculate_mdd(pnl_list, None)
+        # equity (0 시작): [0, 100, 150, -50, 100, -200] → 금액 350
         assert amount == pytest.approx(350.0)
-        # peak > 0이므로 비율 산출 가능
-        assert rate == pytest.approx(350.0 / 150.0)
+        assert rate is None
+
+    @pytest.mark.parametrize(
+        ("capital", "pnl", "expected_rate", "expected_amount"),
+        [
+            (100.0, [-50, 200], 0.5, 50.0),
+            (100.0, [10, -50, 200], 50.0 / 110.0, 50.0),
+            (1000.0, [-100, -200, -150], 0.45, 450.0),
+            (100.0, [10, -50, 60, -80, 200], 80.0 / 120.0, 80.0),
+            (100.0, [-50, 950, -100], 0.5, 100.0),
+        ],
+    )
+    async def test_mdd_uses_starting_capital_and_drawdown_peak(
+        self, performance, capital, pnl, expected_rate, expected_amount
+    ):
+        """#2626: 시작 자본이 첫 고점, 비율의 분모는 그 낙폭의 고점."""
+        rate, amount = performance._calculate_mdd([float(p) for p in pnl], capital)
+        assert rate == pytest.approx(expected_rate)
+        assert amount == pytest.approx(expected_amount)
+
+    @pytest.mark.parametrize("capital", [None, 0.0, -100.0])
+    async def test_mdd_unknown_capital_rate_is_none(self, performance, capital):
+        """#2626: 시작 자본이 없거나 0 이하면 비율 None, 금액은 0 시작 곡선."""
+        rate, amount = performance._calculate_mdd([-100.0, -200.0, 50.0], capital)
+        assert rate is None
+        assert amount == pytest.approx(300.0)
+
+    async def _two_bot_losses(self, fill_applier, order_tracker):
+        """bot1 −500, bot2 −300의 매도 손익을 남긴다(순서와 무관하게 낙폭 800)."""
+        for bot_id, sell_price, symbol in (
+            ("bot1", 50.0, "000001"),
+            ("bot2", 70.0, "000002"),
+        ):
+            await _apply_fill(
+                fill_applier,
+                order_tracker,
+                order_id=f"{bot_id}-buy",
+                broker_order_id=f"{bot_id}-bk-buy",
+                cumulative=10.0,
+                avg_price=100.0,
+                side="buy",
+                bot_id=bot_id,
+                symbol=symbol,
+            )
+            await _apply_fill(
+                fill_applier,
+                order_tracker,
+                order_id=f"{bot_id}-sell",
+                broker_order_id=f"{bot_id}-bk-sell",
+                cumulative=10.0,
+                avg_price=sell_price,
+                side="sell",
+                bot_id=bot_id,
+                symbol=symbol,
+            )
+
+    async def test_calculate_sums_budgets_of_traded_bots(
+        self, fill_applier, order_tracker, performance
+    ):
+        """#2626: 시작 자본은 성과에 잡힌 거래의 봇들의 할당 예산의 합이다."""
+        await self._two_bot_losses(fill_applier, order_tracker)
+        metrics = await performance.calculate(
+            account_id="acc-test",
+            strategy_id="s1",
+            allocated_budgets={"bot1": 1000.0, "bot2": 1000.0, "other": 5000.0},
+        )
+        assert metrics.max_drawdown == pytest.approx(800.0 / 2000.0)
+        assert metrics.max_drawdown_amount == pytest.approx(800.0)
+
+    @pytest.mark.parametrize(
+        "budgets",
+        [None, {}, {"bot1": 1000.0}, {"bot1": -1000.0, "bot2": 0.0}],
+    )
+    async def test_calculate_rate_none_when_capital_unknown(
+        self, fill_applier, order_tracker, performance, budgets
+    ):
+        """#2626: 예산이 없는 봇이 끼거나 지도가 없으면 비율 None."""
+        await self._two_bot_losses(fill_applier, order_tracker)
+        metrics = await performance.calculate(
+            account_id="acc-test", strategy_id="s1", allocated_budgets=budgets
+        )
+        assert metrics.max_drawdown is None
+        assert metrics.max_drawdown_amount == pytest.approx(800.0)
+
+    async def test_calculate_buy_only_is_zero_without_budgets(
+        self, fill_applier, order_tracker, performance
+    ):
+        """#2626: 매도가 없으면 예산 지도와 무관하게 비율·금액 모두 0.0."""
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="buy-only",
+            broker_order_id="bk-buy-only",
+            cumulative=10.0,
+            avg_price=100.0,
+            side="buy",
+        )
+        metrics = await performance.calculate(account_id="acc-test", bot_id="bot1")
+        assert metrics.total_trades == 0
+        assert metrics.max_drawdown == 0.0
+        assert metrics.max_drawdown_amount == 0.0
+
+    async def test_legacy_budget_row_without_account_gives_none(
+        self, db, fill_applier, order_tracker, performance
+    ):
+        """#2626: 계좌 값이 NULL인 옛 예산 행의 봇은 시작 자본을 알 수 없다."""
+        from ante.cli.commands.strategy import _load_allocated_budgets
+
+        await db.execute(
+            "CREATE TABLE bot_budgets (bot_id TEXT PRIMARY KEY, "
+            "allocated REAL NOT NULL DEFAULT 0.0, account_id TEXT)"
+        )
+        await db.execute(
+            "INSERT INTO bot_budgets (bot_id, allocated, account_id) "
+            "VALUES ('bot1', 1000.0, NULL)"
+        )
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="legacy-buy",
+            broker_order_id="bk-legacy-buy",
+            cumulative=10.0,
+            avg_price=100.0,
+            side="buy",
+        )
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="legacy-sell",
+            broker_order_id="bk-legacy-sell",
+            cumulative=10.0,
+            avg_price=50.0,
+            side="sell",
+        )
+        budgets = await _load_allocated_budgets(db, "acc-test")
+        assert budgets == {}
+        metrics = await performance.calculate(
+            account_id="acc-test", strategy_id="s1", allocated_budgets=budgets
+        )
+        assert metrics.max_drawdown is None
+        assert metrics.max_drawdown_amount == pytest.approx(500.0)
 
     async def test_sharpe_under_30_returns_none(self, performance):
         """30건 미만이면 None."""

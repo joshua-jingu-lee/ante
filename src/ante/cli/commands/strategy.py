@@ -554,6 +554,20 @@ def strategy_summary(
     return CommandResult(data=result, text=tuple(table_lines(rows, columns)))
 
 
+async def _load_allocated_budgets(db: Database, account_id: str) -> dict[str, float]:
+    """계좌의 봇별 할당 예산. 예산 표가 없으면 빈 지도."""
+    try:
+        rows = await db.fetch_all(
+            "SELECT bot_id, allocated FROM bot_budgets WHERE account_id = ?",
+            (account_id,),
+        )
+    except OperationalError as e:
+        if "no such table" in str(e).lower():
+            return {}
+        raise
+    return {str(row["bot_id"]): float(row["allocated"]) for row in rows}
+
+
 @strategy.command("performance")
 @click.argument("name")
 @click.option(
@@ -611,7 +625,9 @@ def strategy_performance(
             tracker = PerformanceTracker(db)
             record = records[0]
             metrics = await tracker.calculate(
-                account_id=account_id, strategy_id=record.strategy_id
+                account_id=account_id,
+                strategy_id=record.strategy_id,
+                allocated_budgets=await _load_allocated_budgets(db, account_id),
             )
 
             return {
@@ -638,6 +654,7 @@ def strategy_performance(
     metrics = result["metrics"]
 
     sharpe = metrics["sharpe_ratio"]
+    mdd = metrics["max_drawdown"]
     lines = [
         f"전략 성과: {result['strategy_name']} ({result['strategy_id']})",
         f"  {'총 거래':15s}: {metrics['total_trades']}",
@@ -650,7 +667,9 @@ def strategy_performance(
         f"  {'평균 수익':15s}: {metrics['avg_profit']:,.0f}",
         f"  {'평균 손실':15s}: {metrics['avg_loss']:,.0f}",
         f"  {'수익 팩터':15s}: {metrics['profit_factor']:.2f}",
-        f"  {'MDD':15s}: {metrics['max_drawdown']:.1%}",
+        f"  {'MDD':15s}: {mdd:.1%}"
+        if mdd is not None
+        else f"  {'MDD':15s}: N/A (할당 예산 없음)",
         f"  {'MDD 금액':15s}: {metrics['max_drawdown_amount']:,.0f}",
         f"  {'샤프 비율':15s}: {sharpe:.2f}"
         if sharpe is not None
