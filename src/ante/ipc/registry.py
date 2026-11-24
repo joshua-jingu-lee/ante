@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from ante.account.models import missing_required_credentials
 from ante.account.presets import BROKER_PRESETS
 from ante.contracts.cli_errors import InvalidDateRangeError
 from ante.core import clock
@@ -314,7 +315,7 @@ async def _handle_bot_start(
     account = await svc.account.get(bot.config.account_id)
     preset = BROKER_PRESETS.get(account.broker_type)
     required = preset.required_credentials if preset is not None else ["app_key"]
-    missing = [key for key in required if not account.credentials.get(key)]
+    missing = missing_required_credentials(required, account.credentials)
     if missing:
         raise BotAccountCredentialsNotConfigured(
             f"계좌에 인증정보({missing[0]})가 설정되지 않았습니다"
@@ -1058,6 +1059,7 @@ def _broker_reconcile_envelope(
     *,
     account_id: str,
     fix: bool,
+    fix_applied: bool,
     bot_count: int,
     adjustments: list[dict[str, Any]],
     mismatches: list[dict[str, Any]],
@@ -1072,7 +1074,7 @@ def _broker_reconcile_envelope(
         "total_symbols": len(mismatches),
         "discrepancies": mismatches,
         "match": len(mismatches) == 0,
-        "fix_applied": fix,
+        "fix_applied": fix_applied,
         "corrections": len(adjustments),
     }
 
@@ -1084,6 +1086,7 @@ async def _handle_broker_reconcile(
     account_id = request.account_id
     fix = request.fix
 
+    await svc.account.ensure_reconcile_applicable(account_id)
     broker = await svc.account.get_broker(account_id)
     broker_positions = await broker.get_account_positions()
 
@@ -1114,6 +1117,7 @@ async def _handle_broker_reconcile(
         return _broker_reconcile_envelope(
             account_id=account_id,
             fix=fix,
+            fix_applied=fix,
             bot_count=bot_count,
             adjustments=adjustments,
             mismatches=mismatches,
@@ -1125,6 +1129,7 @@ async def _handle_broker_reconcile(
     return _broker_reconcile_envelope(
         account_id=account_id,
         fix=fix,
+        fix_applied=False,
         bot_count=bot_count,
         adjustments=[],
         mismatches=mismatches,

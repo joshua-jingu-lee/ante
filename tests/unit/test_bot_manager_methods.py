@@ -9,6 +9,7 @@ import json
 import pytest
 
 from ante.bot import BotConfig, BotError, BotManager, BotStatus
+from ante.bot.exceptions import BotAlreadyExistsError
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.strategy import (
@@ -580,16 +581,16 @@ class TestBotConfigDBRoundtrip:
         assert loaded.config.step_timeout_seconds == 45
         assert loaded.config.max_signals_per_step == 80
 
-    async def test_recreate_after_soft_delete_moves_account_column(
+    async def test_recreate_after_hard_delete_moves_account_column(
         self, manager, ctx, db
     ):
-        """soft delete 뒤 같은 bot_id 를 다른 계좌로 만들면 컬럼도 새 계좌로 바뀐다."""
+        """hard delete 뒤 같은 bot_id 를 다른 계좌로 만들면 컬럼도 새 계좌로 바뀐다."""
         await manager.create_bot(
             BotConfig(bot_id="bot-move", strategy_id="s1", account_id="acc-a"),
             SimpleStrategy,
             ctx,
         )
-        await manager.delete_bot("bot-move")
+        await manager.delete_bot("bot-move", hard=True)
         await manager.create_bot(
             BotConfig(bot_id="bot-move", strategy_id="s2", account_id="acc-b"),
             SimpleStrategy,
@@ -1044,3 +1045,99 @@ class TestCreateBotServiceBoundary:
 
         assert counter["count"] == 0
         assert manager.get_bot("bot-acc") is None
+
+
+# ── 삭제한 bot_id 의 재사용 거부 (#2700) ─────────
+
+
+class TestDeletedBotIdReuse:
+    """soft delete 한 bot_id 로는 다시 만들 수 없다 (#2700)."""
+
+    async def test_soft_deleted_id_does_not_vanish_after_reboot(
+        self, manager, eventbus, ctx, db
+    ):
+        """삭제 → 같은 id 로 생성 → 재부팅: 메모리에 있는 봇은 재부팅 뒤에도 있다."""
+        await manager.create_bot(
+            BotConfig(bot_id="bot-re", strategy_id="s1", account_id="acc-a"),
+            SimpleStrategy,
+            ctx,
+        )
+        await manager.delete_bot("bot-re")
+        try:
+            await manager.create_bot(
+                BotConfig(bot_id="bot-re", strategy_id="s2", account_id="acc-b"),
+                SimpleStrategy,
+                ctx,
+            )
+        except BotAlreadyExistsError:
+            pass
+
+        manager2 = BotManager(eventbus=eventbus, db=db)
+        await manager2.initialize()
+        await manager2.load_from_db()
+        in_memory = manager.get_bot("bot-re") is not None
+        after_reboot = manager2.get_bot("bot-re") is not None
+        assert in_memory == after_reboot
+
+    async def test_create_rejects_soft_deleted_id_and_keeps_row(self, manager, ctx, db):
+        """거부는 DB 쓰기보다 앞이라 행은 옛 값과 ``deleted`` 를 그대로 둔다."""
+        await manager.create_bot(
+            BotConfig(bot_id="bot-del", strategy_id="s1", account_id="acc-a"),
+            SimpleStrategy,
+            ctx,
+        )
+        await manager.delete_bot("bot-del")
+
+        with pytest.raises(BotAlreadyExistsError, match=r"\(deleted\): bot-del"):
+            await manager.create_bot(
+                BotConfig(bot_id="bot-del", strategy_id="s2", account_id="acc-b"),
+                SimpleStrategy,
+                ctx,
+            )
+
+        row = await db.fetch_one(
+            "SELECT strategy_id, account_id, status FROM bots WHERE bot_id = ?",
+            ("bot-del",),
+        )
+        assert (row["strategy_id"], row["account_id"], row["status"]) == (
+            "s1",
+            "acc-a",
+            "deleted",
+        )
+        assert manager.get_bot("bot-del") is None
+
+    async def test_is_bot_id_taken(self, manager, ctx):
+        """메모리·``deleted`` 행이면 참, 없는 id 와 hard delete 뒤면 거짓."""
+        for bot_id in ("bot-live", "bot-soft", "bot-hard"):
+            await manager.create_bot(
+                BotConfig(bot_id=bot_id, strategy_id="s1", account_id="acc-a"),
+                SimpleStrategy,
+                ctx,
+            )
+        await manager.delete_bot("bot-soft")
+        await manager.delete_bot("bot-hard", hard=True)
+
+        assert await manager.is_bot_id_taken("bot-live") is True
+        assert await manager.is_bot_id_taken("bot-soft") is True
+        assert await manager.is_bot_id_taken("bot-hard") is False
+        assert await manager.is_bot_id_taken("bot-none") is False
+
+    async def test_non_deleted_orphan_row_can_be_recreated(
+        self, manager, eventbus, ctx, db
+    ):
+        """``deleted`` 가 아닌데 메모리에 없는 행의 id 는 거부하지 않는다."""
+        await manager.create_bot(
+            BotConfig(bot_id="bot-orphan", strategy_id="s1", account_id="acc-a"),
+            SimpleStrategy,
+            ctx,
+        )
+        manager2 = BotManager(eventbus=eventbus, db=db)
+        await manager2.initialize()
+
+        assert await manager2.is_bot_id_taken("bot-orphan") is False
+        bot = await manager2.create_bot(
+            BotConfig(bot_id="bot-orphan", strategy_id="s2", account_id="acc-b"),
+            SimpleStrategy,
+            ctx,
+        )
+        assert manager2.get_bot("bot-orphan") is bot

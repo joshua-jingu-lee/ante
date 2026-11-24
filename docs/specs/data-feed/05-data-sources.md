@@ -136,8 +136,9 @@ ROE = 당기순이익 / 자본총계
 
 **지표 계산 규칙:**
 
-- 계산기는 `source`가 `data_go_kr`인 행(이하 일별 행)의 `market_cap`(시가총액)·`shares_listed`(상장주식수)와 `source`가 `dart`인 행(이하 분기 행)의 `net_income`(당기순이익)·`total_equity`(자본총계)·`total_debt`(부채총계)를 as-of 결합해 위 지표를 계산하고 일별 행에 쓴다.
-- 일별 행마다, 결합 키가 그 행의 `date` 이하(같은 날 포함)인 분기 행 가운데 결합 키가 가장 늦은 행 하나의 `net_income`·`total_equity`·`total_debt`를 쓴다. 그 행에서 null인 값을 다른 분기 행의 값으로 채우지 않는다.
+- 계산기는 `source`가 `data_go_kr`인 행(이하 일별 행)의 `market_cap`(시가총액)·`shares_listed`(상장주식수)와 `source`가 `dart`인 행(이하 분기 행)의 `net_income`(당기순이익)·`total_equity`(자본총계)·`total_debt`(부채총계)를 as-of 결합해 위 지표를 계산하고, 계산한 지표를 일별 행에 기록한다.
+- 일별 행마다, 결합 키가 그 행의 `date` 이하(같은 날 포함)인 분기 행 가운데 결합 키가 가장 늦은 행 하나의 `net_income`·`total_equity`·`total_debt`를 계산에 쓴다. 그 행에서 null인 값을 다른 분기 행의 값으로 채우지 않는다.
+- 계산기는 일별 행을 다시 쓸 때 `FUNDAMENTAL_SCHEMA`(`ante.data.schemas`)에 있는 열만 남긴다. 그래서 결합에 쓴 분기 행의 `net_income`이 계산한 지표와 함께 일별 행에 그대로 기록되고, `total_equity`·`total_debt`는 일별 행에 기록되지 않는다. 다시 쓴 일별 행 가운데 결합한 분기 행이 없거나 그 행의 `net_income`이 null인 행은 `net_income`이 null이다. fundamental의 natural key는 `(date, source)`라([04-schema.md](04-schema.md)) `date`가 같은 일별 행과 분기 행은 서로 다른 행으로 남는다.
 - 분기 행의 결합 키는 `available_date`다. `available_date`가 null이거나 열이 없으면 `date`에 일수를 더한 날이며, 일수는 `date`의 월이 3·6·9월이면 45일, 12월이면 90일이다. 이 둘로 결합 키가 정해지지 않는 분기 행은 결합하지 않는다.
 - TTM(최근 4분기 합산)이나 연환산을 하지 않는다.
 - 분모가 0이거나 null이면 그 지표는 null이다.

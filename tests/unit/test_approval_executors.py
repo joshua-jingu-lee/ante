@@ -76,6 +76,7 @@ def _build_deps(monkeypatch: pytest.MonkeyPatch) -> tuple[SimpleNamespace, dict]
     }
     bot_manager = MagicMock()
     bot_manager.get_bot = MagicMock(side_effect=bots.get)
+    bot_manager.is_bot_id_taken = AsyncMock(side_effect=lambda b: b in bots)
     bot_manager.create_bot = AsyncMock()
     bot_manager.assign_strategy = AsyncMock()
     bot_manager.change_strategy = AsyncMock()

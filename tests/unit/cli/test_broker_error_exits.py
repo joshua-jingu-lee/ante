@@ -251,7 +251,9 @@ class _Harness:
         self.broker_error: BaseException | None = None
         self.with_db = False
 
-    async def _get_broker(self, account_id: str | None = None) -> tuple[Any, Any]:
+    async def _get_broker(
+        self, account_id: str | None = None, *, reconcile: bool = False
+    ) -> tuple[Any, Any]:
         if self.broker_error is not None:
             raise self.broker_error
         return self.adapter, self.db if self.with_db else None
@@ -259,6 +261,10 @@ class _Harness:
     @property
     def direct_calls(self) -> list[Any]:
         return list(self.get_broker.await_args_list)
+
+
+def _direct_call(name: str) -> Any:
+    return call(_ACCOUNT, reconcile=True) if name == "reconcile" else call(_ACCOUNT)
 
 
 def _invoke(
@@ -335,7 +341,7 @@ def test_server_down_falls_back_to_a_direct_connection(name: str, mode: str) -> 
     result = _invoke(mode, name, harness)
 
     _assert_ipc_request(name, harness)
-    assert harness.direct_calls == [call(_ACCOUNT)]
+    assert harness.direct_calls == [_direct_call(name)]
     _assert_success(mode, name, result, _DIRECT_RESULTS[name], _DIRECT_TEXT[name])
 
 
@@ -417,7 +423,7 @@ def test_fallback_account_not_found(name: str, mode: str) -> None:
 
     result = _invoke(mode, name, harness)
 
-    assert harness.direct_calls == [call(_ACCOUNT)]
+    assert harness.direct_calls == [_direct_call(name)]
     _assert_error(
         mode,
         result,
@@ -443,7 +449,7 @@ def test_fallback_broker_error_keeps_its_code(name: str, mode: str) -> None:
 
     result = _invoke(mode, name, harness)
 
-    assert harness.direct_calls == [call(_ACCOUNT)]
+    assert harness.direct_calls == [_direct_call(name)]
     assert method.await_count == 1
     harness.adapter.disconnect.assert_awaited_once()
     _assert_error(

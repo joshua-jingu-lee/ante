@@ -2476,3 +2476,166 @@ async def test_existing_mock_row_with_invalid_price_still_assembles(
         assert math.isnan(await adapter.get_current_price("000009"))
     else:
         assert await adapter.get_current_price("000001") is True
+
+
+# ── 필수 인증정보의 빈 값·공백만의 값 (#2825) ──────────────────
+
+_BLANK_VALUES = ["", "  ", "\t\n", "　"]
+_SECRET_MARK = "SECRET-MARK-2825"
+
+
+def test_is_blank_credential_matches_falsy_or_whitespace_only():
+    """거짓 값이거나 공백만인 문자열이면 비었다. 비문자열 참 값은 비지 않았다."""
+    from ante.account.models import is_blank_credential
+
+    for value in [None, "", 0, False, "  ", "\t\n", "　"]:
+        assert is_blank_credential(value), repr(value)
+    for value in ["k", " k ", 1234, True, ["x"]]:
+        assert not is_blank_credential(value), repr(value)
+
+
+def test_missing_required_credentials_keeps_preset_order_and_returns_keys_only():
+    """빠진 키를 프리셋 순서로 돌려준다(값이 아니라 키 이름만)."""
+    from ante.account.models import missing_required_credentials
+
+    required = ["app_key", "app_secret", "account_no"]
+    credentials = {"app_key": _SECRET_MARK, "app_secret": "  ", "is_paper": ""}
+
+    assert missing_required_credentials(required, credentials) == [
+        "app_secret",
+        "account_no",
+    ]
+    assert missing_required_credentials([], {"app_key": " "}) == []
+    full = {"app_key": 1, "app_secret": "s", "account_no": 9}
+    assert missing_required_credentials(required, full) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank", _BLANK_VALUES)
+async def test_create_rejects_blank_required_credential(service, db, blank):
+    """필수 키의 값이 비었거나 공백만이면 거부하고 행을 만들지 않는다."""
+    account = _make_account(credentials={"app_key": blank, "app_secret": _SECRET_MARK})
+
+    with pytest.raises(MissingCredentialsError) as exc:
+        await service.create(account)
+
+    message = str(exc.value)
+    assert "app_key" in message
+    assert _SECRET_MARK not in message
+    rows = await db.fetch_all(
+        "SELECT account_id FROM accounts WHERE account_id = ?", ("main",)
+    )
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_judge_extra_keys(service):
+    """프리셋의 필수 키가 아닌 여분 키는 판정하지 않는다."""
+    account = _make_account(
+        credentials={"app_key": "k", "app_secret": "s", "is_paper": "  "}
+    )
+
+    result = await service.create(account)
+
+    assert result.credentials["is_paper"] == "  "
+
+
+@pytest.mark.asyncio
+async def test_create_keeps_surrounding_whitespace_without_normalizing(service):
+    """앞뒤 공백이 있는 값은 거부하지도 자르지도 않는다."""
+    result = await service.create(
+        _make_account(credentials={"app_key": " k ", "app_secret": "s\n"})
+    )
+
+    stored = await service.get(result.account_id)
+    assert stored.credentials == {"app_key": " k ", "app_secret": "s\n"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank", _BLANK_VALUES)
+async def test_update_rejects_blank_credentials_and_keeps_stored(service, blank):
+    """수정으로 넘긴 인증정보가 비었거나 공백만이면 거부하고 저장값을 두지 않는다."""
+    await service.create(
+        _make_account(credentials={"app_key": "k0", "app_secret": "s0"})
+    )
+
+    with pytest.raises(MissingCredentialsError) as exc:
+        await service.update(
+            "main", credentials={"app_key": _SECRET_MARK, "app_secret": blank}
+        )
+
+    assert "app_secret" in str(exc.value)
+    assert _SECRET_MARK not in str(exc.value)
+    stored = await service.get("main")
+    assert stored.credentials == {"app_key": "k0", "app_secret": "s0"}
+
+
+async def _store_blank_kis_account(service, db, eventbus) -> AccountService:
+    """공백 인증정보가 저장된 KIS 계좌를 두고 기동 때처럼 새 서비스를 띄운다."""
+    from ante.account.crypto import encrypt_credentials
+
+    preset = BROKER_PRESETS["kis-domestic"]
+    await service.create(
+        _make_account(
+            account_id="kis1",
+            exchange="KRX",
+            broker_type="kis-domestic",
+            credentials={k: "v" for k in preset.required_credentials},
+        )
+    )
+    blank = {"app_key": "  ", "app_secret": "", "account_no": "1"}
+    await db.execute(
+        "UPDATE accounts SET credentials = ? WHERE account_id = ?",
+        (encrypt_credentials(blank), "kis1"),
+    )
+    booted = AccountService(db, eventbus)
+    await booted.initialize()
+    return booted
+
+
+@pytest.mark.asyncio
+async def test_update_broker_config_only_skips_credential_judgement(
+    service, db, eventbus
+):
+    """``broker_config``만 바꾸는 수정은 저장된 공백 인증정보를 판정하지 않는다."""
+    booted = await _store_blank_kis_account(service, db, eventbus)
+
+    updated = await booted.update("kis1", broker_config={"is_paper": True})
+
+    assert updated.broker_config == {"is_paper": True}
+    assert updated.credentials["app_key"] == "  "
+
+
+@pytest.mark.asyncio
+async def test_is_paper_migration_succeeds_with_stored_blank_credentials(
+    service, db, eventbus
+):
+    """데몬 기동의 is_paper 이행은 공백 인증정보가 저장된 KIS 계좌에서도 끝난다."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from ante.main import _migrate_is_paper_to_broker_config
+
+    booted = await _store_blank_kis_account(service, db, eventbus)
+    config = MagicMock()
+    config.get.return_value = True
+
+    await _migrate_is_paper_to_broker_config(
+        SimpleNamespace(config=config, account_service=booted)
+    )
+
+    stored = await booted.get("kis1")
+    assert stored.broker_config["is_paper"] is True
+    assert stored.credentials["app_key"] == "  "
+
+
+@pytest.mark.asyncio
+async def test_mock_account_without_credentials_creates_and_updates(service):
+    """인증정보가 없는 ``mock`` 계좌의 생성·수정은 지금처럼 통과한다."""
+    account = _make_account(account_id="mock1", broker_type="mock", credentials={})
+
+    await service.create(account)
+    await service.update("mock1", credentials={})
+    updated = await service.update("mock1", broker_config={"x": 1})
+
+    assert updated.credentials == {}

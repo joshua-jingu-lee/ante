@@ -124,7 +124,7 @@ allowlist 후보에서 제거한다.
 | `ante broker balance --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 조회 (`--account` 필수) |
 | `ante broker positions --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 조회 (`--account` 필수) |
 | `ante broker order-history --account <account_id> [--from <날짜>] [--to <날짜>]` | `runtime IPC` | 서버 BrokerAdapter 주문/체결 이력 live 조회 (`--account` 필수, read-only) |
-| `ante broker reconcile --account <account_id> [--fix]` | `runtime IPC` | 서버 PositionReconciler (`--account` 필수) |
+| `ante broker reconcile --account <account_id> [--fix]` | `runtime IPC` | 서버 PositionReconciler (`--account` 필수). 가상 계좌는 `ACCOUNT_RECONCILE_NOT_APPLICABLE`로 거부 |
 | `ante data list/schema/storage/validate/info/delete ...` | `offline` | canonical data root 또는 명시 data path 대상 |
 | `ante backtest run <strategy_path> ...` | `external process` | `python -m ante.backtest.runner` subprocess 격리 실행 (D-004) |
 | `ante backtest history <strategy_name> [--limit N]` | `offline` | BacktestRunStore 조회 |
@@ -254,6 +254,9 @@ known key만 읽음). 사용자가 오타나 잘못된 key를 `--broker-config`�
 - `--credential-env`이 참조한 환경변수가 설정되지 않으면 `ACCOUNT_CREDENTIAL_ENV_NOT_SET`,
   `--credential-file`이 가리키는 파일이 존재하지 않으면 `ACCOUNT_CREDENTIAL_FILE_NOT_FOUND`로
   실패한다.
+- credential 값이 비었거나 공백만이면 채널별 코드로 실패한다(`--credential`:
+  `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` / `--credential-env`: `ACCOUNT_CREDENTIAL_ENV_NOT_SET` /
+  `--credential-file`: `ACCOUNT_CREDENTIAL_FILE_NOT_FOUND`).
 - prompt fallback은 없다. 누락 입력은 즉시 구조화된 에러로 종료한다.
 
 #### `account set-credentials` 입력 계약

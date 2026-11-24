@@ -99,7 +99,7 @@ executors = {
 | `strategy_retire` | 전략이 이미 ARCHIVED 상태인가 | `fail` | StrategyRegistry |
 | `bot_create` | `params.config`가 `BotConfig`로 변환 가능한가 | `fail` | BotManager |
 | `bot_create` | 전략이 adopted 상태인가 | `fail` | StrategyRegistry |
-| `bot_create` | 동일 ID의 봇이 이미 존재하는가 | `fail` | BotManager |
+| `bot_create` | 동일 ID의 봇이 이미 존재하는가(삭제한 봇의 ID 포함) | `fail` | BotManager |
 | `bot_delete` | 보유 포지션이 있는가 | `fail` | Trade |
 | `bot_delete` | 봇이 stopped 상태인가 | `fail` | BotManager |
 | `bot_change_strategy` | 봇이 stopped 상태인가 | `fail` | BotManager |

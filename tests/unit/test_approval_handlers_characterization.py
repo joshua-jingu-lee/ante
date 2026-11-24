@@ -116,10 +116,15 @@ class _BotManager:
         self.bots = bots
         self.tag = tag
         self.stop_error: BaseException | None = None
+        self.deleted_ids: set[Any] = set()
 
     def get_bot(self, bot_id: Any) -> Any:
         self._log.add(f"{self.tag}.get_bot", bot_id)
         return self.bots.get(bot_id)
+
+    async def is_bot_id_taken(self, bot_id: Any) -> bool:
+        self._log.add(f"{self.tag}.is_bot_id_taken", bot_id)
+        return bot_id in self.bots or bot_id in self.deleted_ids
 
     async def create_bot(self, **kwargs: Any) -> None:
         self._log.add(f"{self.tag}.create_bot", **kwargs)
@@ -717,7 +722,7 @@ class TestBotValidators:
                 _create_params("b-new", "s-adopted"),
                 [("pass", "", "system:bot_manager")],
                 [
-                    ("bot_manager.get_bot", ("b-new",), {}),
+                    ("bot_manager.is_bot_id_taken", ("b-new",), {}),
                     ("strategy_registry.get", ("s-adopted",), {}),
                 ],
             ),
@@ -736,7 +741,7 @@ class TestBotValidators:
                     ),
                 ],
                 [
-                    ("bot_manager.get_bot", ("b-stopped",), {}),
+                    ("bot_manager.is_bot_id_taken", ("b-stopped",), {}),
                     ("strategy_registry.get", ("s-x",), {}),
                 ],
             ),
@@ -758,6 +763,17 @@ class TestBotValidators:
     ) -> None:
         assert await _validate(env, "bot_create", params) == expected
         assert env.log.calls == calls
+
+    async def test_create_rejects_deleted_bot_id(self, env: _Env) -> None:
+        env.s.bot_manager.deleted_ids.add("b-deleted")
+        params = _create_params("b-deleted", "s-adopted")
+        assert await _validate(env, "bot_create", params) == [
+            ("fail", "동일 ID의 봇이 이미 존재: b-deleted", "system:bot_manager")
+        ]
+        assert env.log.calls == [
+            ("bot_manager.is_bot_id_taken", ("b-deleted",), {}),
+            ("strategy_registry.get", ("s-adopted",), {}),
+        ]
 
     async def test_delete_missing_bot(self, env: _Env) -> None:
         assert await _validate(env, "bot_delete", {"bot_id": "b-x"}) == [

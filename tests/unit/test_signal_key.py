@@ -197,6 +197,7 @@ class TestBotManagerSignalKey:
         db = MagicMock()
         db.execute = AsyncMock()
         db.execute_script = AsyncMock()
+        db.fetch_one = AsyncMock(return_value=None)
         eventbus = MagicMock()
         eventbus.subscribe = MagicMock()
 
@@ -222,6 +223,7 @@ class TestBotManagerSignalKey:
         db = MagicMock()
         db.execute = AsyncMock()
         db.execute_script = AsyncMock()
+        db.fetch_one = AsyncMock(return_value=None)
         eventbus = MagicMock()
         eventbus.subscribe = MagicMock()
 
@@ -247,6 +249,7 @@ class TestBotManagerSignalKey:
         db = MagicMock()
         db.execute = AsyncMock()
         db.execute_script = AsyncMock()
+        db.fetch_one = AsyncMock(return_value=None)
         eventbus = MagicMock()
         eventbus.subscribe = MagicMock()
         eventbus.unsubscribe = MagicMock()
@@ -276,6 +279,7 @@ class TestBotManagerSignalKey:
         db = MagicMock()
         db.execute = AsyncMock()
         db.execute_script = AsyncMock()
+        db.fetch_one = AsyncMock(return_value=None)
         eventbus = MagicMock()
         eventbus.subscribe = MagicMock()
 
@@ -303,6 +307,7 @@ class TestBotManagerSignalKey:
         db = MagicMock()
         db.execute = AsyncMock()
         db.execute_script = AsyncMock()
+        db.fetch_one = AsyncMock(return_value=None)
         eventbus = MagicMock()
         eventbus.subscribe = MagicMock()
 
@@ -328,6 +333,7 @@ class TestBotManagerSignalKey:
         db = MagicMock()
         db.execute = AsyncMock()
         db.execute_script = AsyncMock()
+        db.fetch_one = AsyncMock(return_value=None)
         eventbus = MagicMock()
         eventbus.subscribe = MagicMock()
 
@@ -392,6 +398,7 @@ class TestBotManagerSignalKey:
         db = MagicMock()
         db.execute = AsyncMock()
         db.execute_script = AsyncMock()
+        db.fetch_one = AsyncMock(return_value=None)
         eventbus = MagicMock()
         eventbus.subscribe = MagicMock()
 
@@ -411,6 +418,7 @@ class TestBotManagerSignalKey:
         db = MagicMock()
         db.execute = AsyncMock()
         db.execute_script = AsyncMock()
+        db.fetch_one = AsyncMock(return_value=None)
         eventbus = MagicMock()
         eventbus.subscribe = MagicMock()
 
@@ -433,6 +441,7 @@ class TestBotManagerSignalKey:
         db = MagicMock()
         db.execute = AsyncMock()
         db.execute_script = AsyncMock()
+        db.fetch_one = AsyncMock(return_value=None)
         eventbus = MagicMock()
         eventbus.subscribe = MagicMock()
 

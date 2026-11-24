@@ -96,8 +96,8 @@ error code를 사용한다.
   `BotManager.get_bot()`이 `None`을 반환.
 - `BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED` (신규): `bot.start`에서 계좌의 브로커
   프리셋(`BROKER_PRESETS[account.broker_type].required_credentials`)이 요구하는
-  인증정보 키 가운데 계좌의 `credentials`에 없거나 값이 빈 키가 있음. 메시지는
-  `계좌에 인증정보(<key>)가 설정되지 않았습니다`이고, 빠진 키가 여럿이면 `<key>`는
+  인증정보 키 가운데 계좌의 `credentials`에 없거나 값이 비었거나 공백만인 키가 있음.
+  메시지는 `계좌에 인증정보(<key>)가 설정되지 않았습니다`이고, 빠진 키가 여럿이면 `<key>`는
   프리셋 순서로 첫 키다. 필수 인증정보가 없는 브로커(`mock`)는 이 사전 확인을
   통과한다. 프리셋이 없는 `broker_type`은 `app_key`만 확인한다.
 - `BOT_STATE_CONFLICT` (신규): `bot.start`/`bot.stop`의 `BotManager.start_bot()` /
@@ -165,6 +165,14 @@ credentials 복호화, 연결 세션, rate limit, circuit breaker, audit 경로�
 있다. 서버가 실행 중이 아닐 때의 직접 연결 폴백은 예외다. 서버가 거부하거나 응답하지
 않으면 그 코드로 끝난다. `broker order`와 `broker stream prices`는 일반 운영 IPC 대상이 아니며 별도
 maintenance/test 스펙 없이는 제공하지 않는다.
+
+`broker.reconcile` 응답의 `fix`는 요청의 플래그이고, `fix_applied`는 보정 경로를
+탔는가다. `fix`이고 계좌의 봇이 정확히 하나이면 `true`이며, 보정 건수가 0이어도
+`true`다. 봇이 0개이거나 둘 이상인 계좌는 감지만 하므로
+([15-reconciliation.md](../broker-adapter/15-reconciliation.md)) `false`다.
+`corrections`는 실제 보정 건수(`adjustments`의 길이)다. `ante broker reconcile --fix`의
+사람용 출력은 `fix_applied`가 `false`이면 보정 건수 대신 자동 보정을 하지 않았다는 한
+줄을 낸다(#2632).
 
 #### Signal
 
@@ -291,6 +299,8 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 `broker.reconcile`은 CLI `--fix=False` 경로에서도 같은 IPC command를 사용하지만, 한 command
 이름에 mutating/read-only 의미를 섞지 않고 일괄 mutating으로 분류한다. dry-run 전용
 IPC command 분리는 별도 이슈 범위다.
+가상 계좌에 대한 `broker.reconcile`은 브로커 조회 전에 `ACCOUNT_RECONCILE_NOT_APPLICABLE`로
+거부된다([15-reconciliation.md](../broker-adapter/15-reconciliation.md)).
 
 `account.delete`처럼 1.0 IPC 계약에서 제외되어 `CommandRegistry`에 등록되지 않는 명령은
 taxonomy 대상이 아니다. `member.*` 9개(`member.update_scopes` + admin mutation 8개)는 모두

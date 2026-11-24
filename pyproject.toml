@@ -20,6 +20,9 @@ dependencies = [
     "websockets>=13.0",
     # cryptography 47/48 arm64 wheels SIGILL on Docker/Apple Silicon (#1293)
     "cryptography>=44.0,<47",
+    "pydantic-core",
+    "numpy",
+    "pandas",
 ]
 
 [project.scripts]
