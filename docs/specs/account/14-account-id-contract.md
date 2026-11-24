@@ -379,9 +379,10 @@ from ante.account.scoping import (
     ACCOUNT_ID_PATTERN,           # re.Pattern[str]
     INVALID_RUNTIME_ACCOUNT_IDS,  # frozenset[str] = {"default"}
     RESTRICTED_NEW_ACCOUNT_IDS,   # frozenset[str] = {"test"}
+    InvalidAccountIdError,        # AccountError 하위, code = "VALIDATION_ERROR"
     is_invalid_account_id,        # (str | None) -> bool
     require_account_id,           # (str | None, *, context: str = "") -> str
-    validate_new_account_id,      # (str | None) -> str
+    validate_new_account_id,      # (str | None, *, context: str = "") -> str
 )
 ```
 

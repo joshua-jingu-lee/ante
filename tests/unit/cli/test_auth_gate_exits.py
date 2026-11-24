@@ -445,6 +445,22 @@ def test_real_cli_gate_exit(
     )
 
 
+@pytest.mark.parametrize("out", [_TEXT, _JSON])
+def test_undecodable_token_file_is_no_token(
+    out: str, env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    token_file = tmp_path / "token.bin"
+    token_file.write_bytes(b"fake-tok\xff\xfe-tail\n")
+    _apply(monkeypatch, _NO_TOKEN)
+    monkeypatch.setenv("ANTE_TOKEN_FILE", str(token_file))
+    result = _invoke(cli, ["--format", out, "account", "list"])
+    assert (result.exit_code, result.stdout, result.stderr) == _expected(
+        out, "auth_required", _REQ
+    )
+    for trace in ("0xff", "0xfe", "codec", "position", "fake-tok"):
+        assert trace not in result.stdout + result.stderr
+
+
 def test_account_group_level_format_is_usage_error(
     env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
