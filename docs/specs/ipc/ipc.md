@@ -96,8 +96,8 @@ error code를 사용한다.
   `BotManager.get_bot()`이 `None`을 반환.
 - `BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED` (신규): `bot.start`에서 계좌의 브로커
   프리셋(`BROKER_PRESETS[account.broker_type].required_credentials`)이 요구하는
-  인증정보 키 가운데 계좌의 `credentials`에 없거나 값이 빈 키가 있음. 메시지는
-  `계좌에 인증정보(<key>)가 설정되지 않았습니다`이고, 빠진 키가 여럿이면 `<key>`는
+  인증정보 키 가운데 계좌의 `credentials`에 없거나 값이 비었거나 공백만인 키가 있음.
+  메시지는 `계좌에 인증정보(<key>)가 설정되지 않았습니다`이고, 빠진 키가 여럿이면 `<key>`는
   프리셋 순서로 첫 키다. 필수 인증정보가 없는 브로커(`mock`)는 이 사전 확인을
   통과한다. 프리셋이 없는 `broker_type`은 `app_key`만 확인한다.
 - `BOT_STATE_CONFLICT` (신규): `bot.start`/`bot.stop`의 `BotManager.start_bot()` /
