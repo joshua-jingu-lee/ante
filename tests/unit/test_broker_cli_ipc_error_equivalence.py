@@ -8,7 +8,7 @@ sub-PR 3 (bot) / sub-PR 4 (treasury) 의 1:1 동형 패턴.
 검증 대상 fault:
 
 - ``APIError`` → ``BROKER_API_ERROR`` (external; KIS API business/HTTP error)
-- ``AuthenticationError`` → ``BROKER_AUTH_FAILED`` (auth; KIS OAuth 토큰
+- ``AuthenticationError`` → ``BROKER_AUTH_FAILED`` (external; KIS OAuth 토큰
   발급/갱신 실패)
 - ``OrderNotFoundError`` → ``BROKER_ORDER_NOT_FOUND`` (not_found; broker side
   주문 부재)
