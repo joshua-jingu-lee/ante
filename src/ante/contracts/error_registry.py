@@ -76,7 +76,6 @@ from ante.contracts.cli_errors import (
     BacktestInvalidExchangeError,
     BacktestInvalidSymbolError,
     BacktestInvalidTimeframeError,
-    BotInvalidParamError,
     BotMissingRequiredAccountError,
     CliAlreadyInitializedError,
     CliAuthFailedError,
@@ -914,11 +913,6 @@ _APPROVAL_INVALID_TYPE_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="validation",
 )
 
-_BOT_INVALID_PARAM_SPEC: Final[ErrorSpec] = ErrorSpec(
-    code="BOT_INVALID_PARAM",
-    category="validation",
-)
-
 _BOT_MISSING_REQUIRED_ACCOUNT_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="BOT_MISSING_REQUIRED_ACCOUNT",
     category="validation",
@@ -1209,7 +1203,6 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     UpdateServerRunningError: _UPDATE_SERVER_RUNNING_SPEC,
     ApprovalInvalidStatusError: _APPROVAL_INVALID_STATUS_SPEC,
     ApprovalInvalidTypeError: _APPROVAL_INVALID_TYPE_SPEC,
-    BotInvalidParamError: _BOT_INVALID_PARAM_SPEC,
     BotMissingRequiredAccountError: _BOT_MISSING_REQUIRED_ACCOUNT_SPEC,
     CliBotNotFoundError: _BOT_NOT_FOUND_SPEC,
     CliMissingRequiredInputError: _CLI_MISSING_REQUIRED_INPUT_SPEC,

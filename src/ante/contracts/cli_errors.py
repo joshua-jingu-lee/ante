@@ -21,7 +21,6 @@ __all__ = [
     "BacktestInvalidExchangeError",
     "BacktestInvalidSymbolError",
     "BacktestInvalidTimeframeError",
-    "BotInvalidParamError",
     "BotMissingRequiredAccountError",
     "CliAlreadyInitializedError",
     "CliAuthFailedError",
@@ -172,10 +171,6 @@ class BacktestInvalidSymbolError(Exception):
 
 class BacktestInvalidTimeframeError(Exception):
     code = "BACKTEST_INVALID_TIMEFRAME"
-
-
-class BotInvalidParamError(Exception):
-    code = "BOT_INVALID_PARAM"
 
 
 class BotMissingRequiredAccountError(Exception):
@@ -475,7 +470,6 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     BacktestInvalidExchangeError,
     BacktestInvalidSymbolError,
     BacktestInvalidTimeframeError,
-    BotInvalidParamError,
     BotMissingRequiredAccountError,
     CliAlreadyInitializedError,
     CliAuthFailedError,

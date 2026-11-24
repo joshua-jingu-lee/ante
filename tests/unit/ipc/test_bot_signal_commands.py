@@ -704,7 +704,7 @@ def _audited_by_cli(harness: _Harness, action: str, detail: str = "") -> None:
     )
 
 
-def test_cli_create_with_a_param_passes_the_same_config() -> None:
+def test_cli_create_with_every_option_passes_the_same_config() -> None:
     harness = _Harness()
     sent, output = _run_cli(
         harness,
@@ -721,8 +721,6 @@ def test_cli_create_with_a_param_passes_the_same_config() -> None:
             "120",
             "--id",
             "b-7",
-            "--param",
-            "threshold=0.5",
         ],
     )
     assert sent == [

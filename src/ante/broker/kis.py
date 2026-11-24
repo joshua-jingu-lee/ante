@@ -22,6 +22,7 @@ from ante.broker.error_codes import (
     is_retryable_msg_code,
 )
 from ante.broker.exceptions import (
+    ORDER_OUTCOME_UNKNOWN,
     APIError,
     AuthenticationError,
     CircuitOpenError,
@@ -71,6 +72,14 @@ _ORDER_TR_IDS = frozenset(
         "VTTC0013U",
         "TTTC0013U",
     }
+)
+
+_NEW_ORDER_TR_IDS = frozenset({"VTTC0012U", "TTTC0012U", "VTTC0011U", "TTTC0011U"})
+
+_UNKNOWN_OUTCOME_HTTP_STATUSES = frozenset({500, 502, 503, 504})
+
+_REGISTERED_MSG_CODES = (
+    PERMANENT_MSG_CODES | TRANSIENT_MSG_CODES | {TOKEN_RATE_LIMIT_MSG_CODE}
 )
 
 DEFAULT_EXCG_ID_DVSN_CD = "KRX"
@@ -201,6 +210,31 @@ def _parse_psbl_amount(
         except (TypeError, ValueError):
             pass
     return _to_float(output.get(fallback_field))
+
+
+def _order_outcome_unknown(error: Exception) -> bool:
+    """접수 여부를 알 수 없는 실패(무응답·끊김·미등록 코드 5xx·해석 못 한 200)인지."""
+    import aiohttp
+
+    if isinstance(
+        error, (TimeoutError, ConnectionError, OSError, json.JSONDecodeError)
+    ):
+        return True
+    if isinstance(
+        error,
+        (
+            aiohttp.ClientConnectionError,
+            aiohttp.ClientPayloadError,
+            aiohttp.ContentTypeError,
+        ),
+    ):
+        return True
+    if isinstance(error, APIError):
+        return (
+            error.status_code in _UNKNOWN_OUTCOME_HTTP_STATUSES
+            and error.error_code not in _REGISTERED_MSG_CODES
+        )
+    return False
 
 
 class KISErrorClassifier:
@@ -644,13 +678,21 @@ class KISBaseAdapter(BrokerAdapter):
                 return result
             except Exception as e:
                 retryable, record_failure = KISErrorClassifier.classify(e)
-                if not retryable:
+                unknown = tr_id in _NEW_ORDER_TR_IDS and _order_outcome_unknown(e)
+                if not retryable and not unknown:
                     raise
                 last_error = KISErrorClassifier.to_api_error(e, timeout)
                 if record_failure and not (
                     cb_exempt_timeout and isinstance(e, TimeoutError)
                 ):
                     self._circuit_breaker.record_failure()
+                if unknown:
+                    cause = str(last_error) or type(e).__name__
+                    raise APIError(
+                        f"주문 접수 여부 미상 — 다시 보내지 않음: {cause}",
+                        status_code=e.status_code if isinstance(e, APIError) else 0,
+                        error_code=ORDER_OUTCOME_UNKNOWN,
+                    ) from e
                 if self._retry_handler.should_retry(attempt, max_retries):
                     await self._retry_handler.wait_and_log(
                         attempt, max_retries, tr_id, e

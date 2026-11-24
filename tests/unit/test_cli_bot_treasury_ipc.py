@@ -222,46 +222,6 @@ class TestBotCreateIpc:
         assert sent_args["account_id"] == "acc-1"
         assert sent_args["interval_seconds"] == 120
 
-    @patch(
-        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
-    )
-    @patch("ante.cli.commands.ipc_helpers.IPCClient")
-    def test_bot_create_with_params(self, mock_ipc_cls, mock_socket) -> None:
-        """--param 옵션은 IPC args에 실리지 않는다(핸들러가 읽지 않는다. #2684)."""
-        mock_client = AsyncMock()
-        mock_client.send.return_value = {
-            "id": "req-1",
-            "status": "ok",
-            "result": {"bot_id": "bot-abc123"},
-        }
-        mock_ipc_cls.return_value = mock_client
-
-        result = _invoke_cli(
-            [
-                "bot",
-                "create",
-                "--name",
-                "테스트봇",
-                "--strategy",
-                "strat-1",
-                "--account",
-                "acc-1",
-                "--param",
-                "threshold=0.5",
-                "--param",
-                "window=20",
-            ]
-        )
-
-        assert result.exit_code == 0
-        sent_args = mock_client.send.call_args[0][1]
-        assert sent_args == {
-            "name": "테스트봇",
-            "strategy_id": "strat-1",
-            "account_id": "acc-1",
-            "interval_seconds": 60,
-        }
-
 
 class TestBotRemoveIpc:
     """bot remove 커맨드가 runtime/cold-path 분기를 선택하는지 검증."""
