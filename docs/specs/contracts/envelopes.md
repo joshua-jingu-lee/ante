@@ -154,7 +154,7 @@ IPC 서버가 요청을 성공적으로 처리한 경우 응답으로 직렬화�
 
 - 세 필드는 항상 동시에 직렬화된다.
 - `result` 안의 키/값은 IPC 커맨드별 payload 계약이며 본 SSOT 범위 밖이다.
-  도메인별 envelope 예시(예: `{"bot": ...}`, `{"suspended_count": N}`)는
+  도메인별 envelope 예시(예: `{"bot": ...}`, [`system.halt`](../ipc/ipc.md#메시지-형식)의 `{"status", "accounts_changed", "changed_at", "accounts"}`)는
   `result` payload의 일부이지 별도 envelope 형태가 아니다.
 - 구현 reference: `IPCServer._dispatch()` 성공 분기 (`src/ante/ipc/server.py`).
 
@@ -241,7 +241,7 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
 기존 CLI/IPC 도메인 스펙은 도메인 payload 예시를 풍부히 기록한다. 대표적으로:
 
 - IPC `bot.status` → `{"bot": <BotDetail>}` payload (IPC envelope의 `result`)
-- IPC `system.halt` → `{"suspended_count": N}` payload (IPC envelope의 `result`)
+- IPC `system.halt` → `{"status", "accounts_changed", "changed_at", "accounts"}` payload (IPC envelope의 `result`, 계약은 [ipc.md 메시지 형식](../ipc/ipc.md#메시지-형식))
 - CLI `bot list` → `{"bots": [...]}` payload (CLI envelope의 `data`)
 
 위 `{...}` payload들은 본 SSOT가 정의하는 envelope이 **아니다**. envelope 4형태

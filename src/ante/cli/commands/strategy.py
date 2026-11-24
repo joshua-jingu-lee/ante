@@ -243,8 +243,9 @@ def strategy_list(ctx: click.Context, status: str | None) -> CommandResult:
         raise CliStrategyError(str(e)) from e
 
     if not rows:
-        empty: dict[str, Any] = {"message": "등록된 전략 없음", "strategies": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "등록된 전략 없음"
+        empty: dict[str, Any] = {"message": message, "strategies": []}
+        return CommandResult(data=empty, text=(message,))
 
     columns = ["strategy_id", "name", "version", "status", "author_name", "author_id"]
     return CommandResult(
@@ -537,8 +538,7 @@ def strategy_summary(
 
     rows = result["items"]
     if not rows:
-        empty: dict[str, Any] = {"message": "성과 집계 없음", "items": []}
-        return CommandResult(data=result, text=(str(empty),))
+        return CommandResult(data=result, text=("성과 집계 없음",))
     columns = {
         "daily": ["date", "realized_pnl", "trade_count", "win_rate"],
         "weekly": [
