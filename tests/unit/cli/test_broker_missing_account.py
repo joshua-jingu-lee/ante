@@ -159,6 +159,9 @@ def _patch_account_service_not_found() -> tuple[MagicMock, AsyncMock]:
     mock_account_service.get_broker = AsyncMock(
         side_effect=AccountNotFoundError(_NOT_FOUND_MESSAGE)
     )
+    mock_account_service.ensure_reconcile_applicable = AsyncMock(
+        side_effect=AccountNotFoundError(_NOT_FOUND_MESSAGE)
+    )
     return mock_db, mock_account_service
 
 
@@ -655,7 +658,7 @@ class TestStatusFallbackDisconnectsAdapter:
         mock_adapter.health_check = health_check
         mock_adapter.disconnect = AsyncMock(return_value=None)
 
-        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+        async def _fake_get_broker(account_id=None, *, reconcile=False):  # noqa: ANN001, ANN202
             return mock_adapter, None
 
         with (
@@ -736,7 +739,7 @@ class TestStatusFallbackDisconnectsAdapter:
         mock_db = MagicMock()
         mock_db.close = AsyncMock()
 
-        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+        async def _fake_get_broker(account_id=None, *, reconcile=False):  # noqa: ANN001, ANN202
             return mock_adapter, mock_db
 
         with (
@@ -1257,7 +1260,7 @@ class TestOrderHistoryFallbackDateConversion:
         )
         mock_adapter.disconnect = AsyncMock(return_value=None)
 
-        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+        async def _fake_get_broker(account_id=None, *, reconcile=False):  # noqa: ANN001, ANN202
             return mock_adapter, None
 
         with (

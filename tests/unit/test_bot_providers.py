@@ -18,7 +18,7 @@ from ante.eventbus.events import (
     OrderApprovedEvent,
     OrderFilledEvent,
 )
-from ante.strategy.base import DataProvider
+from ante.strategy.base import DataProvider, PortfolioView
 from ante.strategy.context import StrategyContext
 from ante.trade.position import PositionHistory
 from ante.treasury.treasury import Treasury
@@ -251,113 +251,209 @@ class TestLiveOrderView:
         assert view.get_open_orders("bot1") == []
 
 
+# ── #2816 가상 뷰의 정본(봇 예산·포지션 표) 스택 ─────────
+
+
+_LEDGER_ACCT = "acct1"
+_LEDGER_BOT = "virtual1"
+
+
+class _DictTreasuryManager:
+    """``TreasuryManager.get`` 만 모사 — 없는 계좌는 KeyError."""
+
+    def __init__(self, treasuries: dict[str, Treasury]) -> None:
+        self._treasuries = treasuries
+
+    def get(self, account_id: str) -> Treasury:
+        return self._treasuries[account_id]
+
+
+class _Ledgers:
+    def __init__(self, db, eventbus) -> None:
+        from ante.account.models import TradingMode
+        from ante.trade.fill_applier import FillApplier
+        from ante.trade.fill_outbox import FillOutbox
+        from ante.trade.order_tracker import OrderTracker
+        from ante.trade.recorder import TradeRecorder
+
+        self.db = db
+        self.bus = eventbus
+        registry = ready_registry(
+            _LEDGER_ACCT, broker_type="test", trading_mode=TradingMode.VIRTUAL
+        )
+        self.treasury = Treasury(
+            db,
+            eventbus,
+            account_id=_LEDGER_ACCT,
+            runtime_readiness=registry,
+            broker_type="test",
+            trading_mode=TradingMode.VIRTUAL,
+        )
+        self.position_history = PositionHistory(db=db)
+        self.recorder = TradeRecorder(db, self.position_history)
+        self.tracker = OrderTracker(db)
+        self.outbox = FillOutbox(db)
+        self.applier = FillApplier(
+            db=db,
+            order_tracker=self.tracker,
+            position_history=self.position_history,
+            eventbus=eventbus,
+            outbox=self.outbox,
+        )
+        self.executor = _virtual_executor(
+            eventbus=eventbus,
+            account_id=_LEDGER_ACCT,
+            runtime_readiness=registry,
+            fill_applier=self.applier,
+        )
+        self.manager = _DictTreasuryManager({_LEDGER_ACCT: self.treasury})
+
+    async def start(self) -> None:
+        await self.position_history.initialize()
+        await self.recorder.initialize()
+        await self.tracker.initialize()
+        await self.outbox.initialize()
+        await self.treasury.initialize()
+        await self.treasury.set_account_balance(10_000_000.0)
+        await self.treasury.allocate(_LEDGER_BOT, 1_000_000.0)
+        self.executor.subscribe()
+
+    def factory(self, **overrides) -> StrategyContextFactory:
+        kwargs = {
+            "data_provider": FakeDataProvider(),
+            "virtual_executor": self.executor,
+            "treasury_manager": self.manager,
+            "position_history": self.position_history,
+        }
+        kwargs.update(overrides)
+        return StrategyContextFactory(**kwargs)
+
+    async def hold(self, account_id: str, symbol: str, quantity: float) -> None:
+        from ante.trade.models import TradeRecord, TradeStatus
+
+        await self.position_history.on_trade(
+            TradeRecord(
+                trade_id=f"t-{account_id}-{symbol}",
+                bot_id=_LEDGER_BOT,
+                strategy_id="s1",
+                symbol=symbol,
+                side="buy",
+                quantity=quantity,
+                price=50000.0,
+                status=TradeStatus.FILLED,
+                order_type="limit",
+                account_id=account_id,
+            )
+        )
+
+
+def _ledger_config(account_id: str = _LEDGER_ACCT) -> BotConfig:
+    return BotConfig(bot_id=_LEDGER_BOT, strategy_id="s1", account_id=account_id)
+
+
+def _validated(order_id: str, *, bot_id: str = _LEDGER_BOT, side: str = "buy"):
+    from ante.eventbus.events import OrderValidatedEvent
+
+    return OrderValidatedEvent(
+        account_id=_LEDGER_ACCT,
+        order_id=order_id,
+        bot_id=bot_id,
+        strategy_id="s1",
+        symbol="005930",
+        side=side,
+        quantity=10.0,
+        price=50000.0,
+        order_type="limit",
+        exchange="KRX",
+    )
+
+
+@pytest.fixture
+async def ledgers(db, eventbus) -> _Ledgers:
+    stack = _Ledgers(db, eventbus)
+    await stack.start()
+    return stack
+
+
 # ── US-2: VirtualPortfolioView / VirtualOrderView ───
 
 
+class _ZeroPortfolio(PortfolioView):
+    def get_positions(self, bot_id):
+        return {}
+
+    def get_balance(self, bot_id):
+        return {"allocated": 0.0, "available": 0.0, "reserved": 0.0}
+
+
 class TestVirtualPortfolioView:
-    def test_initial_balance(self):
-        """초기 잔고 확인."""
-        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
-        balance = pv.get_balance("virtual1")
-        assert balance["allocated"] == 10_000_000.0
-        assert balance["available"] == 10_000_000.0
-        assert balance["reserved"] == 0.0
+    async def test_is_live_view_over_treasury_and_positions(self, ledgers):
+        """실전 뷰와 같은 읽기 — 잔고는 봇 예산, 보유는 계좌 스코프 포지션 표."""
+        await ledgers.hold(_LEDGER_ACCT, "005930", 10.0)
+        pv = VirtualPortfolioView(
+            treasury=ledgers.treasury,
+            position_history=ledgers.position_history,
+            account_id=_LEDGER_ACCT,
+        )
 
-    def test_empty_positions(self):
-        """초기 포지션 없음."""
-        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
-        assert pv.get_positions("virtual1") == {}
+        assert isinstance(pv, LivePortfolioView)
+        assert pv.get_balance(_LEDGER_BOT) == {
+            "allocated": 1_000_000.0,
+            "available": 1_000_000.0,
+            "reserved": 0.0,
+        }
+        assert pv.get_positions(_LEDGER_BOT)["005930"]["quantity"] == 10.0
 
-    def test_apply_fill_buy(self):
-        """매수 체결 시 포지션/잔고 갱신."""
-        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
-        pv.apply_fill("005930", "buy", 10.0, 50000.0, commission=75.0)
+    async def test_reservation_is_visible_in_balance(self, ledgers):
+        """자금 쪽 예약이 잔고의 reserved·available 에 그대로 보인다."""
+        pv = VirtualPortfolioView(
+            treasury=ledgers.treasury,
+            position_history=ledgers.position_history,
+            account_id=_LEDGER_ACCT,
+        )
+        assert await ledgers.treasury.reserve_for_order(_LEDGER_BOT, "ord1", 500_000.0)
 
-        positions = pv.get_positions("virtual1")
-        assert positions["005930"]["quantity"] == 10.0
-        assert positions["005930"]["avg_entry_price"] == 50000.0
+        assert pv.get_balance(_LEDGER_BOT) == {
+            "allocated": 1_000_000.0,
+            "available": 500_000.0,
+            "reserved": 500_000.0,
+        }
 
-        balance = pv.get_balance("virtual1")
-        assert balance["available"] == 10_000_000.0 - 500000.0 - 75.0
-
-    def test_apply_fill_sell(self):
-        """매도 체결 시 포지션/잔고 갱신."""
-        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
-        pv.apply_fill("005930", "buy", 10.0, 50000.0, commission=75.0)
-        pv.apply_fill("005930", "sell", 10.0, 55000.0, commission=82.5)
-
-        positions = pv.get_positions("virtual1")
-        # 수량 0이면 포지션에서 제외
-        assert "005930" not in positions
-
-    def test_check_balance_sufficient(self):
-        """잔고 충분 확인."""
-        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
-        assert pv.check_balance(5_000_000.0) is True
-
-    def test_check_balance_insufficient(self):
-        """잔고 부족 확인."""
-        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
-        assert pv.check_balance(15_000_000.0) is False
-
-    def test_reserve_and_release(self):
-        """자금 예약/해제."""
-        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
-        pv.reserve("ord1", 500_000.0)
-
-        balance = pv.get_balance("virtual1")
-        assert balance["reserved"] == 500_000.0
-        assert balance["available"] == 9_500_000.0
-
-        pv.release_reservation("ord1")
-        balance = pv.get_balance("virtual1")
-        assert balance["reserved"] == 0.0
+    async def test_unbudgeted_bot_sees_zero(self, ledgers):
+        """예산이 없는 봇은 잔고 0·보유 없음."""
+        pv = VirtualPortfolioView(
+            treasury=ledgers.treasury,
+            position_history=ledgers.position_history,
+            account_id=_LEDGER_ACCT,
+        )
+        assert pv.get_balance("other") == {
+            "allocated": 0.0,
+            "available": 0.0,
+            "reserved": 0.0,
+        }
+        assert pv.get_positions("other") == {}
 
 
 class TestVirtualOrderView:
     def test_empty_orders(self):
         """미체결 주문 없으면 빈 목록."""
-        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
-        ov = VirtualOrderView(portfolio=pv)
-        assert ov.get_open_orders("virtual1") == []
+        assert VirtualOrderView().get_open_orders("virtual1") == []
 
-    def test_pending_orders_tracked(self):
-        """예약된 주문이 미체결 목록에 통일 스키마로 나타남."""
-        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
-        pv.reserve("ord1", 500_000.0)
+    async def test_reservation_does_not_appear_as_open_order(self, ledgers):
+        """가상 주문은 즉시 체결 — 자금 쪽 예약이 있어도 미체결은 늘 빈 목록."""
+        assert await ledgers.treasury.reserve_for_order(_LEDGER_BOT, "ord1", 500_000.0)
 
-        ov = VirtualOrderView(portfolio=pv)
-        orders = ov.get_open_orders("virtual1")
-        assert len(orders) == 1
-        o = orders[0]
-        assert o["order_id"] == "ord1"
-        # #1948: 통일 OpenOrder dict 스키마 — amount(예약 금액) 제외, 수량 기반.
-        assert set(o.keys()) == {
-            "order_id",
-            "symbol",
-            "side",
-            "ordered_qty",
-            "recorded_filled_qty",
-            "remaining_qty",
-            "status",
-            "submitted_at",
-        }
-        assert "amount" not in o
+        assert VirtualOrderView().get_open_orders(_LEDGER_BOT) == []
 
 
 # ── US-3: VirtualExecutor ─────────────────────────
 
 
 class TestVirtualExecutor:
-    async def test_virtual_fill_buy(self, eventbus):
+    async def test_virtual_fill_buy(self, ledgers):
         """Virtual 계좌 봇의 매수 주문 → 가상 체결."""
-        executor = _virtual_executor(eventbus=eventbus, commission_rate=0.00015)
-
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
-        executor.subscribe()
+        eventbus = ledgers.bus
+        ledgers.executor.register_bot("virtual1")
 
         filled = []
         eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
@@ -385,17 +481,16 @@ class TestVirtualExecutor:
         assert filled[0].order_id == "ord-001"
         assert filled[0].account_id == "acct1"
 
-        # 포지션 반영 확인
-        positions = portfolio.get_positions("virtual1")
-        assert positions["005930"]["quantity"] == 10.0
+        # 포지션 반영 확인 (포지션 표)
+        positions = ledgers.position_history.get_positions_sync(
+            "virtual1", account_id="acct1"
+        )
+        assert [(p.symbol, p.quantity) for p in positions] == [("005930", 10.0)]
 
     async def test_virtual_fill_sell(self, eventbus):
         """Virtual 계좌 봇의 매도 주문 → 가상 체결."""
         executor = _virtual_executor(eventbus=eventbus, commission_rate=0.00015)
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         # 먼저 매수
@@ -466,10 +561,7 @@ class TestVirtualExecutor:
             eventbus=eventbus,
             commission_rate=0.001,  # 0.1%
         )
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         filled = []
@@ -494,10 +586,7 @@ class TestVirtualExecutor:
     async def test_slippage_buy(self, eventbus):
         """매수 슬리피지: 체결가 = 현재가 × (1 + slippage_rate)."""
         executor = _virtual_executor(eventbus=eventbus, slippage_rate=0.001)
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         filled = []
@@ -523,12 +612,7 @@ class TestVirtualExecutor:
     async def test_slippage_sell(self, eventbus):
         """매도 슬리피지: 체결가 = 현재가 × (1 - slippage_rate)."""
         executor = _virtual_executor(eventbus=eventbus, slippage_rate=0.001)
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        # 먼저 포지션 만들기
-        portfolio.apply_fill("005930", "buy", 10.0, 50000.0, 0.0)
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         filled = []
@@ -557,10 +641,7 @@ class TestVirtualExecutor:
             eventbus=eventbus,
             slippage_rate=0.01,  # 1% 슬리피지 설정해도
         )
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         filled = []
@@ -585,10 +666,7 @@ class TestVirtualExecutor:
     async def test_unregister_bot(self, eventbus):
         """봇 등록 해제 후 주문 무시."""
         executor = _virtual_executor(eventbus=eventbus)
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         executor.unregister_bot("virtual1")
@@ -633,7 +711,7 @@ class TestStrategyContextFactory:
         assert ctx.bot_id == "virtual1"
 
         # Virtual 계좌 봇이 VirtualExecutor에 등록되었는지 확인
-        assert "virtual1" in executor._portfolios
+        assert "virtual1" in executor._bot_ids
 
         # Treasury 미설정 시 초기 잔고 0
         balance = ctx.get_balance()
@@ -818,54 +896,40 @@ class TestStrategyContextFactory:
         )
         assert ctx.get_open_orders() == []
 
-    def test_resolve_virtual_balance_with_budget(self, eventbus):
-        """TreasuryManager 존재 + BotBudget 배정 시 allocated 값 반환."""
-        from ante.treasury.models import BotBudget
+    async def test_virtual_without_position_history_uses_empty_view(
+        self, ledgers, caplog
+    ):
+        """PositionHistory 미주입 조립은 경고 + 잔고 0·보유 없음 빈 뷰."""
+        await ledgers.hold(_LEDGER_ACCT, "005930", 10.0)
+        factory = ledgers.factory(position_history=None)
 
-        class FakeTreasury:
-            def get_budget(self, bot_id):
-                if bot_id == "virtual1":
-                    return BotBudget(
-                        bot_id="virtual1", allocated=2_000_000.0, account_id="acc-test"
-                    )
-                return None
+        with caplog.at_level("WARNING", logger="ante.bot.context_factory"):
+            ctx = factory.create(_ledger_config())
 
-        class FakeTreasuryManager:
-            def get(self, account_id):
-                return FakeTreasury()
+        assert ctx.get_balance() == {
+            "allocated": 0.0,
+            "available": 0.0,
+            "reserved": 0.0,
+        }
+        assert ctx.get_positions() == {}
+        assert any("PositionHistory" in r.getMessage() for r in caplog.records)
+        assert _LEDGER_BOT in ledgers.executor._bot_ids
 
-        executor = _virtual_executor(eventbus=eventbus)
-        factory = StrategyContextFactory(
-            data_provider=FakeDataProvider(),
-            virtual_executor=executor,
-            treasury_manager=FakeTreasuryManager(),
-        )
+    async def test_virtual_missing_treasury_uses_empty_view(self, ledgers, caplog):
+        """계좌의 Treasury 가 없으면 예외 없이 경고 + 빈 뷰(공유 뷰로 새지 않음)."""
+        await ledgers.hold("no-acct", "005930", 10.0)
+        factory = ledgers.factory()
 
-        config = BotConfig(bot_id="virtual1", strategy_id="s1", account_id="acct1")
-        ctx = factory.create(config)
+        with caplog.at_level("WARNING", logger="ante.bot.context_factory"):
+            ctx = factory.create(_ledger_config("no-acct"))
 
-        balance = ctx.get_balance()
-        assert balance["allocated"] == 2_000_000.0
-
-    def test_resolve_virtual_balance_key_error(self, eventbus):
-        """TreasuryManager 존재하나 bot_id 미배정 시 0.0 반환."""
-
-        class FakeTreasuryManager:
-            def get(self, account_id):
-                raise KeyError(account_id)
-
-        executor = _virtual_executor(eventbus=eventbus)
-        factory = StrategyContextFactory(
-            data_provider=FakeDataProvider(),
-            virtual_executor=executor,
-            treasury_manager=FakeTreasuryManager(),
-        )
-
-        config = BotConfig(bot_id="virtual1", strategy_id="s1", account_id="no-acct")
-        ctx = factory.create(config)
-
-        balance = ctx.get_balance()
-        assert balance["allocated"] == 0.0
+        assert ctx.get_balance() == {
+            "allocated": 0.0,
+            "available": 0.0,
+            "reserved": 0.0,
+        }
+        assert ctx.get_positions() == {}
+        assert any("Treasury 미발견" in r.getMessage() for r in caplog.records)
 
     def test_live_without_providers_raises(self, eventbus):
         """Live providers 미설정 시 에러."""
@@ -889,6 +953,93 @@ class TestStrategyContextFactory:
 
         with pytest.raises(ValueError, match="Provider"):
             factory.create(config)
+
+
+# ── #2816: 가상 컨텍스트가 봇 예산·포지션 표를 읽는다 ─────────
+
+
+class TestVirtualContextReadsLedgers:
+    async def test_budgetless_virtual_buy_is_rejected_by_treasury(self, ledgers):
+        """예산 없는 가상 봇의 매수는 자금 쪽 승인 단계에서 거부된다."""
+        from ante.eventbus.events import OrderRejectedEvent
+
+        ledgers.factory().create(
+            BotConfig(bot_id="nobudget", strategy_id="s1", account_id=_LEDGER_ACCT)
+        )
+        seen: list = []
+        ledgers.bus.subscribe(OrderRejectedEvent, seen.append)
+        ledgers.bus.subscribe(OrderFilledEvent, seen.append)
+
+        await ledgers.bus.publish(_validated("ord-nb", bot_id="nobudget"))
+
+        assert [type(e) for e in seen] == [OrderRejectedEvent]
+        assert seen[0].reason.startswith("insufficient_budget")
+        assert (
+            ledgers.position_history.get_positions_sync(
+                "nobudget", account_id=_LEDGER_ACCT
+            )
+            == []
+        )
+
+    async def test_positions_come_from_position_table(self, ledgers):
+        """ⓐ 포지션 표에 보유가 있으면 조립한 컨텍스트가 그 보유를 본다."""
+        await ledgers.hold(_LEDGER_ACCT, "005930", 10.0)
+
+        ctx = ledgers.factory().create(_ledger_config())
+
+        assert ctx.get_positions() == {
+            "005930": {
+                "symbol": "005930",
+                "quantity": 10.0,
+                "avg_entry_price": 50000.0,
+                "realized_pnl": 0.0,
+            }
+        }
+
+    async def test_balance_comes_from_settled_budget(self, ledgers):
+        """ⓑ 체결로 정산된 봇 예산을 재조립한 컨텍스트도 그대로 본다."""
+        ctx = ledgers.factory().create(_ledger_config())
+        filled: list = []
+        ledgers.bus.subscribe(OrderFilledEvent, filled.append, priority=-1000)
+
+        await ledgers.bus.publish(_validated("ord-1"))
+
+        assert len(filled) == 1
+        budget = ledgers.treasury.get_budget(_LEDGER_BOT)
+        assert budget is not None
+        spent = 500_000.0 + filled[0].commission
+        assert budget.available == pytest.approx(1_000_000.0 - spent)
+        expected = {
+            "allocated": budget.allocated,
+            "available": budget.available,
+            "reserved": budget.reserved,
+        }
+        rebuilt = ledgers.factory().create(_ledger_config())
+        for view in (ctx, rebuilt):
+            assert view.get_balance() == expected
+            assert view.get_positions()["005930"]["quantity"] == 10.0
+
+    async def test_allocated_follows_budget_change(self, ledgers):
+        """ⓒ 컨텍스트를 만든 뒤의 예산 변경이 바로 보인다."""
+        ctx = ledgers.factory().create(_ledger_config())
+        assert ctx.get_balance()["allocated"] == 1_000_000.0
+
+        await ledgers.treasury.update_budget(_LEDGER_BOT, 2_000_000.0)
+
+        assert ctx.get_balance() == {
+            "allocated": 2_000_000.0,
+            "available": 2_000_000.0,
+            "reserved": 0.0,
+        }
+
+    async def test_other_account_holdings_are_hidden(self, ledgers):
+        """ⓓ 다른 계좌의 같은 bot_id 보유는 보이지 않는다."""
+        await ledgers.hold(_LEDGER_ACCT, "005930", 10.0)
+        await ledgers.hold("acct2", "000660", 5.0)
+
+        ctx = ledgers.factory().create(_ledger_config())
+
+        assert set(ctx.get_positions()) == {"005930"}
 
 
 # ── US-5: BotManager + Factory 통합 ─────────────
@@ -988,7 +1139,7 @@ class TestBotManagerWithFactory:
         bot = await manager.create_bot(config, SimpleStrategy)
 
         assert bot.bot_id == "virtual1"
-        assert "virtual1" in executor._portfolios
+        assert "virtual1" in executor._bot_ids
 
     async def test_create_bot_with_explicit_ctx(self, eventbus, db):
         """기존 방식: ctx 직접 주입."""
@@ -1007,10 +1158,8 @@ class TestBotManagerWithFactory:
         ctx = StrategyContext(
             bot_id="bot1",
             data_provider=FakeDataProvider(),
-            portfolio=VirtualPortfolioView(bot_id="bot1", initial_balance=1_000_000.0),
-            order_view=VirtualOrderView(
-                VirtualPortfolioView(bot_id="bot1", initial_balance=1_000_000.0)
-            ),
+            portfolio=_ZeroPortfolio(),
+            order_view=VirtualOrderView(),
         )
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         bot = await manager.create_bot(config, SimpleStrategy, ctx)
@@ -1055,10 +1204,10 @@ class TestBotManagerWithFactory:
 
         config = BotConfig(bot_id="virtual1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy)
-        assert "virtual1" in executor._portfolios
+        assert "virtual1" in executor._bot_ids
 
         await manager.remove_bot("virtual1")
-        assert "virtual1" not in executor._portfolios
+        assert "virtual1" not in executor._bot_ids
 
 
 # ── PositionHistory 캐시 테스트 ──────────────────

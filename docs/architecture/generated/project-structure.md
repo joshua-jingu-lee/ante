@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-11-23 (KST)
+> 마지막 생성 시점: 2026-11-24 (KST)
 
 ## 최상위 구조
 
@@ -165,6 +165,7 @@ src/ante/
 │   ├── database.py                   # Database — SQLite WAL 연결 관리
 │   ├── exchange.py
 │   ├── market_data_vocab.py
+│   ├── price.py
 │   ├── registry.py
 │   └── time.py
 ├── data/
@@ -437,236 +438,233 @@ docs/
 │   ├── 05-testing.md
 │   ├── 06-release.md                 # 릴리스 정책
 │   └── README.md
-├── specs/                            # 모듈별 세부 설계
-│   ├── account/
-│   │   ├── 01-overview.md
-│   │   ├── 02-design-decisions.md
-│   │   ├── 03-data-model.md
-│   │   ├── 04-account-service.md
-│   │   ├── 05-eventbus-integration.md
-│   │   ├── 06-database-schema.md
-│   │   ├── 07-account-layout-v1.md
-│   │   ├── 08-config-migration.md
-│   │   ├── 09-cli.md
-│   │   ├── 11-scope-out.md
-│   │   ├── 13-cross-module-notes.md
-│   │   ├── 14-account-id-contract.md
-│   │   ├── account.md
-│   │   └── README.md
-│   ├── api-gateway/
-│   │   └── api-gateway.md
-│   ├── approval/
-│   │   ├── 01-overview.md
-│   │   ├── 02-design-decisions.md
-│   │   ├── 03-enums.md
-│   │   ├── 04-approval-request-model.md
-│   │   ├── 05-approval-types.md
-│   │   ├── 06-status-flow.md
-│   │   ├── 07-database-schema.md
-│   │   ├── 08-approval-service.md
-│   │   ├── 09-cli.md
-│   │   ├── 10-eventbus-integration.md
-│   │   ├── 11-notification-events.md
-│   │   ├── 12-cross-module-notes.md
-│   │   ├── approval.md
-│   │   └── README.md
-│   ├── audit/
-│   │   └── audit.md
-│   ├── backtest/
-│   │   ├── 01-overview.md
-│   │   ├── 02-design-decisions.md
-│   │   ├── 03-cli-usage.md
-│   │   ├── 05-cross-module-notes.md
-│   │   ├── backtest.md
-│   │   └── README.md
-│   ├── bot/
-│   │   ├── 01-overview.md
-│   │   ├── 02-reference-implementations.md
-│   │   ├── 03-design-decisions.md
-│   │   ├── 04-eventbus-integration.md
-│   │   ├── 05-notification-events.md
-│   │   ├── 06-cli-usage.md
-│   │   ├── 07-testing.md
-│   │   ├── 08-cross-module-notes.md
-│   │   ├── bot.md
-│   │   └── README.md
-│   ├── broker-adapter/
-│   │   ├── 01-overview.md
-│   │   ├── 02-reference-implementations.md
-│   │   ├── 03-adapter-layer.md
-│   │   ├── 04-broker-adapter-interface.md
-│   │   ├── 05-broker-registry.md
-│   │   ├── 06-broker-presets.md
-│   │   ├── 07-kis-base-adapter.md
-│   │   ├── 08-kis-domestic-adapter.md
-│   │   ├── 09-kis-overseas-adapter.md
-│   │   ├── 10-commission-info.md
-│   │   ├── 11-order-flow.md
-│   │   ├── 12-test-broker-adapter.md
-│   │   ├── 13-setup-and-initialization.md
-│   │   ├── 14-cli.md
-│   │   ├── 15-reconciliation.md
-│   │   ├── 16-eventbus-integration.md
-│   │   ├── 17-notification-events.md
-│   │   ├── 18-fill-recovery.md
-│   │   ├── 19-scope-out.md
-│   │   ├── broker-adapter.md
-│   │   └── README.md
-│   ├── cli/
-│   │   ├── 01-overview.md
-│   │   ├── 02-design-decisions.md
-│   │   ├── 03-commands.md
-│   │   ├── 04-agent-workflows.md
-│   │   ├── 06-cross-module-notes.md
-│   │   ├── cli.md
-│   │   └── README.md
-│   ├── config/
-│   │   ├── 01-overview.md
-│   │   ├── 02-reference-implementations.md
-│   │   ├── 03-design-decisions.md
-│   │   ├── 04-system-initialization.md
-│   │   ├── 05-broker-to-account-migration.md
-│   │   ├── 07-cross-module-notes.md
-│   │   ├── config.md
-│   │   └── README.md
-│   ├── contracts/
-│   │   ├── envelopes.md
-│   │   ├── error-taxonomy.md
-│   │   ├── offline-factory.md
-│   │   └── README.md
-│   ├── core/
-│   │   └── core.md
-│   ├── data-feed/
-│   │   ├── 01-overview.md
-│   │   ├── 02-design-decisions.md
-│   │   ├── 03-collection-scope.md
-│   │   ├── 04-schema.md
-│   │   ├── 05-data-sources.md
-│   │   ├── 06-cli.md
-│   │   ├── 07-execution-modes.md
-│   │   ├── 08-resource-protection.md
-│   │   ├── 09-failure-recovery.md
-│   │   ├── 10-checkpoints-and-reports.md
-│   │   ├── 11-module-structure.md
-│   │   ├── 13-cross-module-notes.md
-│   │   ├── data-feed.md
-│   │   └── README.md
-│   ├── data-pipeline/
-│   │   ├── 01-overview.md
-│   │   ├── 02-write-ownership.md
-│   │   ├── 03-design-decisions.md
-│   │   ├── 04-dependencies.md
-│   │   ├── 05-datafeed-relationship.md
-│   │   ├── 07-cross-module-notes.md
-│   │   ├── data-pipeline.md
-│   │   └── README.md
-│   ├── eventbus/
-│   │   └── eventbus.md
-│   ├── instrument/
-│   │   └── instrument.md
-│   ├── ipc/
-│   │   └── ipc.md
-│   ├── logging/
-│   │   ├── 01-overview.md
-│   │   ├── 02-design-decisions.md
-│   │   ├── 03-json-schema.md
-│   │   ├── 04-fingerprint.md
-│   │   ├── 05-handlers-and-rotation.md
-│   │   ├── 06-context-fields.md
-│   │   ├── 07-implementation.md
-│   │   ├── logging.md
-│   │   └── README.md
-│   ├── member/
-│   │   ├── 01-overview.md
-│   │   ├── 02-design-decisions.md
-│   │   ├── 03-member-model.md
-│   │   ├── 04-database-schema.md
-│   │   ├── 05-member-service.md
-│   │   ├── 06-cli.md
-│   │   ├── 07-eventbus-integration.md
-│   │   ├── 08-module-impact.md
-│   │   ├── 09-notification-events.md
-│   │   ├── member.md
-│   │   └── README.md
-│   ├── notification/
-│   │   └── notification.md
-│   ├── report-store/
-│   │   └── report-store.md
-│   ├── rule-engine/
-│   │   ├── 01-overview.md
-│   │   ├── 02-reference-implementations.md
-│   │   ├── 03-two-layer-evaluation.md
-│   │   ├── 04-rule-interface.md
-│   │   ├── 05-rule-context.md
-│   │   ├── 06-rule-catalog.md
-│   │   ├── 07-rule-engine-core.md
-│   │   ├── 08-notification-events.md
-│   │   ├── 09-rule-management.md
-│   │   ├── 10-rule-engine-manager.md
-│   │   ├── 12-cli.md
-│   │   ├── 14-cross-module-notes.md
-│   │   ├── README.md
-│   │   └── rule-engine.md
-│   ├── strategy/
-│   │   ├── 01-overview.md
-│   │   ├── 02-reference-implementations.md
-│   │   ├── 03-01-strategy-interface.md
-│   │   ├── 03-02-signal-fields.md
-│   │   ├── 03-03-order-action-fields.md
-│   │   ├── 03-04-provider-and-views.md
-│   │   ├── 03-05-strategy-context.md
-│   │   ├── 03-06-indicator-calculator.md
-│   │   ├── 03-07-strategy-snapshot.md
-│   │   ├── 03-08-dynamic-loading.md
-│   │   ├── 03-09-strategy-validator.md
-│   │   ├── 03-10-strategy-registry.md
-│   │   ├── 03-11-registration-flow.md
-│   │   ├── 03-12-runtime-model.md
-│   │   ├── 03-13-bot-execution-flow.md
-│   │   ├── 03-14-performance-scoping.md
-│   │   ├── 03-15-backtest-relationship.md
-│   │   ├── 03-design-decisions.md
-│   │   ├── 04-examples.md
-│   │   ├── 05-testing.md
-│   │   ├── 07-cross-module-notes.md
-│   │   ├── README.md
-│   │   └── strategy.md
-│   ├── trade/
-│   │   ├── 01-overview.md
-│   │   ├── 02-reference-implementations.md
-│   │   ├── 03-01-trade-record.md
-│   │   ├── 03-02-trade-recorder.md
-│   │   ├── 03-03-position-history.md
-│   │   ├── 03-04-performance-tracker.md
-│   │   ├── 03-05-sqlite-schema.md
-│   │   ├── 03-06-trade-service.md
-│   │   ├── 03-07-position-reconciler.md
-│   │   ├── 03-08-fill-recovery.md
-│   │   ├── 03-design-decisions.md
-│   │   ├── 04-eventbus-integration.md
-│   │   ├── 05-cli-usage.md
-│   │   ├── 06-testing.md
-│   │   ├── 07-notification-events.md
-│   │   ├── 09-cross-module-notes.md
-│   │   ├── README.md
-│   │   └── trade.md
-│   ├── treasury/
-│   │   ├── 01-overview.md
-│   │   ├── 02-design-decisions.md
-│   │   ├── 03-treasury-model.md
-│   │   ├── 04-treasury-interface.md
-│   │   ├── 05-treasury-manager.md
-│   │   ├── 06-database-schema.md
-│   │   ├── 07-cli.md
-│   │   ├── 08-daily-asset-snapshots.md
-│   │   ├── 09-virtual-asset-sync.md
-│   │   ├── 11-cross-module-notes.md
-│   │   ├── README.md
-│   │   └── treasury.md
-│   └── README.md
-└── superpowers/
-    └── specs/
-        └── 2026-04-17-staging-environment-design.md
+└── specs/                            # 모듈별 세부 설계
+    ├── account/
+    │   ├── 01-overview.md
+    │   ├── 02-design-decisions.md
+    │   ├── 03-data-model.md
+    │   ├── 04-account-service.md
+    │   ├── 05-eventbus-integration.md
+    │   ├── 06-database-schema.md
+    │   ├── 07-account-layout-v1.md
+    │   ├── 08-config-migration.md
+    │   ├── 09-cli.md
+    │   ├── 11-scope-out.md
+    │   ├── 13-cross-module-notes.md
+    │   ├── 14-account-id-contract.md
+    │   ├── account.md
+    │   └── README.md
+    ├── api-gateway/
+    │   └── api-gateway.md
+    ├── approval/
+    │   ├── 01-overview.md
+    │   ├── 02-design-decisions.md
+    │   ├── 03-enums.md
+    │   ├── 04-approval-request-model.md
+    │   ├── 05-approval-types.md
+    │   ├── 06-status-flow.md
+    │   ├── 07-database-schema.md
+    │   ├── 08-approval-service.md
+    │   ├── 09-cli.md
+    │   ├── 10-eventbus-integration.md
+    │   ├── 11-notification-events.md
+    │   ├── 12-cross-module-notes.md
+    │   ├── approval.md
+    │   └── README.md
+    ├── audit/
+    │   └── audit.md
+    ├── backtest/
+    │   ├── 01-overview.md
+    │   ├── 02-design-decisions.md
+    │   ├── 03-cli-usage.md
+    │   ├── 05-cross-module-notes.md
+    │   ├── backtest.md
+    │   └── README.md
+    ├── bot/
+    │   ├── 01-overview.md
+    │   ├── 02-reference-implementations.md
+    │   ├── 03-design-decisions.md
+    │   ├── 04-eventbus-integration.md
+    │   ├── 05-notification-events.md
+    │   ├── 06-cli-usage.md
+    │   ├── 07-testing.md
+    │   ├── 08-cross-module-notes.md
+    │   ├── bot.md
+    │   └── README.md
+    ├── broker-adapter/
+    │   ├── 01-overview.md
+    │   ├── 02-reference-implementations.md
+    │   ├── 03-adapter-layer.md
+    │   ├── 04-broker-adapter-interface.md
+    │   ├── 05-broker-registry.md
+    │   ├── 06-broker-presets.md
+    │   ├── 07-kis-base-adapter.md
+    │   ├── 08-kis-domestic-adapter.md
+    │   ├── 09-kis-overseas-adapter.md
+    │   ├── 10-commission-info.md
+    │   ├── 11-order-flow.md
+    │   ├── 12-test-broker-adapter.md
+    │   ├── 13-setup-and-initialization.md
+    │   ├── 14-cli.md
+    │   ├── 15-reconciliation.md
+    │   ├── 16-eventbus-integration.md
+    │   ├── 17-notification-events.md
+    │   ├── 18-fill-recovery.md
+    │   ├── 19-scope-out.md
+    │   ├── broker-adapter.md
+    │   └── README.md
+    ├── cli/
+    │   ├── 01-overview.md
+    │   ├── 02-design-decisions.md
+    │   ├── 03-commands.md
+    │   ├── 04-agent-workflows.md
+    │   ├── 06-cross-module-notes.md
+    │   ├── cli.md
+    │   └── README.md
+    ├── config/
+    │   ├── 01-overview.md
+    │   ├── 02-reference-implementations.md
+    │   ├── 03-design-decisions.md
+    │   ├── 04-system-initialization.md
+    │   ├── 05-broker-to-account-migration.md
+    │   ├── 07-cross-module-notes.md
+    │   ├── config.md
+    │   └── README.md
+    ├── contracts/
+    │   ├── envelopes.md
+    │   ├── error-taxonomy.md
+    │   ├── offline-factory.md
+    │   └── README.md
+    ├── core/
+    │   └── core.md
+    ├── data-feed/
+    │   ├── 01-overview.md
+    │   ├── 02-design-decisions.md
+    │   ├── 03-collection-scope.md
+    │   ├── 04-schema.md
+    │   ├── 05-data-sources.md
+    │   ├── 06-cli.md
+    │   ├── 07-execution-modes.md
+    │   ├── 08-resource-protection.md
+    │   ├── 09-failure-recovery.md
+    │   ├── 10-checkpoints-and-reports.md
+    │   ├── 11-module-structure.md
+    │   ├── 13-cross-module-notes.md
+    │   ├── data-feed.md
+    │   └── README.md
+    ├── data-pipeline/
+    │   ├── 01-overview.md
+    │   ├── 02-write-ownership.md
+    │   ├── 03-design-decisions.md
+    │   ├── 04-dependencies.md
+    │   ├── 05-datafeed-relationship.md
+    │   ├── 07-cross-module-notes.md
+    │   ├── data-pipeline.md
+    │   └── README.md
+    ├── eventbus/
+    │   └── eventbus.md
+    ├── instrument/
+    │   └── instrument.md
+    ├── ipc/
+    │   └── ipc.md
+    ├── logging/
+    │   ├── 01-overview.md
+    │   ├── 02-design-decisions.md
+    │   ├── 03-json-schema.md
+    │   ├── 04-fingerprint.md
+    │   ├── 05-handlers-and-rotation.md
+    │   ├── 06-context-fields.md
+    │   ├── 07-implementation.md
+    │   ├── logging.md
+    │   └── README.md
+    ├── member/
+    │   ├── 01-overview.md
+    │   ├── 02-design-decisions.md
+    │   ├── 03-member-model.md
+    │   ├── 04-database-schema.md
+    │   ├── 05-member-service.md
+    │   ├── 06-cli.md
+    │   ├── 07-eventbus-integration.md
+    │   ├── 08-module-impact.md
+    │   ├── 09-notification-events.md
+    │   ├── member.md
+    │   └── README.md
+    ├── notification/
+    │   └── notification.md
+    ├── report-store/
+    │   └── report-store.md
+    ├── rule-engine/
+    │   ├── 01-overview.md
+    │   ├── 02-reference-implementations.md
+    │   ├── 03-two-layer-evaluation.md
+    │   ├── 04-rule-interface.md
+    │   ├── 05-rule-context.md
+    │   ├── 06-rule-catalog.md
+    │   ├── 07-rule-engine-core.md
+    │   ├── 08-notification-events.md
+    │   ├── 09-rule-management.md
+    │   ├── 10-rule-engine-manager.md
+    │   ├── 12-cli.md
+    │   ├── 14-cross-module-notes.md
+    │   ├── README.md
+    │   └── rule-engine.md
+    ├── strategy/
+    │   ├── 01-overview.md
+    │   ├── 02-reference-implementations.md
+    │   ├── 03-01-strategy-interface.md
+    │   ├── 03-02-signal-fields.md
+    │   ├── 03-03-order-action-fields.md
+    │   ├── 03-04-provider-and-views.md
+    │   ├── 03-05-strategy-context.md
+    │   ├── 03-06-indicator-calculator.md
+    │   ├── 03-07-strategy-snapshot.md
+    │   ├── 03-08-dynamic-loading.md
+    │   ├── 03-09-strategy-validator.md
+    │   ├── 03-10-strategy-registry.md
+    │   ├── 03-11-registration-flow.md
+    │   ├── 03-12-runtime-model.md
+    │   ├── 03-13-bot-execution-flow.md
+    │   ├── 03-14-performance-scoping.md
+    │   ├── 03-15-backtest-relationship.md
+    │   ├── 03-design-decisions.md
+    │   ├── 04-examples.md
+    │   ├── 05-testing.md
+    │   ├── 07-cross-module-notes.md
+    │   ├── README.md
+    │   └── strategy.md
+    ├── trade/
+    │   ├── 01-overview.md
+    │   ├── 02-reference-implementations.md
+    │   ├── 03-01-trade-record.md
+    │   ├── 03-02-trade-recorder.md
+    │   ├── 03-03-position-history.md
+    │   ├── 03-04-performance-tracker.md
+    │   ├── 03-05-sqlite-schema.md
+    │   ├── 03-06-trade-service.md
+    │   ├── 03-07-position-reconciler.md
+    │   ├── 03-08-fill-recovery.md
+    │   ├── 03-design-decisions.md
+    │   ├── 04-eventbus-integration.md
+    │   ├── 05-cli-usage.md
+    │   ├── 06-testing.md
+    │   ├── 07-notification-events.md
+    │   ├── 09-cross-module-notes.md
+    │   ├── README.md
+    │   └── trade.md
+    ├── treasury/
+    │   ├── 01-overview.md
+    │   ├── 02-design-decisions.md
+    │   ├── 03-treasury-model.md
+    │   ├── 04-treasury-interface.md
+    │   ├── 05-treasury-manager.md
+    │   ├── 06-database-schema.md
+    │   ├── 07-cli.md
+    │   ├── 08-daily-asset-snapshots.md
+    │   ├── 09-virtual-asset-sync.md
+    │   ├── 11-cross-module-notes.md
+    │   ├── README.md
+    │   └── treasury.md
+    └── README.md
 ```
 
 ## guide/ — 사용자·운용 가이드

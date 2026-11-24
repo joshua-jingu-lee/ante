@@ -163,9 +163,9 @@ class TestMemberStateConflictEquivalence:
     """``MemberStateConflictError`` 는 양쪽에서 ``MEMBER_STATE_CONFLICT``.
 
     CLI direct path: ``member suspend`` / ``member reactivate`` 양쪽 표면
-    모두 typed 매핑 (``except MemberStateConflictError:
-    fmt.error(..., code="MEMBER_STATE_CONFLICT")``) 보존 — generic
-    fallback (``emit_cli_error``) 보다 typed 분기를 우선 매칭한다.
+    모두 예외가 전파되어 ``AuthenticatedGroup.main`` 이 registry MRO lookup
+    (``error_spec_for_exception``) 으로 ``MEMBER_STATE_CONFLICT`` 를 surface
+    한다.
     """
 
     def test_cli_direct_state_conflict_via_suspend(self, runner: CliRunner) -> None:
@@ -491,14 +491,14 @@ class TestMemberPermissionDeniedEquivalence:
 class TestMemberInvalidEmojiEquivalence:
     """``MemberInvalidEmojiError`` 는 양쪽에서 ``MEMBER_INVALID_EMOJI``.
 
-    CLI direct path: ``member set-emoji`` 표면 — ``except ValueError as e:
-    emit_cli_error(fmt, e)`` generic fallback 이 ``error_spec_for_exception``
-    의 registry-first lookup 으로 typed code 를 surface 한다. typed exception
+    CLI direct path: ``member set-emoji`` 표면 — 예외가 전파되어
+    ``AuthenticatedGroup.main`` 이 ``error_spec_for_exception`` 의
+    registry-first lookup 으로 typed code 를 surface 한다. typed exception
     이 ``ValueError`` 다중상속이라 기존 caller (test_member.py:602/606 의
     ``pytest.raises(ValueError, match=...)``) 도 회귀 없이 동일하게 잡힌다.
 
     이전 (#1915 이전): ``_validate_emoji_format`` 이 단순 ``ValueError`` 를
-    raise → ``emit_cli_error`` 가 ``.code`` 속성 부재로 ``EXECUTION_ERROR``
+    raise → CLI 출구가 ``.code`` 속성 부재로 ``EXECUTION_ERROR``
     로 fallback → envelope code 가 ``EXECUTION_ERROR`` 로 surface 되었다.
     #1915 가 typed exception 도입으로 안정 코드를 surface 한다.
     """
@@ -539,13 +539,13 @@ class TestMemberInvalidEmojiEquivalence:
 class TestMemberMasterProtectedEquivalence:
     """``MemberMasterProtectedError`` 는 양쪽에서 ``MEMBER_MASTER_PROTECTED``.
 
-    CLI direct path: ``member suspend`` / ``member revoke`` 표면 — ``except
-    (ValueError, PermissionError) as e: emit_cli_error(fmt, e)`` generic
-    fallback 이 ``error_spec_for_exception`` 의 registry-first lookup 으로
-    typed code 를 surface 한다. typed exception 이 ``PermissionError``
-    다중상속이라 기존 caller (test_member_service_master_guard.py:239/245
-    의 ``pytest.raises(PermissionError, match="master는 ...")``) 도 회귀
-    없이 동일하게 잡힌다.
+    CLI direct path: ``member suspend`` / ``member revoke`` 표면 — 예외가
+    전파되어 ``AuthenticatedGroup.main`` 이 ``error_spec_for_exception`` 의
+    registry-first lookup 으로 typed code 를 surface 한다. typed exception 이
+    ``PermissionError`` 다중상속이라 기존 caller
+    (test_member_service_master_guard.py:239/245 의
+    ``pytest.raises(PermissionError, match="master는 ...")``) 도 회귀 없이
+    동일하게 잡힌다.
 
     ``PermissionDeniedError`` (#1843 sub-PR 1) 와 의미 분리:
 
@@ -556,7 +556,7 @@ class TestMemberMasterProtectedEquivalence:
       권한이 master 라도 거부된다.
 
     이전 (#1915 이전): ``_assert_not_master`` 가 단순 ``PermissionError`` 를
-    raise → ``emit_cli_error`` 가 ``.code`` 속성 부재로 ``EXECUTION_ERROR``
+    raise → CLI 출구가 ``.code`` 속성 부재로 ``EXECUTION_ERROR``
     fallback. #1915 가 typed exception 도입으로 안정 코드 surface.
     """
 

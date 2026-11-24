@@ -52,6 +52,17 @@ class InvalidExchangeError(AccountError):
     code: str = "VALIDATION_ERROR"
 
 
+class InvalidBrokerConfigError(AccountError):
+    """계좌 생성 때 ``broker_config`` 값이 브로커의 정의를 어김.
+
+    ``mock`` 계좌의 ``prices``·``default_price`` 가 가격 정의(불리언이 아닌
+    유한한 수, 0 초과)를 어기면 raise 한다. 안정 코드는 계좌 입력 검증의
+    ``VALIDATION_ERROR`` 다.
+    """
+
+    code: str = "VALIDATION_ERROR"
+
+
 class MissingCredentialsError(AccountError):
     """필수 credentials 키 누락.
 
@@ -157,6 +168,15 @@ class AccountHasActiveBotsError(AccountError):
             f"(각 봇에 대해 반복, 서버 정지 상태에서도 가능)\n"
             f"  2) ante account delete {account_id}"
         )
+
+
+class AccountReconcileNotApplicableError(AccountError):
+    """수동 대사를 할 수 없는 계좌(D-ACC-09 매트릭스의 reconcile 면제, 가상).
+
+    가상 계좌의 포지션은 내부 기록이 권위라 브로커와 비교하거나 덮어쓰지 않는다.
+    """
+
+    code: str = "ACCOUNT_RECONCILE_NOT_APPLICABLE"
 
 
 AccountDeletedException = AccountDeletedError

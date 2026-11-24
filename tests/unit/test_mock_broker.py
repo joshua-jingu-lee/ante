@@ -238,6 +238,96 @@ async def test_delayed_orders_count_their_own_calls(
     assert filled == {early: 1, late: 2}
 
 
+@pytest.mark.asyncio
+async def test_failed_immediate_sell_leaves_ledger_untouched(
+    broker: MockBrokerAdapter,
+) -> None:
+    """#2943: 보유 초과 즉시 매도가 실패하면 현금·포지션·주문 목록이 그대로다."""
+    await broker.place_order("005930", "buy", 5)
+    cash = (await broker.get_account_balance())["cash"]
+    positions = await broker.get_positions()
+    history = await broker.get_order_history()
+    pending = await broker.get_pending_orders()
+
+    with pytest.raises(BrokerError, match="보유 수량 부족"):
+        await broker.place_order("005930", "sell", 10)
+
+    assert (await broker.get_account_balance())["cash"] == cash
+    assert await broker.get_positions() == positions
+    assert len(await broker.get_order_history()) == len(history)
+    assert await broker.get_pending_orders() == pending
+
+
+@pytest.mark.asyncio
+async def test_partial_sell_validates_filled_quantity(
+    partial_broker: MockBrokerAdapter,
+) -> None:
+    """#2943: 부분 모드의 매도는 체결될 수량으로 보유를 검증한다."""
+    await partial_broker.place_order("005930", "buy", 10)
+
+    order_id = await partial_broker.place_order("005930", "sell", 10)
+
+    status = await partial_broker.get_order_status(order_id)
+    assert (status["status"], status["filled_quantity"]) == ("partially_filled", 5)
+    assert await partial_broker.get_positions() == []
+
+
+@pytest.mark.asyncio
+async def test_failed_delayed_sell_leaves_ledger_untouched() -> None:
+    """#2943: 지연 매도의 체결이 실패하면 장부가 그대로이고 주문은 pending이다."""
+    adapter = MockBrokerAdapter(
+        {"fill_mode": "delayed", "delay_polls": 1, "default_price": 50_000}
+    )
+    await adapter.place_order("005930", "buy", 5)
+    await adapter.get_order_history()
+    cash = (await adapter.get_account_balance())["cash"]
+    positions = await adapter.get_positions()
+    sell_id = await adapter.place_order("005930", "sell", 10)
+
+    with pytest.raises(BrokerError, match="보유 수량 부족"):
+        await adapter.get_order_history()
+
+    assert (await adapter.get_account_balance())["cash"] == cash
+    assert await adapter.get_positions() == positions
+    status = await adapter.get_order_status(sell_id)
+    assert (status["status"], status["filled_quantity"]) == ("pending", 0)
+    history = await adapter.get_order_history()
+    assert len(history) == 2
+
+
+@pytest.mark.asyncio
+async def test_delayed_order_keeps_mode_at_submission(
+    delayed_broker: MockBrokerAdapter,
+) -> None:
+    """#2943: 접수 뒤 체결 모드가 바뀌어도 지연 주문은 전량 체결된다."""
+    order_id = await delayed_broker.place_order("005930", "buy", 10)
+    delayed_broker.set_fill_mode(FillMode.PARTIAL)
+
+    await delayed_broker.get_order_history()
+    (item,) = await delayed_broker.get_order_history()
+
+    assert (item["order_id"], item["status"]) == (order_id, "filled")
+    assert item["filled_quantity"] == 10
+
+
+@pytest.mark.asyncio
+async def test_delayed_market_order_fills_at_submission_price(
+    delayed_broker: MockBrokerAdapter,
+) -> None:
+    """#2943: 지연 시장가 주문은 접수 때의 가격으로 체결된다."""
+    await delayed_broker.place_order("005930", "buy", 10)
+    delayed_broker.set_price("005930", 90_000)
+
+    await delayed_broker.get_order_history()
+    await delayed_broker.get_order_history()
+
+    spent = 10_000_000 - (await delayed_broker.get_account_balance())["cash"]
+    expected = 10 * 50_000
+    assert spent == expected + delayed_broker.get_commission_info().calculate(
+        "buy", expected
+    )
+
+
 @pytest.mark.parametrize("value", [0, -1, True, False, 1.0, 2.5, "2", None])
 def test_delay_polls_must_be_positive_int(value: object) -> None:
     """delay_polls가 1 이상의 정수가 아니면 생성자의 BrokerError다."""

@@ -132,6 +132,7 @@ _METRICS_FULL = PerformanceMetrics(
     active_days=58,
 )
 _METRICS_MIN = PerformanceMetrics(total_trades=3, winning_trades=1, losing_trades=2)
+_METRICS_NO_CAPITAL = dataclasses.replace(_METRICS_MIN, max_drawdown=None)
 
 _DAILY = [
     DailySummary(
@@ -179,6 +180,7 @@ _CASES: dict[str, list[str]] = {
     "summary_empty": [*_SUMMARY, "daily"],
     "performance_full": list(_PERF),
     "performance_minimal": list(_PERF),
+    "performance_no_capital": list(_PERF),
 }
 
 _FAILURE_CASES: dict[str, list[str]] = {
@@ -270,7 +272,10 @@ def _tracker(branch: str) -> MagicMock:
     tracker.get_daily_summary = AsyncMock(return_value=daily)
     tracker.get_weekly_summary = AsyncMock(return_value=_WEEKLY)
     tracker.get_monthly_summary = AsyncMock(return_value=_MONTHLY)
-    metrics = _METRICS_MIN if branch == "performance_minimal" else _METRICS_FULL
+    metrics = {
+        "performance_minimal": _METRICS_MIN,
+        "performance_no_capital": _METRICS_NO_CAPITAL,
+    }.get(branch, _METRICS_FULL)
     tracker.calculate = AsyncMock(return_value=metrics)
     return tracker
 
@@ -295,6 +300,7 @@ def _invoke(
     tracker = _tracker(branch)
     db = AsyncMock()
     db.fetch_one = AsyncMock(return_value={"1": 1})
+    db.fetch_all = AsyncMock(return_value=[])
 
     @asynccontextmanager
     async def _create_registry(ctx: Any = None) -> AsyncIterator[tuple[Any, Any]]:
@@ -854,6 +860,51 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         '      "avg_loss": 0.0,\n'
         '      "profit_factor": 0.0,\n'
         '      "max_drawdown": 0.0,\n'
+        '      "max_drawdown_amount": 0.0,\n'
+        '      "sharpe_ratio": null,\n'
+        '      "first_trade_at": null,\n'
+        '      "last_trade_at": null,\n'
+        '      "active_days": 0\n'
+        "    }\n"
+        "  }\n"
+        "}\n"
+    ),
+    ("performance_no_capital", "text"): (
+        "전략 성과: my_strategy (strat-1)\n"
+        "  총 거래           : 3\n"
+        "  승률             : 0.0%\n"
+        "  승리             : 1\n"
+        "  패배             : 2\n"
+        "  총 손익           : 0\n"
+        "  순 손익           : 0\n"
+        "  총 수수료          : 0\n"
+        "  평균 수익          : 0\n"
+        "  평균 손실          : 0\n"
+        "  수익 팩터          : 0.00\n"
+        "  MDD            : N/A (할당 예산 없음)\n"
+        "  MDD 금액         : 0\n"
+        "  샤프 비율          : N/A (거래 30건 미만)\n"
+        "  활성 일수          : 0\n"
+    ),
+    ("performance_no_capital", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_name": "my_strategy",\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "metrics": {\n'
+        '      "total_trades": 3,\n'
+        '      "winning_trades": 1,\n'
+        '      "losing_trades": 2,\n'
+        '      "win_rate": 0.0,\n'
+        '      "total_pnl": 0.0,\n'
+        '      "total_commission": 0.0,\n'
+        '      "net_pnl": 0.0,\n'
+        '      "avg_profit": 0.0,\n'
+        '      "avg_loss": 0.0,\n'
+        '      "profit_factor": 0.0,\n'
+        '      "max_drawdown": null,\n'
         '      "max_drawdown_amount": 0.0,\n'
         '      "sharpe_ratio": null,\n'
         '      "first_trade_at": null,\n'
