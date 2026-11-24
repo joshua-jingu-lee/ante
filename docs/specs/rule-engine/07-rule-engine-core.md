@@ -23,7 +23,7 @@ RuleEngine은 룰을 로드하고 평가하는 메인 엔진입니다.
 
 - `OrderRequestEvent` (priority=100): 주문 평가 — `event.account_id` 필터링 → **OrderRequestEvent preflight** (아래 소절 참조) → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행
 - `OrderModifyEvent` (priority=100): 주문 정정 평가 — `event.account_id` 필터링 → symbol/side enrich → **v1 가격 preflight**(finite `price>0` 아니면 `modify_invalid_args` 거부 + `_consumed` 설정; #2391 — 기존 `event.price or 0.0` 추론 제거, 정정은 항상 지정가이므로 `order_type="limit"` 고정) → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행. 룰 거부 시 `OrderModifyRejectedEvent` + `_consumed`. **룰 통과 시**: broker-level 정정 v1(price-only)이 지원되므로 Gateway(priority=50)가 fail-closed 게이트 후 broker 위임 → `OrderModifyExecutedEvent`(성공) 또는 사유별 `OrderModifyRejectedEvent`. 고급 케이스(수량변경 등)=#2393.
-- `ConfigChangedEvent`: 룰 설정 변경 감지. `category="rule"` + `key="accounts.{account_id}.rules"`이면 해당 계좌 엔진만 계좌 룰을 재로드하고, `category="strategy_rule"`이면 해당 전략 룰을 재로드한다.
+- `ConfigChangedEvent`: 룰 설정 변경 감지. `category="rule"` + `key="accounts.{account_id}.rules"`이면 해당 계좌 엔진만 계좌 룰을 재로드하고, `category="strategy_rule"`이면 해당 전략 룰을 재로드한다. `rules_unavailable` 엔진은 `category="rule"`·자기 key의 리스트 재로드가 성공하면 그 상태를 푼다.
 
 ### 룰 레지스트리
 
@@ -70,6 +70,7 @@ RuleEngine은 `OrderRequestEvent` 처리 시 active-order readiness gate(계층 
 
 - **위치**: `account_id` 필터(`event.account_id != self._account_id`) 직후, 기존 preflight 게이트 군(#1297~#1318)과 동형 위치에서 `runtime_readiness.active_trading_ready(account_id)`를 체크한다(아래 OrderRequestEvent preflight 도메인 검증보다 먼저, RuleContext 생성·Treasury 조회 이전).
 - **거부**: `not_ready`이거나 **`AccountStatus.SUSPENDED`(user kill-switch)**면 `_build_safe_rejected_event(reason="account_not_ready: <missing_flags>" | "account_suspended")`를 발행하고 return한다(try/catch-all + safe-builder로 audit trail 보장). **SUSPENDED 동반 조회 필수(P1)**: `StopOrderManager._trigger_order` 변환 `OrderRequestEvent` 등 봇 상태(BotManager 중지)를 우회하는 경로가 있어, readiness가 ready여도 suspended 계좌 주문이 승인되는 kill-switch 우회를 계층1에서 차단한다(`RuleContext.account_status`는 dead field라 `account_service`에서 직접 status 조회).
+- **규칙 로드 실패**: 기동 때 계좌 룰 저장값을 읽지 못한 엔진(`rules_unavailable`)은 같은 위치에서 `_build_safe_rejected_event(reason="account_not_ready: rules_unavailable")`와 `build_not_ready_notification`을 발행하고 return한다. readiness registry의 플래그가 아니라 엔진의 상태이며, 계층 2·3은 이 사유를 보지 않는다(신규 주문 승인은 이 엔진의 `OrderValidatedEvent`를 거쳐야만 한다). **registry의 not_ready와 달리 정정도 막는다** — `OrderModifyEvent`를 같은 사유의 `OrderModifyRejectedEvent` + `_consumed`로 거부한다(룰이 빈 엔진은 정정을 평가 없이 통과시키기 때문이다). 청산 SELL은 아래 청산 SELL 비대칭 정책과 같이 거부한다.
 - **효과**: Treasury `reserve_for_order` 이전 차단이라 reserve 누수가 없다(가장 깨끗한 차단).
 - **fail-closed**: registry 미주입 / 조회 예외도 `not_ready`로 취급해 차단한다. 멀티계좌 중 1개만 ready면 그 계좌만 통과한다.
 - **stop order 재진입**: `_trigger_order` → 변환 `OrderRequestEvent`도 계층1을 통과하므로 트리거 시점 readiness로 재평가된다(별도 처리 불요).

@@ -17,6 +17,7 @@ from ante.rule.base import (
     RuleEvaluation,
     RuleResult,
 )
+from ante.rule.config_update import account_rules_config_key
 from ante.rule.global_rules import (
     DailyLossLimitRule,
     TotalExposureLimitRule,
@@ -189,11 +190,26 @@ class RuleEngine:
 
         self._account_rules: list[Rule] = []
         self._strategy_rules: dict[str, list[Rule]] = {}
+        self._rules_unavailable_cause: str | None = None
 
     @property
     def account_id(self) -> str:
         """바인딩된 계좌 ID."""
         return self._account_id
+
+    @property
+    def rules_unavailable(self) -> bool:
+        """저장된 계좌 룰을 읽지 못해 주문·정정을 막는 상태인지."""
+        return self._rules_unavailable_cause is not None
+
+    @property
+    def rules_unavailable_cause(self) -> str | None:
+        """막힌 원인(``not_list`` | ``read_error``). 막히지 않았으면 ``None``."""
+        return self._rules_unavailable_cause
+
+    def mark_rules_unavailable(self, cause: str) -> None:
+        """저장된 계좌 룰을 읽지 못한 상태로 둔다."""
+        self._rules_unavailable_cause = cause
 
     def start(self) -> None:
         """EventBus 구독 등록."""
@@ -651,6 +667,25 @@ class RuleEngine:
                 )
                 return
 
+            if self.rules_unavailable:
+                rules_reason = f"{ACCOUNT_NOT_READY_REASON}: rules_unavailable"
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=rules_reason,
+                    )
+                )
+                await self._eventbus.publish(
+                    build_not_ready_notification(
+                        account_id=self._account_id,
+                        reason=rules_reason,
+                        side=getattr(event, "side", ""),
+                        is_liquidation=is_liquidation,
+                    )
+                )
+                return
+
             if not isinstance(event.side, str) or event.side not in _VALID_ORDER_SIDES:
                 reason = (
                     f"Invalid signal side: {_safe_repr(event.side)} "
@@ -1022,6 +1057,23 @@ class RuleEngine:
         if event.account_id != self._account_id:
             return
 
+        if self.rules_unavailable:
+            await self._eventbus.publish(
+                OrderModifyRejectedEvent(
+                    account_id=event.account_id,
+                    order_id=event.order_id,
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    reason="account_not_ready: rules_unavailable",
+                )
+            )
+            object.__setattr__(event, "_consumed", True)
+            return
+
         if self._order_tracker is not None and not event.symbol and not event.side:
             try:
                 record = await self._order_tracker.get(event.order_id)
@@ -1153,6 +1205,17 @@ class RuleEngine:
             )
             object.__setattr__(event, "_consumed", True)
 
+    def _release_rules_unavailable(self, category: str) -> None:
+        """``rule`` category 재로드가 성공했으면 룰 로드 실패 상태를 푼다."""
+        if category != "rule" or not self.rules_unavailable:
+            return
+        self._rules_unavailable_cause = None
+        logger.info(
+            "계좌 룰 로드 실패 상태 해제: account=%s, rules=%s",
+            self._account_id,
+            [rule.config.get("type") for rule in self._account_rules],
+        )
+
     async def _on_config_changed(self, event: object) -> None:
         """설정 변경 시 룰 재로딩."""
         import json
@@ -1165,7 +1228,7 @@ class RuleEngine:
             return
 
         if event.category == "rule":
-            expected_key = f"accounts.{self._account_id}.rules"
+            expected_key = account_rules_config_key(self._account_id)
             if event.key != expected_key:
                 return
 
@@ -1191,6 +1254,7 @@ class RuleEngine:
             else:
                 self.load_rules_from_config(new_rules)
             logger.info("계좌 룰 재로드 완료: %d건", len(self._account_rules))
+            self._release_rules_unavailable(event.category)
         elif event.category == "strategy_rule":
             parts = event.key.rsplit(".", 1)
             strategy_id = parts[-1] if len(parts) > 1 else event.key

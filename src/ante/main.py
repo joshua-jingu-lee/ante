@@ -18,6 +18,7 @@ from ante.account.readiness import (
 from ante.config import Config, DynamicConfigService
 from ante.core import Database, clock
 from ante.eventbus import EventBus, EventHistoryStore
+from ante.eventbus.events import NotificationEvent
 
 logger = logging.getLogger(__name__)
 
@@ -1751,6 +1752,41 @@ async def _init_notification(s: Services) -> None:
         logger.info("TelegramCommandReceiver 건너뜀 — TELEGRAM_CHAT_ID 미설정")
 
 
+_RULES_UNAVAILABLE_MESSAGES = {
+    "not_list": (
+        "계좌 {id} 의 거래 규칙 저장값이 규칙 목록 형식이 아니어서 이 계좌의 주문을 "
+        "막았습니다. ante rule update <rule_type> --account {id} 로 규칙을 다시 "
+        "저장하면 재기동 없이 풀립니다."
+    ),
+    "read_error": (
+        "계좌 {id} 의 거래 규칙 저장값을 읽는 중 오류가 나 이 계좌의 주문을 "
+        "막았습니다. 저장값은 멀쩡할 수 있으며 재기동으로 풀릴 수 있습니다. 풀리지 "
+        "않으면 ante rule update <rule_type> --account {id} 로 규칙을 다시 저장하세요."
+    ),
+}
+
+_RULES_UNAVAILABLE_HISTORY_HINT = (
+    " ante config history accounts.{id}.rules 로 이전 값을 확인하고 필요한 규칙을 "
+    "모두 다시 저장하세요 — 깨지기 전의 다른 규칙은 복원되지 않습니다."
+)
+
+
+async def _notify_rules_unavailable(s: Services) -> None:
+    """저장된 계좌 룰을 읽지 못해 막힌 계좌마다 운영자 알림을 한 번 낸다."""
+    if s.rule_engine_manager is None or s.eventbus is None:
+        return
+    for account_id, cause in s.rule_engine_manager.rules_unavailable_accounts().items():
+        message = _RULES_UNAVAILABLE_MESSAGES[cause] + _RULES_UNAVAILABLE_HISTORY_HINT
+        await s.eventbus.publish(
+            NotificationEvent(
+                level="error",
+                title="계좌 규칙을 읽지 못함 — 주문 차단",
+                message=message.format(id=account_id),
+                category="system",
+            )
+        )
+
+
 async def _init_ipc(s: Services) -> None:
     """IPC 서버 초기화 — Unix 도메인 소켓 기반 프로세스 간 통신."""
     assert s.eventbus is not None
@@ -2024,6 +2060,7 @@ async def main() -> None:
         await _init_feed(s)
         await _init_approval(s)
         await _init_notification(s)
+        await _notify_rules_unavailable(s)
         await _init_ipc(s)
         _remove_starting_marker(s.config)
         await _run(s)

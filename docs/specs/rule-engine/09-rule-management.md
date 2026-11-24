@@ -85,8 +85,15 @@ rules = [
 ```
 
 시스템 시작 시 dynamic_config에 `accounts.{account_id}.rules`가 있으면 그 값을 우선한다.
-없을 때만 정적 TOML seed를 읽어 RuleEngine 초기화에 사용한다. 런타임 수정은 항상
-dynamic_config에 기록한다.
+행이 없을 때만 정적 TOML seed를 읽어 RuleEngine 초기화에 사용한다. 행이 있는데 값이
+리스트가 아니거나 읽지 못하면 seed나 기본 룰로 가지 않는다 — 그 계좌의 RuleEngine은
+계좌 룰 없이 `rules_unavailable` 상태로 떠서 그 계좌의 신규 주문과 정정을
+`account_not_ready: rules_unavailable`로 거부하고, 알림 서비스가 켜져 있으면 기동 뒤
+운영자 알림을 한 번 보낸다. 다른 계좌와 데몬은 정상으로 뜬다. 그 계좌에 `ante rule update`로
+룰을 한 번 저장하면 저장값이 그 룰을 담은 리스트로 다시 쓰이고 차단이 풀린다(데몬이 떠
+있으면 재기동 없이). 깨지기 전의 다른 룰은 복원되지 않는다 —
+`ante config history accounts.<account_id>.rules`로 이전 값을 확인해 다시 저장한다.
+런타임 수정은 항상 dynamic_config에 기록한다.
 
 ### 전략별 룰
 
