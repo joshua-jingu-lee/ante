@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ante.account.models import missing_required_credentials
 from ante.account.presets import BROKER_PRESETS
-from ante.contracts.cli_errors import InvalidDateRangeError
+from ante.contracts.cli_errors import ConfigUnsupportedKeyError, InvalidDateRangeError
 from ante.core import clock
 from ante.ipc.requests import (
     AccountActivateRequest,
@@ -57,6 +57,7 @@ from ante.ipc.requests import (
     TreasuryDeallocateRequest,
     TreasurySetBalanceRequest,
 )
+from ante.rule.config_update import is_account_rules_config_key
 
 if TYPE_CHECKING:
     from ante.core.registry import ServiceRegistry
@@ -896,6 +897,12 @@ async def _handle_member_regenerate_recovery_key(
 async def _handle_config_set(
     svc: ServiceRegistry, request: ConfigSetRequest, actor: str
 ) -> dict[str, Any]:
+    if is_account_rules_config_key(request.key):
+        raise ConfigUnsupportedKeyError(
+            "계좌 규칙 key(accounts.<account_id>.rules)는 config set으로 바꿀 수 "
+            "없습니다. ante rule update <rule_type> --account <account_id>를 "
+            "사용하세요."
+        )
     key = request.key
     value = request.value
     category = request.category

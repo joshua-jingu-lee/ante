@@ -193,9 +193,12 @@ async def test_rejected_set_leaves_stored_rules_untouched(dynamic: Any) -> None:
     assert isinstance(json.loads(after["value"]), list)
     assert await _history_count(database, RULE_KEY) == history_before
 
-    await _update_rule(service, "max_position_count", {"max_count": 3})
+    await _update_rule(service, "total_exposure_limit", {"max_exposure_percent": 0.2})
     stored = await service.get(RULE_KEY)
-    assert [cfg["type"] for cfg in stored] == ["daily_loss_limit", "max_position_count"]
+    assert [cfg["type"] for cfg in stored] == [
+        "daily_loss_limit",
+        "total_exposure_limit",
+    ]
     assert await _history_count(database, RULE_KEY) == history_before + 1
 
 
