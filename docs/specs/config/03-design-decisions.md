@@ -111,6 +111,9 @@ TELEGRAM_CHAT_ID=987654321
 해당 rule만 수정하더라도 `accounts.{account_id}.rules` 리스트 전체를 갱신하고,
 `ConfigChangedEvent(category="rule", key="accounts.{account_id}.rules")`를 발행한다.
 정적 TOML의 `accounts.{account_id}.rules`는 초기 seed/fallback으로만 사용한다.
+`ante config set`(IPC `config.set`)은 `accounts.<account_id>.rules` 형태의 key를 category와 무관하게
+`CONFIG_UNSUPPORTED_KEY`로 거부하고 `ante rule update`를 안내한다. 계좌별 룰은 `rule update`로만 쓴다.
+다른 key의 `config set` 동작은 바뀌지 않는다.
 
 *전략별 룰 (RuleEngine/BotManager가 참조)*:
 
