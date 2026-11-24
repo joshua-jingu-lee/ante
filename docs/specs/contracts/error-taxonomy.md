@@ -44,7 +44,7 @@
 |----------|------|--------------|
 | `validation` | 입력 계약 위반(필수 옵션 누락, enum 비멤버, 형식 오류, 도메인 식별자 형식 위반) | `VALIDATION_ERROR`, `CLI_MISSING_REQUIRED_INPUT`, `CLI_OPTION_CONFLICT`, `CONFIG_VALIDATION_ERROR`, `STRATEGY_VALIDATION_ERROR`, `APPROVAL_VALIDATION_ERROR`, `REPORT_VALIDATION_ERROR`, `INVALID_DATE_RANGE`, `INVALID_DATE`, `INVALID_SIGNAL_KEY`, `MALFORMED_REQUEST` |
 | `auth` | 인증 누락/실패 | `AUTH_REQUIRED`, `AUTH_FAILED` |
-| `permission` | 인증은 됐으나 scope/role 부족 | `PERMISSION_DENIED`, `MEMBER_INVALID_SCOPE` |
+| `permission` | 인증은 됐으나 scope/role 부족, 또는 등록되지 않은 scope의 부여 거부 | `PERMISSION_DENIED`, `MEMBER_INVALID_SCOPE` |
 | `not_found` | 대상 resource 존재하지 않음 | `BOT_NOT_FOUND`, `ACCOUNT_NOT_FOUND`, `APPROVAL_NOT_FOUND`, `MEMBER_NOT_FOUND` |
 | `state_conflict` | 대상이 요청한 상태 전이를 허용하지 않는 상태 | `BOT_STATE_CONFLICT`, `ACCOUNT_ALREADY_DELETED`, `UPDATE_SERVER_RUNNING`, `BOT_NOT_RUNNING`, `BOT_SIGNAL_CHANNEL_BUSY` |
 | `service_unavailable` | 서버 lifecycle / 의존 서비스 미구성으로 dispatch 거부 | `SERVICE_UNAVAILABLE`, `SERVICE_NOT_CONFIGURED` |

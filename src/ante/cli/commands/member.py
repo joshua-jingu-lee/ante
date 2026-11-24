@@ -86,7 +86,7 @@ def _resolve_secret_non_interactive(
     path = Path(file_path)
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         raise MemberPasswordFileNotFoundError(
             f"{file_option_label} 파일을 읽을 수 없습니다."
         ) from e
