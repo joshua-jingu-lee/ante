@@ -324,4 +324,6 @@ AuditLogger가 공유하는 canonical DB이다. 예외적으로 다른 DB를 볼
 | `ANTE_ENV` | `production` / `staging` / `test` | JSONL 로그 레코드의 `env` 필드로 주입되어 환경 식별 | `production` |
 | `ANTE_LOG_JSONL` | `1` / 미설정 | JSONL 파일 핸들러 활성화 게이트. 미설정 시 stdout 평문 핸들러만 동작 | 미설정 |
 
+Ante는 위 두 값을 프로세스 환경 변수에서만 읽고 `secrets.env`(§2)에서 찾지 않는다.
+
 **세부 스펙**: [docs/specs/logging/](../logging/) (JSON 스키마, 핸들러 구성, 회전 정책, Fingerprint 규칙 등)

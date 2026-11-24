@@ -54,4 +54,4 @@
 
 Staging 감시 에이전트가 필요해지면 별도 staging 운영 스펙/런북과 함께 로그 bind mount, `ANTE_ENV=staging`, `ANTE_LOG_JSONL=1` 주입 방식을 다시 정의한다.
 
-Production 볼륨 이름은 기존 저장소 관습(`ante-data`, `ante-db` 하이픈)을 따라 `ante-logs` 로 선언한다(compose 프로젝트 prefix 가 붙어 실제 생성되는 볼륨은 `ante_ante-logs`). 컨테이너 배포에서 로그를 config 볼륨과 분리하고 싶으면 `system.toml`의 `logging.directory`를 `/app/logs` 같은 절대 경로로 override한다. `ANTE_LOG_JSONL=1` 게이트는 Production 에서도 점진 도입 원칙에 따라 운영 시점에 `<config_dir>/secrets.env` 또는 compose `environment:` 로 주입한다. 게이트가 꺼진 상태에서는 파일 핸들러가 생성되지 않아 `ante-logs` 볼륨은 비어 있게 된다.
+Production 볼륨 이름은 기존 저장소 관습(`ante-data`, `ante-db` 하이픈)을 따라 `ante-logs` 로 선언한다(compose 프로젝트 prefix 가 붙어 실제 생성되는 볼륨은 `ante_ante-logs`). 컨테이너 배포에서 로그를 config 볼륨과 분리하고 싶으면 `system.toml`의 `logging.directory`를 `/app/logs` 같은 절대 경로로 override한다. `ANTE_LOG_JSONL=1` 게이트는 Production 에서도 점진 도입 원칙에 따라 운영 시점에 주입한다. Ante는 이 값을 프로세스 환경 변수에서만 읽고 `secrets.env`를 직접 읽지 않는다. compose 배포에서는 `env_file`이 호스트의 `config/secrets.env`를 컨테이너의 프로세스 환경에 실으므로 그 파일이나 compose `environment:`에 적으면 되고, 네이티브 배포에서는 서비스 매니저의 환경(예: systemd `EnvironmentFile`)으로 주입한다. 게이트가 꺼진 상태에서는 파일 핸들러가 생성되지 않아 `ante-logs` 볼륨은 비어 있게 된다.
