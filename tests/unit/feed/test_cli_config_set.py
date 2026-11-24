@@ -196,3 +196,38 @@ class TestFeedConfigSetNewlineRejection:
         assert "개행" in result.stderr
         assert result.stdout.strip() == ""
         assert not (Path(data_path) / ".feed" / ".env").exists()
+
+
+class TestFeedConfigSetNonUtf8EnvFile:
+    """#2918: UTF-8이 아닌 .env는 CONFIG_INVALID_VALUE로 멈추고 바이트를 싣지 않는다."""
+
+    def test_json_format_code_and_no_bytes(
+        self, runner: CliRunner, data_path: str
+    ) -> None:
+        env_path = Path(data_path) / ".feed" / ".env"
+        env_path.parent.mkdir(parents=True)
+        before = b"ANTE_DART_API_KEY=fake-sec\xff\xfe-tail\n"
+        env_path.write_bytes(before)
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "feed",
+                "config",
+                "set",
+                "ANTE_DATAGOKR_API_KEY",
+                "value",
+                "--data-path",
+                data_path,
+            ],
+        )
+        assert result.exit_code == 1, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        payload = json.loads(result.stdout.strip())
+        assert payload["code"] == "CONFIG_INVALID_VALUE"
+        assert payload["message"] == "feed .env 파일을 UTF-8로 읽을 수 없습니다."
+        for trace in ("0xff", "0xfe", "codec", "position", "fake-sec", data_path):
+            assert trace not in result.stdout + result.stderr
+        assert env_path.read_bytes() == before

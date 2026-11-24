@@ -127,7 +127,7 @@ class ModifyOrgnoUnavailableError(BrokerError):
     캐시 miss(재기동 등으로 소실) 또는 제출 영업일 불일치(odno 재사용) 시에는
     오값 전송을 막기 위해 본 예외를 raise 한다(전송 금지, fail-closed). Gateway 는
     이를 ``modify_orgno_unavailable`` 거부 사유로 매핑한다. taxonomy
-    ``execution`` 카테고리 (정정 전송 전제조건 미충족).
+    ``state_conflict`` 카테고리 (정정 전송 전제조건 미충족).
     """
 
     code: str = "BROKER_MODIFY_ORGNO_UNAVAILABLE"
