@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from ante.account.models import missing_required_credentials
 from ante.account.presets import BROKER_PRESETS
 from ante.core import clock
 from ante.ipc.requests import (
@@ -312,7 +313,7 @@ async def _handle_bot_start(
     account = await svc.account.get(bot.config.account_id)
     preset = BROKER_PRESETS.get(account.broker_type)
     required = preset.required_credentials if preset is not None else ["app_key"]
-    missing = [key for key in required if not account.credentials.get(key)]
+    missing = missing_required_credentials(required, account.credentials)
     if missing:
         raise BotAccountCredentialsNotConfigured(
             f"계좌에 인증정보({missing[0]})가 설정되지 않았습니다"

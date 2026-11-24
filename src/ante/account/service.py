@@ -28,6 +28,7 @@ from ante.account.models import (
     Account,
     AccountStatus,
     TradingMode,
+    missing_required_credentials,
 )
 from ante.account.presets import BROKER_PRESETS, VIRTUAL_ONLY_BROKER_TYPES
 from ante.account.scoping import require_account_id, validate_new_account_id
@@ -157,6 +158,18 @@ def _load_persisted_timezone(stored_tz: str, account_id: str) -> tuple[str, bool
         )
         return stored_tz, True
     return stored_tz, False
+
+
+def _reject_missing_credentials(broker_type: str, credentials: dict[str, Any]) -> None:
+    """프리셋의 필수 인증정보가 비어 있으면 키 이름만 실어 거부한다."""
+    preset = BROKER_PRESETS[broker_type]
+    missing = missing_required_credentials(preset.required_credentials, credentials)
+    if missing:
+        raise MissingCredentialsError(
+            f"필수 credentials 누락: {missing}. "
+            f"broker_type '{broker_type}'에 필요: "
+            f"{preset.required_credentials}"
+        )
 
 
 class AccountService:
@@ -293,16 +306,7 @@ class AccountService:
             )
         _reject_virtual_only_broker_in_live(account)
 
-        preset = BROKER_PRESETS[account.broker_type]
-        missing = [
-            k for k in preset.required_credentials if k not in account.credentials
-        ]
-        if missing:
-            raise MissingCredentialsError(
-                f"필수 credentials 누락: {missing}. "
-                f"broker_type '{account.broker_type}'에 필요: "
-                f"{preset.required_credentials}"
-            )
+        _reject_missing_credentials(account.broker_type, account.credentials)
 
         now = clock.now(UTC)
         account.created_at = now
@@ -430,6 +434,11 @@ class AccountService:
         unrecognized = set(fields.keys()) - updatable - self.IMMUTABLE_FIELDS
         if unrecognized:
             raise ValueError(f"인식할 수 없는 필드입니다: {sorted(unrecognized)}")
+
+        if "credentials" in fields and account.broker_type in BROKER_PRESETS:
+            _reject_missing_credentials(
+                account.broker_type, fields["credentials"] or {}
+            )
 
         timezone_update = fields.get("timezone")
         if timezone_update is not None:
