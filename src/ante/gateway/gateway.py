@@ -16,6 +16,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_NOTIFY_REASON_MAX = 200
+
+
+def _code_span(value: object, limit: int = _NOTIFY_REASON_MAX) -> str:
+    """값을 백틱을 지우고 길이를 줄여 Markdown 코드 스팬으로 감싼다."""
+    text = str(value).replace("`", "")
+    if len(text) > limit:
+        text = text[:limit] + "…"
+    return f"`{text}`"
+
 
 class APIGateway:
     """증권사 API 호출 중앙 관리.
@@ -351,6 +361,7 @@ class APIGateway:
     async def _on_order_approved(self, event: object) -> None:
         """stop 계열은 StopOrderManager에 등록, 그 밖은 non-LIVE·virtual 아니면 제출."""
         from ante.eventbus.events import (
+            NotificationEvent,
             OrderApprovedEvent,
             OrderFailedEvent,
             OrderSubmittedEvent,
@@ -434,7 +445,7 @@ class APIGateway:
                 )
             )
         except Exception as e:
-            from ante.broker.exceptions import APIError
+            from ante.broker.exceptions import ORDER_OUTCOME_UNKNOWN, APIError
 
             error_code = ""
             if isinstance(e, APIError):
@@ -457,6 +468,26 @@ class APIGateway:
                     exchange=event.exchange,
                 )
             )
+            if error_code == ORDER_OUTCOME_UNKNOWN:
+                side = "매수" if event.side == "buy" else "매도"
+                await self._eventbus.publish(
+                    NotificationEvent(
+                        level="error",
+                        title="주문 접수 여부 미상",
+                        message=(
+                            f"계좌 {_code_span(event.account_id)} · "
+                            f"봇 {_code_span(event.bot_id)} · "
+                            f"주문 {_code_span(event.order_id)}\n"
+                            f"{side} {_code_span(event.symbol)} "
+                            f"{event.quantity:g}주\n"
+                            "증권사 응답을 받지 못해 다시 보내지 않았습니다. "
+                            "증권사의 미체결·당일 주문 내역에서 접수 여부를 "
+                            "확인하세요.\n"
+                            f"사유: {_code_span(e)}"
+                        ),
+                        category="trade",
+                    )
+                )
 
     async def _on_order_cancel(self, event: object) -> None:
         """주문 취소 요청 → BrokerAdapter 전달 (룰 검증 생략)."""
