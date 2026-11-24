@@ -525,6 +525,41 @@ async def test_set_self_heals_over_legacy_nan_row(service, eventbus):
     assert event.key == "risk.max_mdd_pct"
 
 
+@pytest.mark.parametrize(
+    ("stored", "expected_old"),
+    [
+        ("{", None),
+        ("NaN", None),
+        ("0.2", "0.2"),
+    ],
+    ids=["unparsable", "non_finite", "valid"],
+)
+async def test_set_overwrites_unreadable_previous_value(
+    service, eventbus, stored, expected_old
+):
+    """해석되지 않는 이전 값도 ``set`` 이 덮어쓰고, 이력의 이전 값은 비어 있다."""
+    await _insert_legacy_value(service, "risk.max_mdd_pct", stored, "risk")
+
+    await service.set("risk.max_mdd_pct", 0.1, category="risk")
+
+    assert await service.get("risk.max_mdd_pct") == 0.1
+    history = await service.get_history("risk.max_mdd_pct")
+    assert len(history) == 1
+    assert history[0]["old_value"] == expected_old
+    assert eventbus.published[0].old_value == (expected_old or "")
+
+
+async def test_set_still_rejects_invalid_value_over_unparsable_row(service):
+    """이전 값이 해석되지 않아도 ``validate_value`` 의 거부는 그대로다."""
+    await _insert_legacy_value(service, "system.log_level", "{", "system")
+
+    with pytest.raises(ValueError):
+        await service.set("system.log_level", "verbose", category="system")
+
+    with pytest.raises(json.JSONDecodeError):
+        await service.get("system.log_level")
+
+
 # ── #1412 P2-1 회귀: nested dict/list non-finite 검사 ─────────────────────
 
 

@@ -149,10 +149,9 @@ class DynamicConfigService:
         키별 invariant 가 정의된 경우 ``validate_value`` 가 ValueError 를
         발생시킨다(서비스 경계 검증, IPC/CLI 우회 차단).
 
-        legacy non-finite numeric row 가 저장돼 있는 키를 정상 값으로 덮어쓰는
-        경로(self-healing)는 막지 않는다 — ``get`` 의 read defense 가
-        ``ConfigError`` 를 raise 하면 ``old_value`` 를 ``None`` 으로 두고 새 값을
-        그대로 저장한다.
+        이전 값을 해석하지 못하는 키를 정상 값으로 덮어쓰는 경로(self-healing)는
+        막지 않는다 — 이전 값 읽기가 ``ConfigError``·``json.JSONDecodeError`` 를
+        raise 하면 ``old_value`` 를 ``None`` 으로 두고 새 값을 그대로 저장한다.
         """
         from ante.eventbus.events import ConfigChangedEvent
 
@@ -162,7 +161,7 @@ class DynamicConfigService:
         if await self.exists(key):
             try:
                 old_value = await self.get(key)
-            except ConfigError:
+            except (ConfigError, json.JSONDecodeError):
                 old_value = None
 
         json_value = json.dumps(value)
