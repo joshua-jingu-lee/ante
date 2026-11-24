@@ -307,10 +307,13 @@ class TestSystemOutputBytes:
             ("halt", "system.halt", {"reason": "drill"}),
             ("halt_no_reason", "system.halt", {"reason": ""}),
             ("clear_halt", "system.clear_halt", {}),
+            ("clear_halt_with_reason", "system.clear_halt", {"reason": "post-drill"}),
         ],
     )
     def test_ipc_request(
         self, branch: str, method: str, params: dict[str, Any]
     ) -> None:
         _, ipc_send, _ = _invoke_case(branch, "json")
-        ipc_send.assert_awaited_once_with(method, params, actor="test-master")
+        ipc_send.assert_awaited_once_with(
+            method, params, actor="test-master", required=("accounts_changed",)
+        )

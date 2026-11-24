@@ -14,7 +14,8 @@ import pytest
 
 from ante.account.models import TradingMode
 from ante.account.readiness import ReadinessFlag, RuntimeReadinessRegistry
-from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
+from ante.bot.providers.virtual import VirtualExecutor
+from ante.core.database import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import OrderApprovedEvent, OrderFilledEvent
 from tests.unit._readiness_gate_helpers import make_account
@@ -43,16 +44,70 @@ def eventbus():
     return EventBus()
 
 
+class _Ledger:
+    """가상 체결의 정본(포지션 표·봇 예산) — #2816 뒤 뷰가 읽는 곳."""
+
+    def __init__(self, db: Database, eventbus: EventBus) -> None:
+        from ante.trade.fill_applier import FillApplier
+        from ante.trade.fill_outbox import FillOutbox
+        from ante.trade.order_tracker import OrderTracker
+        from ante.trade.position import PositionHistory
+        from ante.trade.recorder import TradeRecorder
+        from ante.treasury.treasury import Treasury
+
+        self.position_history = PositionHistory(db)
+        self.recorder = TradeRecorder(db, self.position_history)
+        self.tracker = OrderTracker(db)
+        self.outbox = FillOutbox(db)
+        self.applier = FillApplier(
+            db=db,
+            order_tracker=self.tracker,
+            position_history=self.position_history,
+            eventbus=eventbus,
+            outbox=self.outbox,
+        )
+        self.treasury = Treasury(db, eventbus, account_id=ACCOUNT)
+
+    async def start(self) -> None:
+        await self.position_history.initialize()
+        await self.recorder.initialize()
+        await self.tracker.initialize()
+        await self.outbox.initialize()
+        await self.treasury.initialize()
+        await self.treasury.set_account_balance(10_000_000.0)
+        await self.treasury.allocate("virtual1", 10_000_000.0)
+
+    def positions(self) -> dict[str, float]:
+        return {
+            p.symbol: p.quantity
+            for p in self.position_history.get_positions_sync(
+                "virtual1", account_id=ACCOUNT
+            )
+        }
+
+
+@pytest.fixture
+async def ledger(tmp_path, eventbus):
+    db = Database(str(tmp_path / "stop_guard.db"))
+    await db.connect()
+    try:
+        led = _Ledger(db, eventbus)
+        await led.start()
+        yield led
+    finally:
+        await db.close()
+
+
 class TestVirtualProviderStopGuard:
-    async def test_virtual_provider_skips_stop_orders(self, eventbus):
+    async def test_virtual_provider_skips_stop_orders(self, eventbus, ledger):
         """Virtual 계좌의 buy stop OrderApprovedEvent는 즉시 체결되지 않는다."""
         executor = VirtualExecutor(
-            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+            eventbus=eventbus,
+            commission_rate=0.00015,
+            fill_applier=ledger.applier,
+            **_gate_kwargs(),
         )
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         filled: list[OrderFilledEvent] = []
@@ -78,19 +133,20 @@ class TestVirtualProviderStopGuard:
             "등록 단계의 stop은 trigger 전이므로 가상 체결되어선 안 된다 (#1337)."
         )
         # 포지션·잔고에도 영향 없음
-        assert portfolio.get_positions("virtual1") == {}
-        balance = portfolio.get_balance("virtual1")
-        assert balance["reserved"] == 0.0
+        assert ledger.positions() == {}
+        budget = ledger.treasury.get_budget_sync("virtual1")
+        assert budget is not None
+        assert budget.reserved == 0.0
 
-    async def test_virtual_provider_skips_stop_limit_orders(self, eventbus):
+    async def test_virtual_provider_skips_stop_limit_orders(self, eventbus, ledger):
         """stop_limit도 동일하게 등록 단계에서 가상 체결되지 않는다."""
         executor = VirtualExecutor(
-            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+            eventbus=eventbus,
+            commission_rate=0.00015,
+            fill_applier=ledger.applier,
+            **_gate_kwargs(),
         )
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         filled: list[OrderFilledEvent] = []
@@ -113,23 +169,23 @@ class TestVirtualProviderStopGuard:
         )
 
         assert len(filled) == 0
-        assert portfolio.get_positions("virtual1") == {}
+        assert ledger.positions() == {}
 
     @pytest.mark.parametrize("order_type", ["stop", "stop_limit"])
     @pytest.mark.parametrize("price", [None, 1050.0])
     async def test_virtual_provider_leaves_stop_orders_untouched(
-        self, eventbus, order_type, price
+        self, eventbus, ledger, order_type, price
     ):
         """등록 단계 stop / stop_limit 은 체결도 실패 종결도 하지 않고 그대로 둔다."""
         from ante.eventbus.events import OrderFailedEvent
 
         executor = VirtualExecutor(
-            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+            eventbus=eventbus,
+            commission_rate=0.00015,
+            fill_applier=ledger.applier,
+            **_gate_kwargs(),
         )
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         filled: list[OrderFilledEvent] = []
@@ -155,8 +211,10 @@ class TestVirtualProviderStopGuard:
 
         assert filled == []
         assert failed == []
-        assert portfolio.get_positions("virtual1") == {}
-        assert portfolio.get_balance("virtual1")["available"] == 10_000_000.0
+        assert ledger.positions() == {}
+        budget = ledger.treasury.get_budget_sync("virtual1")
+        assert budget is not None
+        assert budget.available == 10_000_000.0
 
         # 같은 executor 가 일반 limit 주문은 체결한다(구독이 살아 있다는 대조군).
         await eventbus.publish(
@@ -175,15 +233,17 @@ class TestVirtualProviderStopGuard:
         )
         assert [e.order_id for e in filled] == ["ord-limit-control"]
 
-    async def test_virtual_provider_processes_trigger_converted_market(self, eventbus):
+    async def test_virtual_provider_processes_trigger_converted_market(
+        self, eventbus, ledger
+    ):
         """StopOrderManager가 trigger 시 발행하는 변환 market 주문은 정상 체결된다."""
         executor = VirtualExecutor(
-            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+            eventbus=eventbus,
+            commission_rate=0.00015,
+            fill_applier=ledger.applier,
+            **_gate_kwargs(),
         )
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         filled: list[OrderFilledEvent] = []
@@ -211,18 +271,19 @@ class TestVirtualProviderStopGuard:
         assert evt.symbol == "069500"
         assert evt.quantity == 1.0
         assert evt.price == 1000.0
-        positions = portfolio.get_positions("virtual1")
-        assert positions["069500"]["quantity"] == 1.0
+        assert ledger.positions() == {"069500": 1.0}
 
-    async def test_virtual_provider_processes_trigger_converted_limit(self, eventbus):
+    async def test_virtual_provider_processes_trigger_converted_limit(
+        self, eventbus, ledger
+    ):
         """stop_limit trigger 변환 limit 주문도 정상 체결된다."""
         executor = VirtualExecutor(
-            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+            eventbus=eventbus,
+            commission_rate=0.00015,
+            fill_applier=ledger.applier,
+            **_gate_kwargs(),
         )
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         filled: list[OrderFilledEvent] = []
@@ -258,14 +319,14 @@ class TestVirtualProviderFillDedupKeyPolicy:
     이며 fill_dedup_key 는 빈키("")로 발행한다.
     """
 
-    async def test_virtual_fill_has_empty_dedup_key(self, eventbus):
+    async def test_virtual_fill_has_empty_dedup_key(self, eventbus, ledger):
         executor = VirtualExecutor(
-            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+            eventbus=eventbus,
+            commission_rate=0.00015,
+            fill_applier=ledger.applier,
+            **_gate_kwargs(),
         )
-        portfolio = VirtualPortfolioView(
-            bot_id="virtual1", initial_balance=10_000_000.0
-        )
-        executor.register_bot("virtual1", portfolio)
+        executor.register_bot("virtual1")
         executor.subscribe()
 
         filled: list[OrderFilledEvent] = []

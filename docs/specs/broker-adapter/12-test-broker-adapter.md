@@ -149,9 +149,9 @@ ante account create --broker-type mock --trading-mode virtual \
 
 **읽는 시점**: 어댑터를 만들 때 한 번 읽는다. 실행 중에는 다시 읽지 않으므로 가격을 바꾸려면 데몬을 다시 띄운다. 데몬이 꺼져 있을 때의 `ante broker …`는 CLI 프로세스에서 어댑터를 새로 만들므로 그때마다 파일을 읽는다.
 
-**검증 시점**: 계좌 생성이 아니라 어댑터가 처음 만들어질 때다. `broker_config`는 형식 없는 값이라 계좌 생성은 통과한다. 가상 계좌에서는 첫 가격 조회가 그 시점이고, 실패하면 시장가 주문이 `virtual_market_price_unavailable`로 끝난다.
+**검증 시점**: 가격 파일의 검증은 계좌 생성이 아니라 어댑터가 처음 만들어질 때다. 계좌 생성은 `prices_file`의 값을 보지 않으므로 그 파일이 틀려도 통과한다. 가상 계좌에서는 첫 가격 조회가 그 시점이고, 실패하면 시장가 주문이 `virtual_market_price_unavailable`로 끝난다.
 
-`prices_file`이 없으면 생성자 config의 `prices`, `default_price`를 쓴다(`default_price` 기본값 50,000). `set_price`는 메모리 값을 바꾸는 테스트 도우미다.
+`prices_file`이 없으면 생성자 config의 `prices`, `default_price`를 쓴다(`default_price` 기본값 50,000). `mock` 계좌를 만들 때 `broker_config`의 `prices`(객체)의 각 값과 `default_price`는 위 가격 정의로 검사하고, 어기면 계좌 생성이 `VALIDATION_ERROR`로 실패한다. `set_price`는 메모리 값을 바꾸는 테스트 도우미다.
 
 ### 전략 거래소 선언
 

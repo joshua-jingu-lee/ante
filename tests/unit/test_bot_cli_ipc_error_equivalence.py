@@ -139,10 +139,10 @@ class TestBotNotFoundEquivalence:
     """``BotNotFoundError`` 는 양쪽에서 ``BOT_NOT_FOUND``.
 
     CLI direct path: ``bot remove`` 표면 — ``ipc_send`` 가 server error
-    envelope (code=``BOT_NOT_FOUND``) 을 ClickException 으로 변환하고,
-    ``except Exception: emit_cli_error(fmt, e)`` 분기가 동일 코드로 CLI
-    envelope 을 surface 한다. ``BotNotFoundError`` 는 #1840 에서 이미 registry
-    등록되어 있으므로 helper resolver 가 ``BOT_NOT_FOUND`` 로 resolve 한다.
+    envelope (code=``BOT_NOT_FOUND``) 을 ``IPCRemoteError`` 로 변환하고, 예외가
+    전파되어 ``AuthenticatedGroup.main`` 이 그 ``.code`` 로 동일 코드의 CLI
+    envelope 을 surface 한다. IPC 쪽은 ``BotNotFoundError`` 가 #1840 에서 이미
+    registry 등록되어 있으므로 helper resolver 가 ``BOT_NOT_FOUND`` 로 resolve 한다.
     """
 
     def test_cli_direct_not_found_via_remove(self, runner: CliRunner) -> None:
@@ -306,9 +306,10 @@ class TestBotAlreadyExistsEquivalence:
     """``BotAlreadyExistsError`` 는 양쪽에서 ``BOT_ALREADY_EXISTS``.
 
     CLI direct path: ``bot create`` 표면 — ``ipc_send`` 가 server error
-    envelope 을 ClickException 으로 변환하고, ``except Exception:
-    emit_cli_error(fmt, e)`` 가 동일 코드를 surface 한다. registry MRO
-    lookup 으로 ``BotAlreadyExistsError`` → ``BOT_ALREADY_EXISTS`` resolve.
+    envelope 을 ``IPCRemoteError`` 로 변환하고, 예외가 전파되어
+    ``AuthenticatedGroup.main`` 이 그 ``.code`` 로 동일 코드를 surface 한다. IPC
+    쪽은 registry MRO lookup 으로 ``BotAlreadyExistsError`` →
+    ``BOT_ALREADY_EXISTS`` resolve.
 
     IPC path: 실제 ``bot.create`` IPC handler 를 ``IPCServer`` 위에서
     실행해 envelope code 를 확인한다 (#1842 ``account.suspend`` 1:1 동형
@@ -425,9 +426,9 @@ class TestBotStrategyAlreadyRunningEquivalence:
     ``BOT_STRATEGY_ALREADY_RUNNING`` ("1전략 1봇" 정책 거부).
 
     CLI direct path: ``bot create`` 표면 — ``ipc_send`` 가 server error
-    envelope 을 ClickException 으로 변환하고, ``except Exception:
-    emit_cli_error(fmt, e)`` 가 동일 코드를 surface 한다. registry MRO
-    lookup 으로 ``BotStrategyAlreadyRunningError`` →
+    envelope 을 ``IPCRemoteError`` 로 변환하고, 예외가 전파되어
+    ``AuthenticatedGroup.main`` 이 그 ``.code`` 로 동일 코드를 surface 한다. IPC
+    쪽은 registry MRO lookup 으로 ``BotStrategyAlreadyRunningError`` →
     ``BOT_STRATEGY_ALREADY_RUNNING`` resolve.
     """
 
