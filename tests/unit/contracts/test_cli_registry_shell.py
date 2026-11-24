@@ -90,7 +90,7 @@ def test_output_contract_is_frozen() -> None:
 
 
 def test_output_contract_defaults() -> None:
-    instance = OutputContract(kind="entity")
+    instance = OutputContract(kind="envelope")
     assert instance.data_key is None
 
 
@@ -113,7 +113,7 @@ def test_cli_command_contract_defaults() -> None:
     instance = CliCommandContract(
         path=("example",),
         auth=AuthContract(mode="public"),
-        output=OutputContract(kind="entity"),
+        output=OutputContract(kind="envelope"),
         execution="offline",
     )
     assert instance.ipc_command is None
@@ -144,6 +144,11 @@ def test_contract_kind_literal_values_accepted_by_output_contract() -> None:
     for value in _literal_values(ContractKind):
         instance = OutputContract(kind=value)  # type: ignore[arg-type]
         assert instance.kind == value
+
+
+def test_contract_kind_literal_values_are_envelope_and_stream() -> None:
+    """``ContractKind`` 는 ``envelope``·``stream`` 두 값이다 (#2976)."""
+    assert set(_literal_values(ContractKind)) == {"envelope", "stream"}
 
 
 def test_execution_class_literal_values_match_spec() -> None:
