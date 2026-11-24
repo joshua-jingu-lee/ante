@@ -22,6 +22,8 @@ from ante.contracts.cli_errors import (
     ReportNotFoundError,
     ReportValidationError,
 )
+from ante.contracts.error_registry import EXECUTION_ERROR_SPEC
+from ante.contracts.helpers import error_spec_for_exception
 from ante.core import clock
 from ante.core.database import OperationalError
 from ante.report.models import ReportStatus
@@ -153,11 +155,14 @@ def submit(
 
     try:
         result = asyncio.run(_submit())
-        return CommandResult(
-            data=result, message=f"Report submitted: {result['report_id']}"
-        )
     except Exception as e:
+        if error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:
+            raise
         raise ReportError(str(e)) from e
+
+    return CommandResult(
+        data=result, message=f"Report submitted: {result['report_id']}"
+    )
 
 
 @report.command("list")
@@ -212,6 +217,8 @@ def report_list(
     try:
         rows = asyncio.run(_list())
     except Exception as e:
+        if error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:
+            raise
         raise ReportError(str(e)) from e
 
     def _lines() -> tuple[str, ...]:
@@ -219,6 +226,8 @@ def report_list(
             columns = ["report_id", "strategy", "status", "submitted_at"]
             return tuple(table_lines(rows, columns))
         except Exception as e:
+            if error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:
+                raise
             raise ReportError(str(e)) from e
 
     return CommandResult(data=rows, text=_lines)
@@ -306,8 +315,9 @@ def report_performance(
     result = asyncio.run(_run_performance())
 
     if not result:
-        empty: dict[str, Any] = {"message": "집계 데이터가 없습니다.", "summaries": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "집계 데이터가 없습니다."
+        empty: dict[str, Any] = {"message": message, "summaries": []}
+        return CommandResult(data=empty, text=(message,))
 
     if period == "daily":
         columns = ["date", "realized_pnl", "trade_count", "win_rate"]
@@ -373,6 +383,8 @@ def report_view(
     try:
         result = asyncio.run(_view())
     except Exception as e:
+        if error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:
+            raise
         raise ReportError(str(e)) from e
 
     if not result:

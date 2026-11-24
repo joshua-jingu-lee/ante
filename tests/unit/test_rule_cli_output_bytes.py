@@ -159,7 +159,7 @@ def _invoke_case(
 
 
 _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
-    ("list_empty", "text"): ("{'message': '등록된 룰이 없습니다.', 'rules': []}\n"),
+    ("list_empty", "text"): ("등록된 룰이 없습니다.\n"),
     ("list_empty", "json"): (
         "{\n"
         '  "status": "ok",\n'

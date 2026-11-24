@@ -91,7 +91,7 @@ def _encode_signal_frame(frame: dict[str, Any]) -> bytes:
 
 
 class IPCServerState(Enum):
-    """IPCServer lifecycle state.
+    """IPCServer lifecycle state. 표에 없는 전이는 상태를 바꾸지 않는다.
 
     * ``STOPPED`` → ``RUNNING``: ``start()`` 마지막에 전환.
     * ``RUNNING`` → ``SHUTTING_DOWN``: ``stop_accepting()`` 진입 직후
@@ -109,28 +109,19 @@ class IPCServerState(Enum):
 
 IPC_SERVER_STATE_TRANSITIONS: dict[IPCServerState, set[IPCServerState]] = {
     IPCServerState.RUNNING: {
-        IPCServerState.RUNNING,
         IPCServerState.SHUTTING_DOWN,
         IPCServerState.DRAINING,
         IPCServerState.STOPPED,
     },
     IPCServerState.SHUTTING_DOWN: {
-        IPCServerState.RUNNING,
-        IPCServerState.SHUTTING_DOWN,
         IPCServerState.DRAINING,
         IPCServerState.STOPPED,
     },
     IPCServerState.DRAINING: {
-        IPCServerState.RUNNING,
-        IPCServerState.SHUTTING_DOWN,
-        IPCServerState.DRAINING,
         IPCServerState.STOPPED,
     },
     IPCServerState.STOPPED: {
         IPCServerState.RUNNING,
-        IPCServerState.SHUTTING_DOWN,
-        IPCServerState.DRAINING,
-        IPCServerState.STOPPED,
     },
 }
 
@@ -161,7 +152,7 @@ class IPCServer:
         return self._state
 
     async def start(self) -> None:
-        """서버 시작. 기존 소켓 파일이 있으면 삭제 후 재생성.
+        """서버 시작(STOPPED에서만). 기존 소켓 파일이 있으면 삭제 후 재생성.
 
         Python 3.13의 ``asyncio.start_unix_server``는 ``cleanup_socket`` 인자를
         받으며 기본값이 ``True``이다. 본 메서드는 ``cleanup_socket=False``를
@@ -170,6 +161,8 @@ class IPCServer:
         shutdown 동안에도 'active runtime'을 정확히 판정할 수 있는 race window
         차단 의도가 유지된다.
         """
+        if IPCServerState.RUNNING not in IPC_SERVER_STATE_TRANSITIONS[self._state]:
+            return
         path = Path(self._socket_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
@@ -196,11 +189,12 @@ class IPCServer:
         'active runtime'으로 판정하도록, 소켓 파일은 ``unlink_socket()``이
         호출되기 전까지 유지된다.
 
-        listener close 호출 **전**에 state를 ``SHUTTING_DOWN``으로
-        전환한다. 이래야 close 진행 중에 들어오는 dispatch도 mutating이라면
-        ``SERVICE_UNAVAILABLE``로 거부된다.
+        listener close 호출 **전**에 state를 ``SHUTTING_DOWN``으로 전환해(표가
+        허용할 때만) close 중의 mutating dispatch를 ``SERVICE_UNAVAILABLE``로
+        거부한다. listener close는 상태와 관계없이 한다.
         """
-        self._state = IPCServerState.SHUTTING_DOWN
+        if IPCServerState.SHUTTING_DOWN in IPC_SERVER_STATE_TRANSITIONS[self._state]:
+            self._state = IPCServerState.SHUTTING_DOWN
 
         if self._server:
             self._closing_server = self._server
@@ -237,6 +231,8 @@ class IPCServer:
         disconnect/DB close 같은 리소스 종료 직전에는 read-only도 closed
         resource를 밟을 수 있으므로 이 메서드로 전 명령 reject 상태에 들어간다.
         """
+        if IPCServerState.DRAINING not in IPC_SERVER_STATE_TRANSITIONS[self._state]:
+            return
         self._state = IPCServerState.DRAINING
         logger.info("IPCServer dispatch 거부 시작: %s", self._socket_path)
 
@@ -245,6 +241,8 @@ class IPCServer:
 
         메서드 종료 시 state를 ``STOPPED``으로 전환한다.
         """
+        if IPCServerState.STOPPED not in IPC_SERVER_STATE_TRANSITIONS[self._state]:
+            return
         path = Path(self._socket_path)
         if path.exists():
             path.unlink()
