@@ -288,7 +288,7 @@ def _run_offline_reconcile(
     adapter.get_account_positions = AsyncMock(return_value=broker_rows)
     adapter.disconnect = AsyncMock()
 
-    async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+    async def _fake_get_broker(account_id=None, *, reconcile=False):  # noqa: ANN001, ANN202
         return adapter, None
 
     exc = IPCServerNotRunningError("server down")

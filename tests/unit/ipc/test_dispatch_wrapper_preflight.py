@@ -549,6 +549,7 @@ def _reconcile_services(missing: str | None) -> dict[str, Any]:
     broker.get_account_positions = AsyncMock(return_value=[])
     account = MagicMock()
     account.get_broker = AsyncMock(return_value=broker)
+    account.ensure_reconcile_applicable = AsyncMock(return_value=None)
     reconciler = MagicMock()
     reconciler.detect_account_level = AsyncMock(return_value=[])
     reconciler.reconcile = AsyncMock(return_value=[])

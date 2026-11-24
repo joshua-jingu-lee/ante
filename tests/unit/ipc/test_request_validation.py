@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import fields
 from typing import Any
@@ -11,6 +12,7 @@ import pytest
 
 from ante.core.account_id import InvalidAccountIdError
 from ante.core.registry import ServiceRegistry
+from ante.ipc import protocol
 from ante.ipc.registry import CommandRegistry, CommandSpec, register_all_handlers
 from ante.ipc.requests import IPCRequest
 from ante.ipc.server import IPCServer, IPCServerState
@@ -292,3 +294,135 @@ async def test_unknown_key_name_is_escaped_in_response_and_log(
     assert line == f"WARNING IPC 요청 검증 거부: {message}"
     assert "\n" not in line
     assert "\x1b" not in line
+
+
+_HEAD = "demo.run 인자 검증 실패: "
+_EXTRA = "(extra_forbidden)"
+_KEYS = [f"k{i}" for i in range(80_000)]
+
+
+def _size(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+
+
+def _full_message(keys: list[str]) -> str:
+    return _HEAD + ", ".join(f"{key}{_EXTRA}" for key in keys)
+
+
+def _with(message: str, request_id: Any = "req-9") -> dict[str, Any]:
+    return {
+        "id": request_id,
+        "status": "error",
+        "error": {"code": "VALIDATION_ERROR", "message": message},
+    }
+
+
+def _loaded(message: str, keys: list[str]) -> list[str]:
+    assert message.startswith(_HEAD)
+    body = message[len(_HEAD) :]
+    if body.startswith("외 "):
+        loaded, rest = [], body[2:]
+    else:
+        fields, _, rest = body.rpartition(" 외 ")
+        loaded = fields.split(", ")
+    assert loaded == [f"{key}{_EXTRA}" for key in keys[: len(loaded)]]
+    assert rest == f"{len(keys) - len(loaded)}건"
+    return loaded
+
+
+async def _validation_response(
+    keys: list[str], request_id: Any = "req-9"
+) -> dict[str, Any]:
+    server, handler, _audit = _demo_server()
+    request = _request("demo.run", {"name": "a", **dict.fromkeys(keys, 0)})
+    request["id"] = request_id
+    response = await server._dispatch(request)
+    assert handler.calls == []
+    assert response["id"] == request_id
+    assert response["status"] == "error"
+    assert response["error"]["code"] == "VALIDATION_ERROR"
+    await protocol.encode(response)
+    return response
+
+
+@pytest.mark.asyncio
+async def test_oversized_validation_message_is_shortened_into_one_frame() -> None:
+    await protocol.encode(_request("demo.run", dict.fromkeys(_KEYS, 0)))
+    response = await _validation_response(_KEYS)
+    loaded = _loaded(response["error"]["message"], _KEYS)
+    assert 0 < len(loaded) < len(_KEYS)
+
+
+@pytest.mark.asyncio
+async def test_shortened_message_carries_as_many_fields_as_fit() -> None:
+    response = await _validation_response(_KEYS)
+    k = len(_loaded(response["error"]["message"], _KEYS)) + 1
+    one_more = f"{_full_message(_KEYS[:k])} 외 {len(_KEYS) - k}건"
+    assert _size(_with(one_more)) > protocol.MAX_MESSAGE_SIZE
+
+
+def _boundary_keys(extra: int) -> list[str]:
+    keys = [f"k{i}" for i in range(1_000)]
+    filler = protocol.MAX_MESSAGE_SIZE - _size(_with(_full_message([*keys, ""])))
+    return [*keys, "z" * (filler + extra)]
+
+
+@pytest.mark.asyncio
+async def test_message_of_exactly_one_frame_is_unchanged() -> None:
+    keys = _boundary_keys(0)
+    response = await _validation_response(keys)
+    assert response == _with(_full_message(keys))
+    assert _size(response) == protocol.MAX_MESSAGE_SIZE
+
+
+@pytest.mark.asyncio
+async def test_message_one_byte_over_the_frame_is_shortened() -> None:
+    keys = _boundary_keys(1)
+    response = await _validation_response(keys)
+    assert response == _with(f"{_full_message(keys[:-1])} 외 1건")
+
+
+@pytest.mark.asyncio
+async def test_json_escape_cost_counts_against_the_budget() -> None:
+    keys = [f'"\\\x00{i}' for i in range(40_000)]
+    response = await _validation_response(keys)
+    escaped = [f'"\\\\x00{i}' for i in range(40_000)]
+    loaded = _loaded(response["error"]["message"], escaped)
+    assert 0 < len(loaded) < len(keys)
+
+
+@pytest.mark.parametrize(
+    "request_id",
+    [
+        pytest.param("x" * 600_000, id="large-string"),
+        pytest.param({"n": list(range(100_000))}, id="non-string"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_request_id_counts_against_the_budget(request_id: Any) -> None:
+    keys = _KEYS[:40_000]
+    response = await _validation_response(keys, request_id)
+    loaded = _loaded(response["error"]["message"], keys)
+    assert 0 < len(loaded) < len(keys)
+
+
+@pytest.mark.asyncio
+async def test_single_field_over_the_budget_is_only_counted() -> None:
+    response = await _validation_response(["z" * protocol.MAX_MESSAGE_SIZE])
+    assert response == _with("demo.run 인자 검증 실패: 외 1건")
+
+
+@pytest.mark.asyncio
+async def test_shortened_message_logs_one_warning_without_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    response = await _validation_response(_KEYS)
+    records = _server_records(caplog)
+    assert len(records) == 1
+    assert records[0].levelname == "WARNING"
+    assert records[0].exc_info is None
+    assert records[0].getMessage() == (
+        f"IPC 요청 검증 거부: {response['error']['message']}"
+    )
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []

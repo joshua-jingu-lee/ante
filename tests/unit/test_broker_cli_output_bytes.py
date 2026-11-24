@@ -115,6 +115,7 @@ _CASES: dict[str, list[str]] = {
     **_pair("reconcile_match", ["broker", "reconcile", *_ACCOUNT]),
     **_pair("reconcile_mismatch", ["broker", "reconcile", *_ACCOUNT]),
     "reconcile_fix": ["broker", "reconcile", *_ACCOUNT, "--fix"],
+    "reconcile_fix_detect_only": ["broker", "reconcile", *_ACCOUNT, "--fix"],
 }
 
 
@@ -150,6 +151,13 @@ def _ipc_result(branch: str) -> Any:
             "match": False,
             "fix_applied": True,
             "corrections": 1,
+        },
+        "reconcile_fix_detect_only": {
+            "total_symbols": 2,
+            "discrepancies": _DISCREPANCIES,
+            "match": False,
+            "fix_applied": False,
+            "corrections": 0,
         },
     }
     return results[branch]
@@ -704,6 +712,35 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         '    "match": false,\n'
         '    "fix_applied": true,\n'
         '    "corrections": 1\n'
+        "  }\n"
+        "}\n"
+    ),
+    ("reconcile_fix_detect_only", "text"): (
+        "  총 종목 수     : 2\n"
+        "  대사 결과      : 불일치\n"
+        "  불일치 종목:\n"
+        "      symbol |   broker_qty | internal_qty |         diff\n"
+        "---------------------------------------------------------\n"
+        "      005930 |         10.0 |          8.0 |          2.0\n"
+        "  자동 보정      : 안 함 (봇이 0개이거나 둘 이상인 계좌)\n"
+    ),
+    ("reconcile_fix_detect_only", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "total_symbols": 2,\n'
+        '    "discrepancies": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "broker_qty": 10.0,\n'
+        '        "internal_qty": 8.0,\n'
+        '        "diff": 2.0\n'
+        "      }\n"
+        "    ],\n"
+        '    "match": false,\n'
+        '    "fix_applied": false,\n'
+        '    "corrections": 0\n'
         "  }\n"
         "}\n"
     ),
