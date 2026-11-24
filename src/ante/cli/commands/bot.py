@@ -31,7 +31,7 @@ from ante.contracts.cli_errors import (
 )
 from ante.contracts.ipc_client_errors import IPCRemoteError, IPCServerNotRunningError
 from ante.contracts.request_errors import RequestValidationError
-from ante.core.database import OperationalError
+from ante.core.database import OperationalError, is_missing_table
 
 if TYPE_CHECKING:
     from ante.account.service import AccountService
@@ -371,7 +371,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> CommandResu
                     (bot_id,),
                 )
             except OperationalError as e:
-                if "no such table" in str(e).lower():
+                if is_missing_table(e):
                     bot_row = None
                 else:
                     raise
@@ -433,7 +433,7 @@ def bot_positions(ctx: click.Context, bot_id: str) -> CommandResult:
                     "SELECT account_id FROM bots WHERE bot_id = ?", (bot_id,)
                 )
             except OperationalError as e:
-                if "no such table" in str(e).lower():
+                if is_missing_table(e):
                     return None
                 raise
             if bot_row is None:
@@ -631,7 +631,7 @@ def bot_logs(
                     (bot_id,),
                 )
             except OperationalError as e:
-                if "no such table" in str(e).lower():
+                if is_missing_table(e):
                     bot_row = None
                 else:
                     raise

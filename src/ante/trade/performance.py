@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ante.account.errors import InvalidAccountIdError
-from ante.core.database import OperationalError
+from ante.core.database import OperationalError, is_missing_table
 from ante.trade.models import (
     DailySummary,
     MonthlySummary,
@@ -32,11 +32,6 @@ _COND_STRATEGY_ID = "t.strategy_id = ?"
 _JOIN_POSITION_HISTORY = """LEFT JOIN position_history ph
                 ON ph.trade_id = CAST(t.trade_id AS TEXT)
                 AND ph.action = 'sell'"""
-
-
-def _is_missing_table(exc: OperationalError) -> bool:
-    """테이블이 아직 없어서 난 OperationalError인지."""
-    return "no such table" in str(exc).lower()
 
 
 class PerformanceTracker:
@@ -164,7 +159,7 @@ class PerformanceTracker:
         try:
             rows = await self._db.fetch_all(query, tuple(params))
         except OperationalError as exc:
-            if not _is_missing_table(exc):
+            if not is_missing_table(exc):
                 raise
             return []
         return [
@@ -228,7 +223,7 @@ class PerformanceTracker:
         try:
             rows = await self._db.fetch_all(query, tuple(params))
         except OperationalError as exc:
-            if not _is_missing_table(exc):
+            if not is_missing_table(exc):
                 raise
             return []
         return [
@@ -297,7 +292,7 @@ class PerformanceTracker:
         try:
             rows = await self._db.fetch_all(query, tuple(params))
         except OperationalError as exc:
-            if not _is_missing_table(exc):
+            if not is_missing_table(exc):
                 raise
             return []
         return [
@@ -403,7 +398,7 @@ class PerformanceTracker:
         try:
             rows = await self._db.fetch_all(query, tuple(params))
         except OperationalError as exc:
-            if not _is_missing_table(exc):
+            if not is_missing_table(exc):
                 raise
             logger.debug("trades 테이블 없음 — 빈 목록 반환")
             return []
@@ -425,7 +420,7 @@ class PerformanceTracker:
                     (str(trade.trade_id),),
                 )
             except OperationalError as exc:
-                if not _is_missing_table(exc):
+                if not is_missing_table(exc):
                     raise
                 row = None
             if row:

@@ -866,3 +866,20 @@ def test_reexported_database_error_is_sqlite3_class():
     from ante.core.database import DatabaseError
 
     assert DatabaseError is sqlite3.DatabaseError
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (sqlite3.OperationalError("no such table: x"), True),
+        (sqlite3.OperationalError("No Such Table: x"), True),
+        (sqlite3.OperationalError("database is locked"), False),
+        (Exception("no such table: x"), True),
+        (sqlite3.OperationalError("no such column: x"), False),
+    ],
+)
+def test_is_missing_table(exc: BaseException, expected: bool) -> None:
+    """``is_missing_table`` 는 메시지에 ``no such table`` 이 있을 때만 참이다."""
+    from ante.core.database import is_missing_table
+
+    assert is_missing_table(exc) is expected
