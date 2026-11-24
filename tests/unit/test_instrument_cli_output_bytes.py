@@ -316,10 +316,7 @@ _INSTRUMENT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  }\n"
         "}\n"
     ),
-    ("sync", "text"): (
-        "{'sync_result': {'total': 3, 'new': 2, 'updated': 1, 'delisted': 1}, 'message'"
-        ": '동기화 완료: 신규 2건, 갱신 1건, 상폐 1건'}\n"
-    ),
+    ("sync", "text"): ("동기화 완료: 신규 2건, 갱신 1건, 상폐 1건\n"),
     ("sync", "json"): (
         "{\n"
         '  "status": "ok",\n'

@@ -317,8 +317,9 @@ def validate(
         symbols = store.list_symbols(timeframe)
 
     if not symbols:
-        empty: dict[str, Any] = {"message": "검증할 데이터가 없습니다.", "results": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "검증할 데이터가 없습니다."
+        empty: dict[str, Any] = {"message": message, "results": []}
+        return CommandResult(data=empty, text=(message,))
 
     results = []
     for sym in symbols:
