@@ -93,7 +93,7 @@ class SystemHaltRequest(IPCRequest):
 
 
 class SystemClearHaltRequest(IPCRequest):
-    pass
+    reason: str = "IPC clear_halt"
 
 
 class StrategySetStatusRequest(IPCRequest):

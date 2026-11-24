@@ -249,7 +249,7 @@ CLI는 default-deny + allowlist (opt-out) 정책을 적용한다. 새 명령 추
 
 - 1.0 현재 CLI는 default-deny 모델로 동작한다. default-deny factory
   (`AuthenticatedGroup`)는 #1404로 적용 완료(`src/ante/cli/main.py:58`,
-  `src/ante/cli/middleware.py:353`).
+  `src/ante/cli/middleware.py`의 `AuthenticatedGroup`).
 - 본 spec은 정책과 allowlist 결정을 확정한다. factory 시그니처와 decorator shim은
   `src/ante/cli/middleware.py`의 `AuthenticatedGroup`가 SSOT다. 마이그레이션은
   #1404로 완료되었고, 후속 명령 추가 시 default-deny가 자동 적용된다.
@@ -265,7 +265,7 @@ CLI는 default-deny + allowlist (opt-out) 정책을 적용한다. 새 명령 추
 | `ante --help` (root) | `click`은 root 그룹의 콜백 실행 **전에** root 레벨 `--help` 플래그를 처리해 도움말을 출력하고 종료한다. 인증 단계까지 진입하지 않는다. | `src/ante/cli/main.py:105`의 root `cli()` 콜백 안 `authenticate_member(ctx)`는 click이 root `--help`를 처리한 뒤에는 호출되지 않는다. |
 | `ante <cmd> --help`, `ante <cmd> <sub> --help` 등 nested `--help` | **주의**: click은 nested `--help`에서 **부모 그룹 콜백을 먼저 실행한 뒤** 서브커맨드 단의 도움말을 출력한다. 즉 `ante member --help`나 `ante member list --help`에서도 root `cli()` 콜백(과 `AuthenticatedGroup` factory, #1404 적용 후)이 실행된다. 토큰 없이 인증을 강제하면 보호 서브커맨드의 도움말 자체를 못 받게 되어 학습 경로가 막힌다. | nested help 처리 시 부모 group 콜백이 실행되는 시점의 `ctx.resilient_parsing` 값은 **click 내부 동작에 의존**하며 항상 `True`라고 보장되지 않는다. 따라서 본 spec은 invariant만 정의하고 구체 검사 시그니처는 #1404로 확정됨(`src/ante/cli/middleware.py`의 `AuthenticatedGroup`). invariant는 아래 "nested help 면제 invariant" 절을 따른다. raw `sys.argv` 검사(`"--help" in sys.argv[1:]`)는 어떤 경우에도 사용하지 않는다. `ante strategy submit -- --help`처럼 `--` 이후 위치 인자로 들어간 `--help`는 인증을 면제하지 않으며 default-deny 게이트가 정상 발화해야 한다. 도움말은 명령 사용법 그 자체이며 토큰 없이 받을 수 있어야 Agent와 사람이 명령을 학습할 수 있으므로 본 면제는 default-deny의 의도와 충돌하지 않는다(Codex review v4 Finding 2 — raw sys.argv 검사로 인한 우회 차단). |
 | `ante --version` | `@click.version_option`(`src/ante/cli/main.py:94`)이 root 콜백 진입 전 처리. 메타데이터 출력. | 동일. |
-| Click resilient parsing 경로 | `click`이 자동완성(shell completion) 등을 위해 명시적으로 `ctx.resilient_parsing=True`로 옵션 파싱을 시도할 때. 이 모드에서는 부작용을 일으키지 않아야 한다. **nested `--help`는 click 버전에 따라 부모 콜백 invoke 시점에 `resilient_parsing`이 `True`가 아닐 수 있으므로 위 nested help 행과 별도로 다룬다.** | `authenticate_member(ctx)`는 `ctx.resilient_parsing`이 True면 즉시 return하여 인증을 건너뛴다(`src/ante/cli/middleware.py:64-65`). `AuthenticatedGroup` factory(#1404 적용)도 동일 가드를 갖는다. |
+| Click resilient parsing 경로 | `click`이 자동완성(shell completion) 등을 위해 명시적으로 `ctx.resilient_parsing=True`로 옵션 파싱을 시도할 때. 이 모드에서는 부작용을 일으키지 않아야 한다. **nested `--help`는 click 버전에 따라 부모 콜백 invoke 시점에 `resilient_parsing`이 `True`가 아닐 수 있으므로 위 nested help 행과 별도로 다룬다.** | `authenticate_member(ctx)`는 `ctx.resilient_parsing`이 True면 즉시 return하여 인증을 건너뛴다(`src/ante/cli/middleware.py`의 `authenticate_member`). `AuthenticatedGroup` factory(#1404 적용)도 동일 가드를 갖는다. |
 
 이 면제 경로는 4개 명령 allowlist와 다른 결로 운영된다.
 
