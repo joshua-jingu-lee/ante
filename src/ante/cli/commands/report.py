@@ -306,8 +306,9 @@ def report_performance(
     result = asyncio.run(_run_performance())
 
     if not result:
-        empty: dict[str, Any] = {"message": "집계 데이터가 없습니다.", "summaries": []}
-        return CommandResult(data=empty, text=(str(empty),))
+        message = "집계 데이터가 없습니다."
+        empty: dict[str, Any] = {"message": message, "summaries": []}
+        return CommandResult(data=empty, text=(message,))
 
     if period == "daily":
         columns = ["date", "realized_pnl", "trade_count", "win_rate"]
