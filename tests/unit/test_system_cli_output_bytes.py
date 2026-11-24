@@ -307,6 +307,7 @@ class TestSystemOutputBytes:
             ("halt", "system.halt", {"reason": "drill"}),
             ("halt_no_reason", "system.halt", {"reason": ""}),
             ("clear_halt", "system.clear_halt", {}),
+            ("clear_halt_with_reason", "system.clear_halt", {"reason": "post-drill"}),
         ],
     )
     def test_ipc_request(
