@@ -64,11 +64,13 @@ KIS API 응답 코드를 영구 에러(재시도 불필요)와 일시 에러(재
 
 KISBaseAdapter는 지수 백오프 방식의 재시도 로직을 내장한다. 토큰 만료는 응답으로 감지하지 않고 어댑터가 기록한 만료 시각(발급 시점 + 24시간)으로만 판정하며, 요청의 매 시도 전송 직전에 그 시각 5분 전을 넘었으면 선제적으로 재발급을 시도한다(#2901). 응답을 보고 재인증한 뒤 다시 보내는 경로는 없다(#2908) — 선제 재발급이 놓친 경우(시계 어긋남, KIS 쪽 조기 폐기) 그 요청이 재시도되더라도 기록된 만료 시각 5분 전이 지나기 전에는 같은 토큰으로 다시 보내며, 재발급은 그 시각이 지난 뒤의 선제 확인에서야 시도한다. 모든 API 응답에서 `rt_cd != '0'`이면 `APIError`를 발생시킨다. CircuitBreaker가 `_request()` 흐름에 통합되어, 연속 실패 시 자동으로 요청을 차단한다. 회계 판정은 `to_api_error()` 변환 **전 raw 예외** 기준이며, 재시도 루프에서 `record_failure` 분류이면서 호출측 `cb_exempt_timeout`+`TimeoutError` 조합이 아닐 때만 `record_failure()`를 호출한다(#2350). 단, **late-ccld(`get_order_history`) 경로의 `TimeoutError`는 차단기 회계에서 제외**된다(위 CircuitBreaker 절·[18-fill-recovery.md](18-fill-recovery.md) 참조).
 
+**신규 주문의 재송신 금지 (normative, #2911)**: 매수·매도 주문 TR(`VTTC0012U`·`TTTC0012U`·`VTTC0011U`·`TTTC0011U`)은 접수 여부를 알 수 없는 실패에서 다시 보내지 않는다. 그런 실패는 `TimeoutError`, 연결 오류(`ConnectionError`·`OSError` 계열과 aiohttp의 `ClientConnectionError`·`ClientPayloadError` — 응답을 받는 도중의 끊김 포함), HTTP 500·502·503·504 가운데 등록된 KIS 오류 코드(`msg_cd`)가 붙지 않은 것(코드가 없거나 위 「에러 코드 분류」의 어느 목록에도 없는 코드), HTTP 200인데 본문을 해석하지 못한 응답이다. 이 실패는 `APIError(error_code="order_outcome_unknown", retryable=False)`로 끝나고(차단기 기록은 다른 요청과 같은 기준이다), 게이트웨이가 이를 `OrderFailedEvent(error_code="order_outcome_unknown")`과 ERROR 알림 「주문 접수 여부 미상」으로 알린다. 예약 해제·거래 기록은 다른 주문 실패와 같다. 그 밖의 실패 — HTTP 429, 등록된 코드가 붙은 응답, HTTP 200의 거부 — 의 재시도 여부는 [07-kis-base-adapter.md](07-kis-base-adapter.md) 「HTTP/Business 에러 분류」의 retryable 우선순위와 `is_retryable_msg_code`의 기존 판정 그대로다. 정정·취소 TR(`VTTC0013U`·`TTTC0013U`)과 조회·인증 요청의 재시도는 이 규칙의 대상이 아니다. 접수 여부를 자동으로 확인하지는 않는다(#2998).
+
 **오퍼레이션별 기본값**:
 
 | 설정 | config 키 | 기본값 | 설명 |
 |------|-----------|--------|------|
-| 주문 재시도 | `retry.max_retries_order` | 3 | 주문 API 최대 재시도 |
+| 주문 재시도 | `retry.max_retries_order` | 3 | 주문 API 최대 재시도. 매수·매도 주문은 접수되지 않은 것이 분명한 거부에만 재시도한다(아래 「신규 주문의 재송신 금지」) |
 | 조회 재시도 | `retry.max_retries_query` | 2 | 조회 API 최대 재시도 |
 | 인증 재시도 | `retry.max_retries_auth` | 2 | 인증 API 최대 재시도 |
 | 백오프 기준 | `retry.backoff_base_seconds` | 1.0 | 지수 백오프 기본 대기 시간 |

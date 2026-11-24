@@ -115,6 +115,7 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 | 봇 에러 | bot (BotManager) | ERROR | bot |
 | 봇 재시작 한도 소진 | bot (BotManager) | ERROR | bot |
 | 주문 취소 실패 | trade (TradeRecorder) | ERROR | trade |
+| 주문 접수 여부 미상 (매수·매도 주문의 응답 없음) | gateway (APIGateway) | ERROR | trade |
 | 서킷 브레이커 차단 | broker (KISAdapter) | ERROR | broker |
 | 인증 실패 반복 | member (AuthService) | WARNING | member |
 | 서킷 브레이커 복구 | broker (KISAdapter) | INFO | broker |

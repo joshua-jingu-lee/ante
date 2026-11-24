@@ -28,6 +28,7 @@ _OLD_TOKEN = "fake-old-token"
 _NEW_TOKEN = "fake-new-token"
 _QUERY_TR_ID = "FAKEQUERY01"
 _ORDER_TR_ID = "VTTC0012U"
+_CANCEL_TR_ID = "VTTC0013U"
 _URL = "https://example.invalid/uapi/fake"
 
 
@@ -247,10 +248,10 @@ class TestReauthFailureInsideRetry:
         assert h.sent_headers == []
         assert h.issued == 0
 
-    async def test_order_timeout_then_reauth_failure_does_not_resend(
+    async def test_cancel_timeout_then_reauth_failure_does_not_resend(
         self, fake_clock: _Clock, slept: list[float]
     ) -> None:
-        """주문 시간 초과 뒤 재인증이 실패하면 전송은 한 번뿐이고 인증 오류로 끝난다."""
+        """취소 시간 초과 뒤 재인증이 실패하면 전송은 한 번뿐이고 인증 오류로 끝난다."""
         h = _Harness(
             expires_in=timedelta(minutes=5, seconds=10),
             backoff_base=30.0,
@@ -260,8 +261,29 @@ class TestReauthFailureInsideRetry:
 
         with pytest.raises(TokenRateLimitError):
             await h.adapter._request_with_cont(
-                "POST", _URL, _ORDER_TR_ID, json_data={"fake": "order"}
+                "POST", _URL, _CANCEL_TR_ID, json_data={"fake": "cancel"}
             )
 
         assert len(h.sent_headers) == 1
+        assert h.failures == 1
+
+    async def test_order_timeout_ends_unknown_before_reauth(
+        self, fake_clock: _Clock, slept: list[float]
+    ) -> None:
+        """매수 주문 시간 초과는 재인증 전에 접수 여부 미상으로 끝난다(#2911)."""
+        h = _Harness(
+            expires_in=timedelta(minutes=5, seconds=10),
+            backoff_base=30.0,
+            send_errors=[TimeoutError()],
+            issue_error=True,
+        )
+
+        with pytest.raises(APIError) as exc_info:
+            await h.adapter._request_with_cont(
+                "POST", _URL, _ORDER_TR_ID, json_data={"fake": "order"}
+            )
+
+        assert exc_info.value.error_code == "order_outcome_unknown"
+        assert len(h.sent_headers) == 1
+        assert h.issued == 0
         assert h.failures == 1

@@ -181,7 +181,7 @@ async def _on_order_approved(self, event: OrderApprovedEvent) -> None:
 | 이벤트 | 설명 |
 |--------|------|
 | `OrderSubmittedEvent` | 증권사에 주문 전송 완료 (원주문 지정가 단가 `price?` 포함 — OrderTracker `order_price` seed, #2391) |
-| `OrderFailedEvent` | 주문 제출 실패 또는 스탑 주문 등록 실패 |
+| `OrderFailedEvent` | 주문 제출 실패 또는 스탑 주문 등록 실패. 브로커가 `error_code="order_outcome_unknown"`(접수 여부 미상)으로 끝낸 제출은 `NotificationEvent`(ERROR, category `trade`, 「주문 접수 여부 미상」)도 한 번 발행한다 |
 | `OrderCancelledEvent` | 주문 취소 완료 |
 | `OrderCancelFailedEvent` | 주문 취소 실패 |
 | `OrderModifyExecutedEvent` | 주문 정정 완료 (v1=price-only, broker 위임 성공, #2391) |

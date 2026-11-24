@@ -150,6 +150,7 @@ async def test_order_timeout_still_records_failure_and_opens_cb() -> None:
     반복되면 차단기가 OPEN 되어 연쇄 호출을 막는 본래 보호가 유지된다.
     """
     adapter = _make_adapter()
+    sends = 0
 
     async def fake_send_http(
         method: str,
@@ -159,25 +160,25 @@ async def test_order_timeout_still_records_failure_and_opens_cb() -> None:
         json_data: dict[str, Any] | None,
         timeout: float,
     ) -> tuple[dict[str, Any], str]:
+        nonlocal sends
         if "order-cash" in url:
+            sends += 1
             raise TimeoutError("주문 타임아웃")
         raise AssertionError(f"예상치 못한 url: {url}")
 
     adapter._send_http = fake_send_http  # type: ignore[method-assign]
 
-    # 주문 1회 = 최초+재시도 3회 = 최대 4회 record_failure. 임계 5 에 도달하려면
-    # 2회 주문이면 충분하다. OPEN 전환 후 check() 가 CircuitOpenError 를 던진다.
-    opened = False
-    for _ in range(3):
-        try:
+    # 매수 주문 타임아웃은 다시 보내지 않으므로(#2911) 주문 1회 = 전송 1회 =
+    # record_failure 1회. 임계 5 에 도달하면 OPEN, 6번째 주문은 CircuitOpenError.
+    for _ in range(5):
+        before = sends
+        with pytest.raises(APIError):
             await adapter.place_order("005930", "buy", 1.0)
-        except CircuitOpenError:
-            opened = True
-            break
-        except APIError:
-            continue
-    assert opened, "주문 타임아웃 누적으로 차단기가 OPEN 되어야 한다"
+        assert sends == before + 1
     assert adapter.circuit_breaker.state == CircuitState.OPEN
+    with pytest.raises(CircuitOpenError):
+        await adapter.place_order("005930", "buy", 1.0)
+    assert sends == 5
 
 
 # ── 회계 범위: ccld 비-Timeout 실패는 기존대로 기록 ───────────────

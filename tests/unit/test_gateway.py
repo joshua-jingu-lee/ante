@@ -11,6 +11,7 @@ import pytest
 
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
+    NotificationEvent,
     OrderApprovedEvent,
     OrderCancelEvent,
     OrderCancelledEvent,
@@ -564,6 +565,86 @@ class TestAPIGatewayEvents:
         assert len(received) == 1
         assert received[0].error_code == "APBK0919"
         assert "잔고 부족" in received[0].error_message
+
+    async def test_plain_order_failure_sends_no_notification(
+        self, gateway, eventbus, broker, account_service
+    ):
+        """KIS 코드가 붙은 일반 주문 실패는 알림을 내지 않는다(지금 동작)."""
+        from ante.broker.exceptions import APIError
+
+        broker.place_order = AsyncMock(
+            side_effect=APIError("잔고 부족", status_code=500, error_code="APBK0919")
+        )
+        notifications: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
+
+        await eventbus.publish(
+            OrderApprovedEvent(
+                account_id="acc-001",
+                order_id="ord1",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10.0,
+                order_type="market",
+                reserved_amount=500000.0,
+            )
+        )
+
+        assert notifications == []
+
+    async def test_unknown_outcome_failure_notifies_once(
+        self, gateway, eventbus, broker, account_service
+    ):
+        """접수 여부 미상 실패는 error_code 를 전달하고 ERROR 알림을 한 번 낸다."""
+        from ante.broker.exceptions import APIError
+
+        reason = "HTTP 503: <html>`busy_body`</html> " + "x" * 400
+        broker.place_order = AsyncMock(
+            side_effect=APIError(
+                f"주문 접수 여부 미상 — 다시 보내지 않음: {reason}",
+                status_code=503,
+                error_code="order_outcome_unknown",
+            )
+        )
+        failed: list[OrderFailedEvent] = []
+        notifications: list[NotificationEvent] = []
+        eventbus.subscribe(OrderFailedEvent, lambda e: failed.append(e))
+        eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
+
+        await eventbus.publish(
+            OrderApprovedEvent(
+                account_id="acc-001",
+                order_id="ord_with_underscore",
+                bot_id="bot_a",
+                strategy_id="s1",
+                symbol="005930",
+                side="sell",
+                quantity=3.0,
+                order_type="market",
+                reserved_amount=0.0,
+            )
+        )
+
+        assert len(failed) == 1
+        assert failed[0].error_code == "order_outcome_unknown"
+        assert len(notifications) == 1
+        note = notifications[0]
+        assert note.level == "error"
+        assert note.category == "trade"
+        assert note.title == "주문 접수 여부 미상"
+        assert "`ord_with_underscore`" in note.message
+        assert "`bot_a`" in note.message
+        assert "`acc-001`" in note.message
+        assert "매도 `005930` 3주" in note.message
+        assert "다시 보내지 않았습니다" in note.message
+        reason_line = note.message.splitlines()[-1]
+        assert reason_line.startswith("사유: `")
+        assert reason_line.endswith("…`")
+        assert reason_line.count("`") == 2
+        assert "busy_body" in reason_line
+        assert len(reason_line) < 230
 
     async def test_order_cancel_event_with_account_id(
         self, gateway, eventbus, broker, account_service
