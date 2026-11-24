@@ -1501,6 +1501,13 @@ async def _init_treasury_sync(s: Services, accounts: list[Any]) -> None:
                 )
 
 
+async def _restore_bots(s: Services) -> None:
+    """DB의 봇을 시작하지 않은 채 메모리로 복원한다(봇 관리자가 없으면 건너뜀)."""
+    if s.bot_manager is None:
+        return
+    await s.bot_manager.restore_bots()
+
+
 async def _init_feed(s: Services) -> None:
     """Data Pipeline, BacktestService, ReportStore 초기화."""
     assert s.db is not None
@@ -2013,6 +2020,7 @@ async def main() -> None:
         await _init_account(s)
         await _init_trading(s)
         await _init_gateway(s)
+        await _restore_bots(s)
         await _init_feed(s)
         await _init_approval(s)
         await _init_notification(s)
