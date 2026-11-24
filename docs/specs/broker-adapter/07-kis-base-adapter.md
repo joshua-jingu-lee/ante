@@ -16,7 +16,7 @@ KISBaseAdapter는 한국투자증권 Open API의 국내/해외 공통 로직을 
 | HTTP 클라이언트 | aiohttp 세션, 헤더 구성, 에러 파싱 |
 | Rate Limiter 연동 | APIGateway의 rate limiter 사용 |
 | CircuitBreaker | 장애 감지·차단·복구 상태 머신. **어댑터 전역 단일**(주문 경로 보호 우선)이며 주문·조회 모든 경로가 공유한다. **late-ccld(`get_order_history`) `TimeoutError`는 회계에서 제외**(호출측 opt-out)되어 체결이력 폴 타임아웃이 무관한 treasury 동기화·주문 경로를 broker-wide 로 차단하지 않는다(#2350, [10-commission-info.md](10-commission-info.md)). |
-| 재시도 로직 | 지수 백오프 + 에러 분류 기반 재시도. 매수·매도 주문 TR은 접수 여부를 알 수 없는 실패(시간 초과·연결 오류·등록된 KIS 코드가 없는 HTTP 500·502·503·504·해석하지 못한 HTTP 200 본문)에서 다시 보내지 않고 `order_outcome_unknown`으로 끝낸다([10-commission-info.md](10-commission-info.md) 「에러 처리 및 재시도」) |
+| 재시도 로직 | 지수 백오프 + 에러 분류 기반 재시도. 매수·매도 주문 TR은 접수 여부를 알 수 없는 실패(시간 초과·연결 오류·등록된 KIS 코드가 없는 HTTP 500·502·503·504·해석하지 못한 HTTP 200 본문·결과 코드(`rt_cd`)가 없거나 빈 값(`null`·빈 문자열)인 HTTP 200 본문)에서 다시 보내지 않고 `order_outcome_unknown`으로 끝낸다([10-commission-info.md](10-commission-info.md) 「에러 처리 및 재시도」) |
 | Base URL 결정 | `broker_config.is_paper`에 따라 실전/모의 도메인 분기 |
 | `connect()` / `disconnect()` | API 연결·해제 |
 
@@ -52,7 +52,7 @@ KIS API는 broker-side business failure(예: 원주문번호 오류, 잘못된 �
    4. 그 외 unknown msg_cd → HTTP status retryable 기준에 위임.
 5. **메시지 비공백 보장 (#2324)**: business error 승격 시 `msg1`이 빈 문자열/공백이면 `get_error_message(msg_cd)`로 폴백해 `APIError`의 error_message가 절대 비어 있으면 안 된다. 미등록 코드도 `알 수 없는 에러 ({msg_cd})`로 코드가 보존된 triage-able 메시지가 된다. (generic `HTTP <status>: <text>` fallback 경로는 해당 없음.)
 
-HTTP 200 + `rt_cd != "0"` 경로는 기존 동작을 유지하며 별도로 `error_code = msg_cd`만 설정한다 (status_code 미설정).
+HTTP 200 + `rt_cd != "0"` 경로는 기존 동작을 유지하며 별도로 `error_code = msg_cd`만 설정한다 (status_code 미설정). `rt_cd`가 없거나 빈 값(`null`·빈 문자열)인 응답도 같은 값의 `APIError`가 되며, 매수·매도 TR에서는 재시도 루프가 이를 접수 여부 미상으로 끝낸다([10-commission-info.md](10-commission-info.md) 「신규 주문의 재송신 금지」).
 
 ### OAuth2 인증 — single-flight + shared cache + EGW00133 backoff (#2396)
 
