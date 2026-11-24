@@ -194,9 +194,8 @@ amend는 §2.3의 보류를 해제하고 옵션 A를 normative로 채택해 이 
   read-only).
 - #1815 CLI command contract registry에는 read-only 축이 없다 — factory는
   caller가 넘긴 `read_only: bool`(생략하면 `False`)을 받는다.
-- 본 SSOT는 분류의 enumeration(전 CLI 명령의 read-only 여부 표)을 재선언하지
-  **않는다**. enumeration은 [docs/specs/cli/03-commands.md](../cli/03-commands.md)
-  + #1815 registry가 SSOT다.
+- 본 SSOT는 분류의 enumeration(전 CLI 명령의 read-only 여부 표)을 두지
+  **않는다**.
 
 ### 2.3 옵션 A 채택 (#1974 R2, 2026-05-31 KST)
 
