@@ -8,6 +8,10 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from ante.account.errors import (
+    AccountActivateAllFailedError,
+    AccountSuspendAllFailedError,
+)
 from ante.account.models import missing_required_credentials
 from ante.account.presets import BROKER_PRESETS
 from ante.contracts.cli_errors import InvalidDateRangeError
@@ -156,12 +160,44 @@ def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict[st
     }
 
 
+async def _audit_incomplete_kill_switch(
+    svc: ServiceRegistry,
+    action: str,
+    actor: str,
+    failed: tuple[str, ...],
+    changed: int,
+    reason: str,
+) -> None:
+    """킬 스위치의 부분 실패를 감사에 한 건 남긴다(감사 실패는 로그만)."""
+    try:
+        await svc.audit_logger.log(
+            member_id=actor,
+            action=action,
+            resource="system:kill_switch",
+            detail=f"failed={','.join(failed)}; changed={changed}; reason={reason}",
+            ip="",
+        )
+    except Exception:
+        logger.exception("킬 스위치 부분 실패의 감사 기록 실패: %s", action)
+
+
 async def _handle_system_halt(
     svc: ServiceRegistry, request: SystemHaltRequest, actor: str
 ) -> dict[str, Any]:
     """전역 거래 정지(kill switch) IPC handler."""
     reason = request.reason
-    accounts = await svc.account.suspend_all(reason=reason, suspended_by=actor)
+    try:
+        accounts = await svc.account.suspend_all(reason=reason, suspended_by=actor)
+    except AccountSuspendAllFailedError as exc:
+        await _audit_incomplete_kill_switch(
+            svc,
+            "system.halt",
+            actor,
+            exc.failed_account_ids,
+            exc.suspended_count,
+            reason,
+        )
+        raise
     payload = _kill_switch_payload("halted", accounts)
     payload["_audit_detail"] = {
         "resource": "system:kill_switch",
@@ -175,7 +211,18 @@ async def _handle_system_clear_halt(
     svc: ServiceRegistry, request: SystemClearHaltRequest, actor: str
 ) -> dict[str, Any]:
     """전역 거래 정지 해제 IPC handler."""
-    accounts = await svc.account.activate_all(activated_by=actor)
+    try:
+        accounts = await svc.account.activate_all(activated_by=actor)
+    except AccountActivateAllFailedError as exc:
+        await _audit_incomplete_kill_switch(
+            svc,
+            "system.clear_halt",
+            actor,
+            (exc.failed_account_id,),
+            exc.activated_count,
+            request.reason,
+        )
+        raise
     payload = _kill_switch_payload("halt_cleared", accounts)
     payload["_audit_detail"] = {
         "resource": "system:kill_switch",

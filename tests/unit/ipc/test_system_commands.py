@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
+from ante.account.errors import AccountSuspendAllFailedError
 from ante.cli.main import cli
+from ante.contracts.ipc_client_errors import IPCRemoteError
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
 from ante.ipc.server import IPCServer, IPCServerState
@@ -274,3 +277,62 @@ def test_clear_halt_cli_sends_reason(argv: list[str], args: dict[str, str]) -> N
     send.assert_awaited_once_with(
         "system.clear_halt", args, actor=ACTOR, required=("accounts_changed",)
     )
+
+
+_PARTIAL_MESSAGE = (
+    "전체 계좌 정지가 1개 계좌에서 실패했습니다: acc2. "
+    "이번 요청으로 정지된 계좌는 1개입니다."
+)
+
+
+@pytest.mark.asyncio
+async def test_halt_partial_failure_audit_error_does_not_mask_code(
+    harness: _Harness,
+) -> None:
+    harness.account.suspend_all = AsyncMock(
+        side_effect=AccountSuspendAllFailedError(("acc2",), 1)
+    )
+    harness.audit_logger.log = AsyncMock(side_effect=RuntimeError("감사 저장 실패"))
+
+    response = await harness.send("system.halt", {"reason": "r"})
+
+    assert response == {
+        "id": "req-1",
+        "status": "error",
+        "error": {"code": "ACCOUNT_SUSPEND_ALL_FAILED", "message": _PARTIAL_MESSAGE},
+    }
+    harness.audit_logger.log.assert_awaited_once_with(
+        member_id=ACTOR,
+        action="system.halt",
+        resource="system:kill_switch",
+        detail="failed=acc2; changed=1; reason=r",
+        ip="",
+    )
+
+
+@pytest.mark.parametrize("mode", ["text", "json"])
+def test_halt_cli_partial_failure_exits_with_remote_code(mode: str) -> None:
+    send = AsyncMock(
+        side_effect=IPCRemoteError("ACCOUNT_SUSPEND_ALL_FAILED", _PARTIAL_MESSAGE)
+    )
+    with (
+        patch("ante.cli.main.authenticate_member", side_effect=_set_member),
+        patch("ante.cli.commands.ipc_helpers.ipc_send", new=send),
+    ):
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["--format", mode, "system", "halt", "--reason", "r"]
+        )
+
+    assert result.exit_code == 1
+    assert "시스템 HALTED" not in result.stdout
+    if mode == "json":
+        assert json.loads(result.stdout) == {
+            "status": "error",
+            "code": "ACCOUNT_SUSPEND_ALL_FAILED",
+            "message": _PARTIAL_MESSAGE,
+        }
+    else:
+        assert result.stdout == ""
+        assert result.stderr.splitlines() == [
+            f"Error: ACCOUNT_SUSPEND_ALL_FAILED: {_PARTIAL_MESSAGE}"
+        ]

@@ -7,6 +7,10 @@ import logging
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, cast
 
+from ante.account.errors import (
+    AccountActivateAllFailedError,
+    AccountSuspendAllFailedError,
+)
 from ante.core import clock
 
 if TYPE_CHECKING:
@@ -480,10 +484,15 @@ class TelegramCommandReceiver:
             return "이미 거래가 중지된 상태입니다."
 
         reason = " ".join(args) if args else "텔레그램 명령"
-        await self._account_service.suspend_all(
-            reason=reason,
-            suspended_by="telegram",
-        )
+        try:
+            await self._account_service.suspend_all(
+                reason=reason,
+                suspended_by="telegram",
+            )
+        except AccountSuspendAllFailedError as exc:
+            return (
+                f"⚠️ 전체 거래 중지가 일부 계좌에서 실패했습니다.\n{exc}\n사유: {reason}"
+            )
         return (
             "\U0001f6a8 전체 거래가 중지되었습니다.\n"
             f"사유: {reason}\n"
@@ -498,7 +507,10 @@ class TelegramCommandReceiver:
         if await self._all_accounts_active():
             return "이미 거래가 활성 상태입니다."
 
-        await self._account_service.activate_all(activated_by="telegram")
+        try:
+            await self._account_service.activate_all(activated_by="telegram")
+        except AccountActivateAllFailedError as exc:
+            return f"⚠️ 전역 정지 해제가 중간에 멈췄습니다.\n{exc}"
         return (
             "✅ 전역 정지가 해제되었습니다.\n"
             "계좌 상태만 ACTIVE로 복구되며 봇은 자동 재시작되지 않습니다."
