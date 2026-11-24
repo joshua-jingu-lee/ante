@@ -94,7 +94,7 @@ def instrument_list(
 
     if not results:
         empty: dict[str, Any] = {"instruments": [], "count": 0}
-        return CommandResult(data=empty, text=(str(empty),))
+        return CommandResult(data=empty, text=("종목이 없습니다.",))
 
     columns = ["symbol", "name", "name_en", "type", "listed"]
     return CommandResult(data=results, text=tuple(table_lines(results, columns)))
@@ -251,7 +251,7 @@ def search(
 
     if not results:
         empty: dict[str, Any] = {"results": [], "count": 0}
-        return CommandResult(data=empty, text=(str(empty),))
+        return CommandResult(data=empty, text=("검색 결과가 없습니다.",))
 
     columns = ["symbol", "exchange", "name", "name_en", "type"]
     return CommandResult(data=results, text=tuple(table_lines(results, columns)))
