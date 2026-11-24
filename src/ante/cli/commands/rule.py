@@ -26,7 +26,7 @@ from ante.contracts.ipc_client_errors import (
     IPCServerNotRunningError,
 )
 from ante.contracts.request_errors import RequestValidationError
-from ante.core.database import OperationalError
+from ante.core.database import OperationalError, is_missing_table
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -69,7 +69,7 @@ async def _create_rule_engine(
                 (validated_account_id,),
             )
         except OperationalError as e:
-            if "no such table" in str(e).lower():
+            if is_missing_table(e):
                 raise AccountNotFoundError(
                     f"계좌 '{validated_account_id}'를 찾을 수 없습니다."
                 ) from e

@@ -23,7 +23,7 @@ from ante.contracts.cli_errors import (
     InvalidDateError,
     InvalidDateRangeError,
 )
-from ante.core.database import OperationalError
+from ante.core.database import OperationalError, is_missing_table
 
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -243,7 +243,7 @@ def history(
             try:
                 runs = await store.list_by_strategy(strategy_name, limit=limit)
             except OperationalError as e:
-                if "no such table" in str(e).lower():
+                if is_missing_table(e):
                     return []
                 raise
             return [r.to_dict() for r in runs]

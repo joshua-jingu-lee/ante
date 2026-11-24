@@ -18,7 +18,7 @@ from ante.cli.middleware import require_auth, require_scope
 from ante.contracts.cli_errors import TradeError, TradeNotFoundError
 from ante.contracts.error_registry import EXECUTION_ERROR_SPEC
 from ante.contracts.helpers import error_spec_for_exception
-from ante.core.database import OperationalError
+from ante.core.database import OperationalError, is_missing_table
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -170,7 +170,7 @@ def trade_info(ctx: click.Context, trade_id: str) -> CommandResult:
                     "SELECT * FROM trades WHERE trade_id = ?", (trade_id,)
                 )
             except OperationalError as e:
-                if "no such table" in str(e).lower():
+                if is_missing_table(e):
                     return None
                 raise
             return dict(row) if row else None

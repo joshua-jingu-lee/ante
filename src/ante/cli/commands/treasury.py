@@ -31,6 +31,7 @@ from ante.contracts.cli_errors import (
     TreasuryDeallocateFailedError,
 )
 from ante.core import clock
+from ante.core.database import is_missing_table
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -221,7 +222,7 @@ def transactions(
                     (*params, limit, offset),
                 )
             except Exception as e:
-                if "no such table" in str(e).lower():
+                if is_missing_table(e):
                     return {"items": [], "total": 0}
                 raise
             items = [
