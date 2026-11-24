@@ -46,7 +46,7 @@ class TradeRecord:
     ``__post_init__`` 에서 :func:`require_account_id` 로 runtime 검증된다.
     """
 
-    trade_id: UUID
+    trade_id: UUID | str
     bot_id: str
     strategy_id: str
     symbol: str
