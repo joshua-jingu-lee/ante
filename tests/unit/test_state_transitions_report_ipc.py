@@ -1,6 +1,6 @@
-"""리포트 상태와 IPC 서버 상태 전이의 특성 테스트 (#2688).
+"""리포트 상태와 IPC 서버 상태 전이의 특성 테스트 (#2688, #2687).
 
-두 상태를 쓰는 자리에는 가드가 없다. 지금 코드가 모든 (이전, 다음) 쌍을
+리포트 상태를 쓰는 자리에는 가드가 없다. 지금 코드가 모든 (이전, 다음) 쌍을
 예외 없이 통과시킨다는 것을 공개 API로 잠근다. 누가 쓰는 자리에 가드를
 더하면 이 테스트가 실패하고, 그 변경은 전이표를 함께 좁혀야 한다.
 
@@ -9,11 +9,13 @@
 ``reviewed_at``·``user_notes`` 가 있는 사례는 ``submit`` 뒤
 ``update_status(..., REVIEWED, user_notes="이전")`` 로 만든다.
 
-IPC 서버는 공개 메서드만으로 4개 이전 상태를 만들고, 네 수명주기 메서드,
-``drain_connections``, ``stop()`` 을 부른다. 각 사례 끝에 테스트가 만든
-listener를 모두 닫는다.
+IPC 서버의 수명주기 메서드는 전이표가 허용하는 전이만 한다(#2687). 공개
+메서드만으로 4개 이전 상태를 만들고, 네 수명주기 메서드, ``drain_connections``,
+``stop()`` 을 부른다. 허용되지 않는 전이에서는 상태·listener·소켓 경로의
+파일이 그대로다. 이전 상태가 STOPPED인 사례는 소켓 경로에 남의 파일을 먼저
+둔다. 각 사례 끝에 테스트가 만든 listener를 모두 닫는다.
 
-뒤쪽은 두 전이표가 리터럴로 적은 쌍(36쌍, 16쌍)과 같은지 본다.
+뒤쪽은 두 전이표가 리터럴로 적은 쌍(36쌍, 7쌍)과 같은지 본다.
 
 기대값은 모두 리터럴(상태 문자열, 열 값)이다.
 """
@@ -260,12 +262,36 @@ PRIOR_STEPS: dict[str, tuple[Callable[[IPCServer], Any], ...]] = {
 
 IPC_PRIORS = ("stopped", "running", "shutting_down", "draining")
 
-IPC_METHODS = (
-    ("start", _start, "running"),
-    ("stop_accepting", _stop_accepting, "shutting_down"),
-    ("stop_dispatching", _stop_dispatching, "draining"),
-    ("unlink_socket", _unlink_socket, "stopped"),
+IPC_METHOD_STEPS = {
+    "start": _start,
+    "stop_accepting": _stop_accepting,
+    "stop_dispatching": _stop_dispatching,
+    "unlink_socket": _unlink_socket,
+}
+
+IPC_ALLOWED_CASES = (
+    ("stopped", "start", "running"),
+    ("running", "stop_accepting", "shutting_down"),
+    ("running", "stop_dispatching", "draining"),
+    ("running", "unlink_socket", "stopped"),
+    ("shutting_down", "stop_dispatching", "draining"),
+    ("shutting_down", "unlink_socket", "stopped"),
+    ("draining", "unlink_socket", "stopped"),
 )
+
+IPC_REFUSED_CASES = (
+    ("stopped", "stop_accepting"),
+    ("stopped", "stop_dispatching"),
+    ("stopped", "unlink_socket"),
+    ("running", "start"),
+    ("shutting_down", "start"),
+    ("shutting_down", "stop_accepting"),
+    ("draining", "start"),
+    ("draining", "stop_accepting"),
+    ("draining", "stop_dispatching"),
+)
+
+FOREIGN_BYTES = b"other daemon"
 
 
 @pytest.fixture
@@ -280,25 +306,89 @@ async def harness() -> AsyncIterator[_Harness]:
 
 
 async def _enter(h: _Harness, prior: str) -> None:
+    if prior == "stopped":
+        Path(h.server.socket_path).write_bytes(FOREIGN_BYTES)
     for step in PRIOR_STEPS[prior]:
         await h.call(step)
     assert h.server.state.value == prior
 
 
-@pytest.mark.parametrize(
-    ("method", "step", "target"),
-    IPC_METHODS,
-    ids=[name for name, _, _ in IPC_METHODS],
-)
-@pytest.mark.parametrize("prior", IPC_PRIORS)
-async def test_ipc_lifecycle_method_passes_every_pair(
-    harness, prior, method, step, target
+def _snapshot(h: _Harness) -> tuple[Any, ...]:
+    path = Path(h.server.socket_path)
+    file_id = None
+    if path.exists():
+        stat = path.stat()
+        file_id = (stat.st_ino, stat.st_mode)
+    return (
+        h.server.state.value,
+        h.server._server,
+        h.server._closing_server,
+        file_id,
+    )
+
+
+@pytest.mark.parametrize(("prior", "method", "target"), IPC_ALLOWED_CASES)
+async def test_ipc_lifecycle_method_takes_allowed_transition(
+    harness, prior, method, target
 ):
     await _enter(harness, prior)
 
-    await harness.call(step)
+    await harness.call(IPC_METHOD_STEPS[method])
 
     assert harness.server.state.value == target
+
+
+@pytest.mark.parametrize(("prior", "method"), IPC_REFUSED_CASES)
+async def test_ipc_lifecycle_method_refused_transition_changes_nothing(
+    harness, prior, method
+):
+    await _enter(harness, prior)
+    before = _snapshot(harness)
+
+    await harness.call(IPC_METHOD_STEPS[method])
+
+    assert _snapshot(harness) == before
+    assert harness.server.state.value == prior
+
+
+@pytest.mark.parametrize(
+    "method", ["stop_accepting", "stop_dispatching", "unlink_socket"]
+)
+async def test_ipc_stop_side_before_start_keeps_foreign_file(harness, method):
+    await _enter(harness, "stopped")
+
+    await harness.call(IPC_METHOD_STEPS[method])
+
+    assert harness.server.state.value == "stopped"
+    assert Path(harness.server.socket_path).read_bytes() == FOREIGN_BYTES
+
+
+@pytest.mark.parametrize("prior", ["running", "shutting_down", "draining"])
+async def test_ipc_start_while_not_stopped_keeps_listener_and_socket(harness, prior):
+    await _enter(harness, prior)
+    listener = harness.server._server
+    inode = Path(harness.server.socket_path).stat().st_ino
+
+    await harness.call(_start)
+
+    assert harness.server.state.value == prior
+    assert harness.server._server is listener
+    assert Path(harness.server.socket_path).stat().st_ino == inode
+
+
+async def test_ipc_stop_accepting_after_stop_dispatching_closes_listener(harness):
+    await _enter(harness, "running")
+    listener = harness.server._server
+    assert listener is not None
+    harness.server.stop_dispatching()
+    assert harness.server.state.value == "draining"
+
+    await harness.call(_stop_accepting)
+
+    assert harness.server.state.value == "draining"
+    assert harness.server._server is None
+    assert harness.server._closing_server is listener
+    assert listener.is_serving() is False
 
 
 @pytest.mark.parametrize("prior", IPC_PRIORS)
@@ -317,6 +407,28 @@ async def test_ipc_stop_ends_stopped_from_every_state(harness, prior):
     await harness.call(_stop)
 
     assert harness.server.state.value == "stopped"
+
+
+async def test_ipc_stop_before_start_keeps_foreign_file(harness):
+    await _enter(harness, "stopped")
+
+    await harness.call(_stop)
+
+    assert harness.server.state.value == "stopped"
+    assert Path(harness.server.socket_path).read_bytes() == FOREIGN_BYTES
+
+
+async def test_ipc_second_stop_keeps_foreign_file(harness):
+    await _enter(harness, "running")
+    await harness.call(_stop)
+    assert harness.server.state.value == "stopped"
+    assert not Path(harness.server.socket_path).exists()
+    Path(harness.server.socket_path).write_bytes(FOREIGN_BYTES)
+
+    await harness.call(_stop)
+
+    assert harness.server.state.value == "stopped"
+    assert Path(harness.server.socket_path).read_bytes() == FOREIGN_BYTES
 
 
 # ── 전이표 ───────────────────────────────────────────────────────
@@ -377,32 +489,23 @@ def test_report_status_transition_table_allows_every_pair():
     }
 
 
-def test_ipc_server_state_transition_table_allows_every_pair():
+def test_ipc_server_state_transition_table_moves_forward_only():
     assert {
         k.value: {v.value for v in vs} for k, vs in IPC_SERVER_STATE_TRANSITIONS.items()
     } == {
         "running": {
-            "running",
             "shutting_down",
             "draining",
             "stopped",
         },
         "shutting_down": {
-            "running",
-            "shutting_down",
             "draining",
             "stopped",
         },
         "draining": {
-            "running",
-            "shutting_down",
-            "draining",
             "stopped",
         },
         "stopped": {
             "running",
-            "shutting_down",
-            "draining",
-            "stopped",
         },
     }
