@@ -569,6 +569,46 @@ async def test_failed_partial_fill_after_bot_stop_took_rest_stays_consistent(
     assert await stored(db) == {}
 
 
+async def test_failed_bot_release_reverts_only_orders_still_released(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node)
+    assert await node.treasury.reserve_for_order(BOT, OTHER, OTHER_AMOUNT)
+    retaken = 20_000.0
+    reached, gate = asyncio.Event(), asyncio.Event()
+    original = node.treasury._persist_reservation
+
+    with patch.object(
+        node.treasury,
+        "_persist_reservation",
+        gated(original, ORDER, reached, gate),
+    ):
+        releasing = asyncio.create_task(
+            node.treasury._release_bot_reservations(
+                BOT, node.treasury.get_reservations(BOT)
+            )
+        )
+        await reached.wait()
+        retaking = asyncio.create_task(
+            node.treasury.reserve_for_order(BOT, ORDER, retaken)
+        )
+        await asyncio.sleep(0)
+        gate.set()
+        with pytest.raises(RuntimeError):
+            await releasing
+        assert await retaking
+
+    expected = (ALLOCATED - retaken - OTHER_AMOUNT, retaken + OTHER_AMOUNT)
+    assert_budget(budget_of(node), *expected)
+    assert await budget_row(db) == pytest.approx(expected)
+    assert node.treasury.get_reservations(BOT) == {
+        ORDER: retaken,
+        OTHER: OTHER_AMOUNT,
+    }
+    assert await stored(db) == {ORDER: retaken, OTHER: OTHER_AMOUNT}
+
+
 def failing_delete(db: Database, gate: asyncio.Event | None = None, fail=True):
     original = db.execute
 

@@ -636,8 +636,9 @@ class Treasury:
                 await self._save_budget(budget)
                 await self._persist_reservation(order_id)
         except BaseException:
-            self._revert_budget(budget, before, after)
-            self._restore_reservation(order_id, previous)
+            if self._entry_kept(order_id, previous, (bot_id, amount)):
+                self._revert_budget(budget, before, after)
+                self._restore_reservation(order_id, previous)
             raise
         return True
 
@@ -667,9 +668,10 @@ class Treasury:
                     await self._save_budget(settle)
                 await self._persist_reservation(order_id)
         except BaseException:
-            if settle is not None and changes is not None:
-                self._revert_budget(settle, *changes)
-            self._restore_reservation(order_id, entry)
+            if self._entry_kept(order_id, entry, None):
+                if settle is not None and changes is not None:
+                    self._revert_budget(settle, *changes)
+                self._restore_reservation(order_id, entry)
             raise
 
     def get_reservations(self, bot_id: str) -> dict[str, float]:
@@ -713,6 +715,20 @@ class Treasury:
             self._reservations.pop(order_id, None)
         else:
             self._reservations[order_id] = entry
+
+    def _entry_kept(
+        self,
+        order_id: str,
+        before: tuple[str, float] | None,
+        left: tuple[str, float] | None,
+    ) -> bool:
+        """이 연산이 바꾼 예약 항목이 남긴 그대로인지 보고, 아니면 경고를 남긴다."""
+        if before == left or self._reservations.get(order_id) == left:
+            return True
+        logger.warning(
+            "다른 연산이 예약을 이어받아 되돌리지 않는다: order_id=%s", order_id
+        )
+        return False
 
     def _log_duplicate_validated(self, order_id: str, bot_id: str) -> None:
         """같은 id의 예약이 있는 검증 이벤트를 발행 없이 버리며 오류 로그를 남긴다."""
@@ -1132,6 +1148,7 @@ class Treasury:
         before: BotBudget | None = None
         after: BotBudget | None = None
         reservation_snapshot: tuple[str, float] | None = None
+        left: tuple[str, float] | None = None
 
         try:
             async with self._db.transaction():
@@ -1152,10 +1169,18 @@ class Treasury:
                 reservation_snapshot = self._reservations.get(order_id)
                 fill_value = self._apply_fill_settlement(event, budget, record)
                 after = replace(budget)
+                left = self._reservations.get(order_id)
                 await self._persist_fill_settlement(event, budget, fill_value)
         except BaseException:
-            if before is not None:
-                self._revert_budget(budget, before, after or replace(budget))
+            if before is not None and after is None:
+                after = replace(budget)
+                left = self._reservations.get(order_id)
+            if (
+                before is not None
+                and after is not None
+                and self._entry_kept(order_id, reservation_snapshot, left)
+            ):
+                self._revert_budget(budget, before, after)
                 self._restore_reservation(order_id, reservation_snapshot)
             raise
 
@@ -1354,12 +1379,43 @@ class Treasury:
                 for order_id in pending:
                     await self._persist_reservation(order_id)
         except BaseException:
+            kept = [
+                oid
+                for oid, amount in pending.items()
+                if self._entry_kept(oid, (bot_id, amount), None)
+            ]
             if budget and changes is not None:
-                self._revert_budget(budget, *changes)
-            for order_id, amount in pending.items():
-                self._restore_reservation(order_id, (bot_id, amount))
+                self._revert_budget(budget, *self._kept_share(changes, pending, kept))
+            for order_id in kept:
+                self._restore_reservation(order_id, (bot_id, pending[order_id]))
             raise
         return total_released
+
+    @staticmethod
+    def _kept_share(
+        changes: tuple[BotBudget, BotBudget],
+        pending: dict[str, float],
+        kept: list[str],
+    ) -> tuple[BotBudget, BotBudget]:
+        """일괄 회수의 직전·직후 값을 되돌릴 주문들의 몫만 담은 쌍으로 좁힌다."""
+        before, after = changes
+        if len(kept) == len(pending):
+            return changes
+        room = before.reserved - after.reserved
+        reserved = 0.0
+        available = 0.0
+        for order_id, amount in pending.items():
+            share = min(amount, room)
+            room -= share
+            if order_id in kept:
+                reserved += share
+                available += amount
+        narrowed = replace(
+            after,
+            reserved=after.reserved + reserved,
+            available=after.available - available,
+        )
+        return narrowed, after
 
     def start_sync(
         self,
