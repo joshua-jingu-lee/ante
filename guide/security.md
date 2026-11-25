@@ -62,6 +62,8 @@ ante account activate domestic
 
 계좌가 정지(SUSPENDED)되면 해당 계좌에 연결된 모든 봇의 주문이 차단됩니다. 이미 접수된 주문은 영향을 받지 않지만, 새 주문은 계좌가 다시 활성화될 때까지 거부됩니다.
 
+정지가 DB에 기록되지 못하면 오류와 실패 알림이 나가고 정지는 적용된 채로 남지만, `ante account list`·`ante account info`는 그 계좌를 활성으로 보이고 `ante system status`는 정지로 세지 않습니다 — 정지를 다시 보내 기록을 마칩니다(기록 전에 재시작하면 계좌는 활성으로 돌아옵니다).
+
 시스템 전체를 긴급 중단해야 할 때는 `ante system halt` 명령어로 모든 계좌를 일괄 정지할 수 있습니다.
 
 ---
