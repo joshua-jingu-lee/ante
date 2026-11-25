@@ -259,6 +259,17 @@ test("LOOSE", () => {
   assert.ok(warnings.some((w) => w.startsWith("[done-criteria:item-not-matched]")));
 });
 
+// 아래 둘은 L4 밖에서 더한 것이다: 들여쓰기 상한 3칸이 펜스와 헤딩에서 각각 지켜지는지 본다.
+test("FENCEINDENT4", () => {
+  const out = lines(["## 완료 조건", "    ```", "- [ ] a"].join("\n"));
+  assert.equal(out[2], "- [x] a");
+});
+
+test("HEADINGINDENT4", () => {
+  const out = lines(["## 완료 조건", "    ## 코드 블록 안의 글", "- [ ] a"].join("\n"));
+  assert.equal(out[2], "- [x] a");
+});
+
 // 아래 넷은 #2509가 실측 노출 0으로 선언한 파서 공백이다. 이 파일은 동작을
 // 넓히지 않는다 — 기대 동작을 todo로 적어 두고 후속 이슈가 켠다.
 test("SETEXT: setext 헤딩이 절을 닫는다", { todo: true }, () => {
