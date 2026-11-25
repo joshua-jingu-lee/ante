@@ -11,7 +11,7 @@
 | `bot_create` | 봇 신규 생성 | `{"config": {"bot_id": "...", "strategy_id": "...", "name": "...", "account_id": "domestic-demo", "interval_seconds": 60}}` | `params.config`를 `BotConfig`로 변환하고 `StrategyRegistry`에서 ADOPTED 전략을 조회한 뒤 `StrategyLoader.load(record.filepath)`와 `BotManager.create_bot(config=..., strategy_cls=..., source_path=...)`를 호출한다. 예산 배정은 별도 `budget_change` 요청으로 처리한다 | 등록됨 |
 | `bot_assign_strategy` | 봇에 전략 배정 | `{"bot_id": "...", "strategy_id": "..."}` | `BotManager.assign_strategy(bot_id, strategy_id)` 호출 → 봇에 채택된 전략을 배정한다. running 상태이면 즉시 새 전략으로 전환된다 | 등록됨 |
 | `bot_change_strategy` | 봇 전략 변경 | `{"bot_id": "...", "strategy_id": "..."}` | `BotManager.change_strategy(bot_id, strategy_id)` 호출 → 중지 상태의 봇에 다른 전략을 교체 배정한다. running 상태이면 거부된다 | 등록됨 |
-| `bot_stop` | 봇 중지 | `{"bot_id": "...", "reason": "손실 누적"}` | `BotManager.stop_bot(bot_id)` 호출 → 봇의 전략 루프가 중지되고, 미체결 주문이 취소되고 스탑 주문이 만료된다. 보유 포지션은 유지된다 | 등록됨 |
+| `bot_stop` | 봇 중지 | `{"bot_id": "...", "reason": "손실 누적"}` | `BotManager.stop_bot(bot_id)` 호출 → 봇의 전략 루프가 중지되고, 스탑 주문이 만료되고 미체결 주문이 취소된다. 보유 포지션은 유지된다 | 등록됨 |
 | `bot_resume` | 봇 재개 | `{"bot_id": "...", "reason": "에러 해소 확인"}` | `BotManager.resume_bot(bot_id)` 호출 → 중지 또는 에러 상태의 봇을 재시작한다. Agent가 재개 사유를 판단하여 요청한다 | 등록됨 |
 | `bot_delete` | 봇 삭제 | `{"bot_id": "...", "reason": "전략 폐기"}` | `BotManager.delete_bot(bot_id)` 호출 → 중지 상태의 봇을 완전히 제거한다. 보유 포지션이 있으면 거부된다. 할당 예산은 Treasury 미할당으로 반환된다 | 등록됨 |
 | `budget_change` | 봇 예산 변경 | `{"bot_id": "...", "amount": 25000000, "current": 10000000}` | `Treasury.update_budget(bot_id, amount)` 호출 → 해당 봇의 할당 예산이 변경되고, 미할당 잔액이 재계산된다 | 등록됨 |

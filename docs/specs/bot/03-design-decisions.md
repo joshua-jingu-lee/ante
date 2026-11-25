@@ -18,7 +18,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 
 **정지 뒤의 주문**: `stop()`이 불리면, 그리고 실행 루프가 예외나 연속 시간 초과로 봇을 ERROR로 바꾸면 그 봇의 주문이 닫힌다. 주문은 다음 `start()`에서만 다시 열린다. 주문이 닫힌 뒤에는 `on_step`과 `on_data`가 돌려준 시그널을 `OrderRequestEvent`로 발행하지 않는다. 시그널마다 발행 직전에 확인하므로, 실행 중이던 콜백이 돌려준 시그널과 같은 목록에서 아직 발행되지 않은 시그널이 모두 버려진다. 콜백이 시작된 뒤 봇이 다시 시작됐으면(세대 번호가 다르면) 새 세대에서 주문이 열려 있어도 그 콜백의 시그널은 버려진다. 버린 건수는 경고 로그로만 남는다. 실행 루프가 한 스텝의 시그널을 발행한 뒤 세대가 바뀌었으면, 그 옛 루프는 대기 액션을 발행하지 않고 `BotStepCompletedEvent`도 내지 않고 끝난다. 실행 루프가 예외로 끝날 때 봇의 정지가 이미 끝났으면(STOPPED·DELETED) 상태를 ERROR로 바꾸지 않고 `BotErrorEvent`와 실패의 `BotStepCompletedEvent`도 발행하지 않는다(예외는 경고 로그로만 남긴다). 그래서 정지된 봇이 이 경로로 자동 재시작되지 않는다. 다음은 이 규칙의 대상이 아니다: 체결 통보로 불린 `on_fill`의 후속 주문, 남은 스탑 주문의 트리거가 내는 주문 요청(ERROR 전이 뒤의 스탑 주문과, 아래 정리가 끝난 뒤 `on_fill` 후속으로 등록된 스탑 주문), 청산을 동반한 삭제의 청산 주문, 취소·정정 액션, 주문이 닫히기 전에 이미 발행된 `OrderRequestEvent`.
 
-**정지 때의 미체결 주문 (#3049)**: `BotManager`가 `BotStoppedEvent`를 받아 그 봇의 미체결 주문에 취소를 요청하고 활성 스탑 주문을 만료시킨다. 그래서 정리는 봇이 STOPPED가 된 뒤에 일어난다. 정지 종류별 처리는 다음과 같다.
+**정지 때의 미체결 주문 (#3049)**: `BotManager`가 `BotStoppedEvent`를 받아 그 봇의 활성 스탑 주문을 만료시키고 미체결 주문에 취소를 요청한다. 그래서 정리는 봇이 STOPPED가 된 뒤에 일어난다. 정지 종류별 처리는 다음과 같다.
 
 | 정지 종류 | 미체결 주문 | 스탑 주문 |
 |---|---|---|
@@ -31,11 +31,11 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 | ERROR 전이 | 취소하지 않는다(자동 재시작이 이어받는다) | 만료하지 않는다 |
 
 - 대상은 정리를 시작할 때 주문 추적기의 DB에서 그 봇의 `open`·`partially_filled` 주문이다. 주문마다 `OrderCancelEvent(reason="bot_stopped")`를 발행해 게이트웨이의 취소 경로를 탄다. 부분 체결 주문은 잔량만 취소된다. 가상 계좌의 주문은 추적 기록이 없어 스탑 주문만 대상이다. 승인과 제출 사이에 있던 주문도 추적 기록이 없어 빠진다(알려진 한계).
-- 스탑 주문은 주문마다 `StopOrderExpiredEvent(reason="bot_stopped")`를 한 번 내고 활성 목록에서 빠진다.
+- 스탑 주문은 첫 await 전에 모두 만료로 표시되어 그 뒤의 시세에 발동하지 않고, 주문마다 `StopOrderExpiredEvent(reason="bot_stopped")`를 한 번 낸다.
 - 취소 요청이 돌아온 뒤 추적기의 상태가 `cancelled`면 취소, 아니면 실패로 센다. 실패(브로커가 `False`를 돌려주거나 예외를 낸 경우)는 정지를 실패시키지 않는다. 그 주문은 열린 채 남고 체결은 폴링이 반영한다. 취소한 주문에 취소 접수 전의 체결이 있으면 늦은 체결로 반영된다([broker-adapter/18-fill-recovery.md](../broker-adapter/18-fill-recovery.md) §6.3).
 - 정지 명령은 취소 요청과 브로커의 응답까지 마친 뒤 돌아온다. 체결 확인은 기다리지 않는다.
-- 순서: 전략의 대기 액션(아직 발행되지 않은 취소·정정) 폐기 → 미체결 주문 취소 → 스탑 주문 만료 → 시그널 채널 닫기 → 「봇 중지」 알림. 알림은 취소한 주문 수·취소에 실패한 주문 수·만료한 스탑 주문을 적는다. 텔레그램 `/stop`은 알림 대신 같은 내용을 응답에 적는다.
-- 정리를 시작할 때 봇이 STOPPED가 아니면(그 사이 다시 시작됐으면) 액션 폐기·취소·만료를 건너뛰고 경고 로그만 남긴다. ERROR 전이는 `BotStoppedEvent`를 내지 않으므로 대기 액션도 그대로 둔다.
+- 순서: 전략의 대기 액션(아직 발행되지 않은 취소·정정) 폐기 → 스탑 주문 만료 → 미체결 주문의 조회·취소 → 시그널 채널 닫기 → 「봇 중지」 알림. 정리가 예외로 끝나도 채널 닫기는 한다. 알림은 취소한 주문 수·취소에 실패한 주문 수·만료한 스탑 주문을 적고, 열린 주문의 조회가 실패했으면 그 사실(직접 확인 필요)을 적는다. 텔레그램 `/stop`은 알림 대신 같은 내용을 응답에 적는다.
+- 정리를 시작할 때 봇이 STOPPED가 아니면(그 사이 다시 시작됐으면) 액션 폐기·취소·만료를 건너뛰고 경고 로그만 남긴다. 정리 도중(만료·조회·취소 요청 하나마다의 뒤) 봇의 상태나 세대 번호가 바뀌었으면 정리는 거기서 멈추고, 남은 주문은 취소되지 않는다(알려진 한계). ERROR 전이는 `BotStoppedEvent`를 내지 않으므로 대기 액션도 그대로 둔다.
 
 **근거**:
 - NautilusTrader는 INITIALIZED/RUNNING/STOPPED/DEGRADED/FAULTING/DISPOSED 6단계
@@ -118,11 +118,11 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 |----------|----------|--------|------|
 | `create_bot` | `config: BotConfig, strategy_cls: type[Strategy], ctx: StrategyContext \| None = None` | `Bot` | 봇 생성. ctx가 주입되면 그대로 사용하고, None이면 context_factory로 자동 생성. 이벤트 구독 등록 + DB 저장. `accepts_external_signals=True`이면 시그널 키 자동 발급. `bot_id`가 메모리에 있거나 `deleted` 행으로 남아 있으면 `BotAlreadyExistsError`(`BOT_ALREADY_EXISTS`) — 삭제한 id는 다시 쓸 수 없다(보유·이력 귀속) |
 | `start_bot` | `bot_id: str` | `None` | 봇 시작. `bot.start()` 호출 |
-| `stop_bot` | `bot_id: str` | `StopCleanup \| None` | 봇 중지. 미체결 주문을 취소하고 스탑 주문을 만료시킨 결과(취소 건수·실패 건수·만료한 스탑 주문)를 돌려준다. 정리를 건너뛰었으면 `None`(위 「정지 때의 미체결 주문」) |
+| `stop_bot` | `bot_id: str` | `StopCleanup \| None` | 봇 중지. 스탑 주문을 만료시키고 미체결 주문을 취소한 결과(취소 건수·실패 건수·만료한 스탑 주문·조회 실패 여부)를 돌려준다. 정리를 건너뛰었으면 `None`(위 「정지 때의 미체결 주문」) |
 | `update_bot` | `bot_id: str, updates: dict` | `Bot` | 봇 설정 수정. **중지 상태에서만 가능** — RUNNING이면 `BotError` 발생. BotConfig는 frozen dataclass이므로 재생성 패턴 적용: 기존 config를 dict로 풀고 → updates 병합 → 새 BotConfig 생성 → Bot.config 교체 → DB 갱신. `budget` 키가 포함되면 `Treasury.deallocate()` + `Treasury.allocate()`로 예산 재조정. `strategy_id` 변경 시 StrategyRegistry 존재 확인 + exchange 호환성 검증 후 실행 코드도 함께 교체(아래 「전략 교체」). **`account_id`는 불변 필드** — updates에 현재 값과 다른 `account_id`가 포함되면 `BotImmutableFieldError`(안정 코드 `BOT_IMMUTABLE_FIELD`, validation 카테고리) 발생. 같은 값(no-op)·미포함은 통과 |
 
 **`account_id` 불변 정책 (#2282)**: 봇의 `account_id`는 생성 후 변경할 수 없다. treasury 예산은 옛 account 아래에 할당되고, broker credential도 옛 account에 바인딩되며, 포지션 격리도 account-bound이므로, `account_id`를 변경하면 이 자원들이 새 account로 재배치되지 않아 불일치가 발생한다. 단일 사용자 홈서버에서 복잡한 re-isolation(예산 이전·credential 재바인딩·포지션 마이그레이션)을 구현하는 대신, `account_id`를 `update_bot`의 불변 필드로 제약한다(YAGNI 안전 기본). 변경이 필요하면 봇을 삭제한 뒤 **새 `bot_id`로** 다시 만든다. 이는 Account의 불변 필드(`exchange`/`currency`/`trading_mode`/`broker_type`, `AccountImmutableFieldError`) 정책과 정합한다([account/04-account-service.md](../account/04-account-service.md) 참조). `_save_bot_config`의 UPSERT가 `account_id` 컬럼을 갱신하는 것(#2274, create/load 경로 persistence 일관성)은 그대로 유지되며, 제약은 `update_bot` ingress에서만 적용된다.
-| `delete_bot` | `bot_id: str, handle_positions: str = "keep"` | `None` | 봇 삭제. 실행 중이면 먼저 중지. STOPPED·ERROR면 남은 미체결 주문을 취소하고 스탑 주문을 만료시킨다(청산보다 먼저). `handle_positions="liquidate"` 시 TradeService를 통해 보유 종목 시장가 매도 주문 발행 후 삭제 진행. `"keep"`(기본)은 포지션 유지한 채 봇만 삭제. 이벤트 구독 해제 + VIRTUAL 계좌 봇의 VirtualExecutor 해제 + 시그널 키 폐기 + DB 레코드 삭제. `remove_bot`은 동일 기능의 별칭(alias) |
+| `delete_bot` | `bot_id: str, handle_positions: str = "keep"` | `None` | 봇 삭제. 실행 중이면 먼저 중지. STOPPED·ERROR면 스탑 주문을 만료시키고 남은 미체결 주문을 취소한다(청산보다 먼저). `handle_positions="liquidate"` 시 TradeService를 통해 보유 종목 시장가 매도 주문 발행 후 삭제 진행. `"keep"`(기본)은 포지션 유지한 채 봇만 삭제. 이벤트 구독 해제 + VIRTUAL 계좌 봇의 VirtualExecutor 해제 + 시그널 키 폐기 + DB 레코드 삭제. `remove_bot`은 동일 기능의 별칭(alias) |
 | `stop_all` | — | `None` | 모든 실행 중 봇 중지 + 재시작 태스크 취소. 미체결 주문을 취소하지 않는다. 시스템 셧다운 시 호출 |
 | `list_bots` | — | `list[dict[str, Any]]` | 봇 목록 조회 |
 | `get_bot` | `bot_id: str` | `Bot \| None` | 봇 조회. 없으면 None |

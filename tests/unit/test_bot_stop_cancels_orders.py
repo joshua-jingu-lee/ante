@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ante.bot import BotConfig, BotManager, BotStatus
+from ante.bot.manager import StopCleanup
 from ante.broker.fill_scheduler import business_date_kst
 from ante.core import Database, clock
 from ante.eventbus import EventBus
@@ -713,3 +714,107 @@ async def test_late_fill_after_stop_cancel_is_applied(rig: Rig) -> None:
     budget = treasury.get_budget(BOT)
     assert budget is not None
     assert budget.spent == 40_000.0
+
+
+# ── 리뷰 후속: 순서·재시작·조회 실패·서식·finally ──────
+
+
+async def test_stop_order_expires_before_cancel_wait(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _running(rig)
+    await rig.seed("ord-1")
+    await rig.register_stop(BOT, stop_price=9_000.0)
+    monkeypatch.setattr(rig.stops, "_is_in_session", lambda order, now: True)
+    original = rig.broker.cancel_order
+
+    async def _tick_then_cancel(broker_order_id: str) -> bool:
+        await rig.stops.on_price_update("005930", 8_000.0, account_id=ACCT)
+        return await original(broker_order_id)
+
+    rig.broker.cancel_order = _tick_then_cancel  # type: ignore[method-assign]
+
+    await rig.manager.stop_bot(BOT)
+
+    assert rig.events("request") == []
+    assert [e.reason for e in rig.events("stop_expired")] == ["bot_stopped"]
+    assert await rig.status("ord-1") == "cancelled"
+
+
+async def test_restart_during_cleanup_leaves_new_generation(rig: Rig) -> None:
+    await _running(rig)
+    await rig.seed("ord-1")
+    await rig.seed("ord-2")
+    old_stop = await rig.register_stop(BOT)
+    original = rig.broker.cancel_order
+    new_stop: list[str] = []
+
+    async def _restart_then_cancel(broker_order_id: str) -> bool:
+        if not new_stop:
+            await rig.manager.start_bot(BOT)
+            await rig.seed("ord-new")
+            new_stop.append(await rig.register_stop(BOT))
+        return await original(broker_order_id)
+
+    rig.broker.cancel_order = _restart_then_cancel  # type: ignore[method-assign]
+
+    cleanup = await rig.manager.stop_bot(BOT)
+
+    bot = rig.manager.get_bot(BOT)
+    assert bot is not None and bot.status == BotStatus.RUNNING
+    assert [e.stop_order_id for e in rig.events("stop_expired")] == [old_stop]
+    assert rig.stops.get_order(new_stop[0]) in rig.stops.active_orders
+    assert [e.order_id for e in rig.events("cancel")] == ["ord-1"]
+    assert await rig.status("ord-2") == "open"
+    assert await rig.status("ord-new") == "open"
+    assert cleanup is not None
+    assert (cleanup.cancelled, cleanup.failed) == (1, 0)
+
+
+async def test_open_order_lookup_failure_is_reported(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _running(rig)
+
+    async def _boom(account_id: str) -> list[Any]:
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(rig.tracker, "get_open_orders", _boom)
+
+    cleanup = await rig.manager.stop_bot(BOT)
+
+    assert cleanup is not None and cleanup.lookup_failed
+    [note] = rig.events("notify")
+    assert "열린 주문 조회 실패 — 직접 확인 필요" in note.message
+
+
+def test_summary_price_format_has_no_exponent() -> None:
+    orders = (
+        SimpleNamespace(symbol="005930", side="sell", stop_price=1_050_000.0),
+        SimpleNamespace(symbol="AAPL", side="buy", stop_price=12.35),
+    )
+    lines = StopCleanup(stop_orders=orders).summary_lines()  # type: ignore[arg-type]
+
+    assert "- 005930 sell stop 1,050,000" in lines
+    assert "- AAPL buy stop 12.35" in lines
+
+
+async def test_cleanup_error_still_closes_channel_and_clears_suppression(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    closed: list[tuple[str, str]] = []
+    rig.manager._signal_channel_registry = SimpleNamespace(  # type: ignore[assignment]
+        close_bot=lambda bot_id, reason: closed.append((bot_id, reason))
+    )
+    await _running(rig)
+
+    async def _boom(bot_id: str, reason: str) -> list[Any]:
+        raise RuntimeError("expire failed")
+
+    monkeypatch.setattr(rig.stops, "expire_for_bot", _boom)
+
+    await rig.manager.stop_bot(BOT, suppress_notification=True)
+
+    assert closed == [(BOT, "bot_stopped")]
+    assert BOT not in rig.manager._suppress_notification_bot_ids
+    assert rig.events("notify") == []

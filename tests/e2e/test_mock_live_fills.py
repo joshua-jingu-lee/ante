@@ -17,7 +17,9 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
+from contextlib import closing
 from dataclasses import dataclass
 from typing import Any
 
@@ -160,6 +162,18 @@ def _reconcile(daemon: DaemonHarness, case: LiveCase) -> dict[str, Any]:
     return dict(daemon.cli("broker", "reconcile", "--account", case.account_id))
 
 
+def _tracked_open_orders(daemon: DaemonHarness, case: LiveCase) -> int:
+    """데몬 DB의 주문 추적기에서 그 봇의 열린 주문 수(읽기 전용으로 연다)."""
+    uri = f"file:{daemon.config_dir / 'db' / 'ante.db'}?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM order_tracker"
+            " WHERE bot_id = ? AND status IN ('open', 'partially_filled')",
+            (case.bot_id,),
+        ).fetchone()
+    return int(row[0])
+
+
 def _fill_deadline(observed_at: float, polls: int) -> float:
     """예약이 보인 시각부터 ``polls``번째 폴까지 남은 기한(초, 하한 있음)."""
     deadline = observed_at + polls * DEFAULT_POLL_INTERVAL + POLL_MARGIN_SECONDS
@@ -255,8 +269,15 @@ def test_mock_live_fill_modes(daemon: DaemonHarness) -> None:
         assert budget["reserved"] == pytest.approx(case.order_amount), budget
         assert _fills(daemon, case)["total"] == 0
 
+    tracked = wait_until(
+        lambda: _tracked_open_orders(daemon, STOPPED),
+        lambda count: count == 1,
+        seconds=SUBMIT_DEADLINE_SECONDS,
+    )
+    assert tracked == 1
     stopped = daemon.cli("bot", "stop", STOPPED.bot_id)
     assert stopped["data"]["bot"]["status"] == "stopped", stopped
+    assert _tracked_open_orders(daemon, STOPPED) == 0
     stopped_trades = _trades(daemon, STOPPED)
     assert [t["status"] for t in stopped_trades] == ["cancelled"], stopped_trades
     assert _budget(daemon, STOPPED)["reserved"] == 0
