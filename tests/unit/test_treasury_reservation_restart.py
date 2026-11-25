@@ -20,8 +20,8 @@ from ante.eventbus.events import (
     OrderFailedEvent,
     OrderFilledEvent,
 )
-from ante.trade.order_tracker import OrderTracker
-from ante.treasury import Treasury
+from ante.trade.order_tracker import OPEN_STATUSES, OrderTracker
+from ante.treasury import Treasury, TreasuryDeallocateExceedsAvailableError
 
 ACCOUNT_ID = "domestic"
 BOT = "bot-a"
@@ -49,7 +49,9 @@ async def db(tmp_path: Path):
     await database.close()
 
 
-async def boot(db: Database, account_id: str = ACCOUNT_ID) -> Node:
+async def boot(
+    db: Database, account_id: str = ACCOUNT_ID, *, with_tracker: bool = True
+) -> Node:
     bus = EventBus()
     tracker = OrderTracker(db=db)
     await tracker.initialize()
@@ -59,32 +61,40 @@ async def boot(db: Database, account_id: str = ACCOUNT_ID) -> Node:
         account_id=account_id,
         buy_commission_rate=0.0,
         sell_commission_rate=0.0,
-        order_tracker=tracker,
+        order_tracker=tracker if with_tracker else None,
     )
     await treasury.initialize()
     return Node(bus, tracker, treasury)
 
 
-async def funded(db: Database, account_id: str = ACCOUNT_ID) -> Node:
-    node = await boot(db, account_id)
+async def funded(
+    db: Database, account_id: str = ACCOUNT_ID, *, with_tracker: bool = True
+) -> Node:
+    node = await boot(db, account_id, with_tracker=with_tracker)
     await node.treasury.set_account_balance(ALLOCATED)
     await node.treasury.allocate(BOT, ALLOCATED)
     return node
 
 
-async def reserve(node: Node, *, tracked: bool = False) -> None:
-    assert await node.treasury.reserve_for_order(BOT, ORDER, RESERVED)
+async def reserve(
+    node: Node,
+    *,
+    tracked: bool = False,
+    order_id: str = ORDER,
+    amount: float = RESERVED,
+) -> None:
+    assert await node.treasury.reserve_for_order(BOT, order_id, amount)
     if tracked:
         await node.tracker.open(
-            order_id=ORDER,
+            order_id=order_id,
             account_id=node.treasury.account_id,
             bot_id=BOT,
             strategy_id="s1",
-            broker_order_id=f"bk-{ORDER}",
+            broker_order_id=f"bk-{order_id}",
             symbol="005930",
             side="buy",
             order_type="limit",
-            ordered_qty=float(QTY),
+            ordered_qty=amount / PRICE,
             submitted_date="2026-11-23",
             order_price=PRICE,
         )
@@ -524,7 +534,11 @@ async def test_failed_reserve_after_bot_stop_took_it_does_not_revert(
                 BotStoppedEvent(account_id=ACCOUNT_ID, bot_id=BOT)
             )
         )
-        await asyncio.sleep(0)
+        for _ in range(200):
+            if not node.treasury.get_reservations(BOT):
+                break
+            await asyncio.sleep(0.01)
+        assert node.treasury.get_reservations(BOT) == {}
         gate.set()
         with pytest.raises(RuntimeError):
             await reserving
@@ -535,6 +549,7 @@ async def test_failed_reserve_after_bot_stop_took_it_does_not_revert(
     assert await full_row(db) == (ALLOCATED, 0.0, 0.0)
     assert node.treasury.get_reservations(BOT) == {}
     assert await stored(db) == {}
+    assert await stop_releases(db) == [RESERVED]
 
 
 async def test_failed_partial_fill_after_bot_stop_took_rest_stays_consistent(
@@ -688,3 +703,226 @@ async def test_release_budget_state_failure_drops_reservations(
     assert node.treasury.get_budget(BOT) is None
     assert node.treasury.unallocated == unallocated + ALLOCATED
     assert await stored(db) == {}
+
+
+async def stop(node: Node) -> None:
+    await node.bus.publish(BotStoppedEvent(account_id=ACCOUNT_ID, bot_id=BOT))
+
+
+async def stop_releases(db: Database) -> list[float]:
+    rows = await db.fetch_all(
+        "SELECT amount FROM treasury_transactions "
+        "WHERE transaction_type = 'bot_stopped_release'"
+    )
+    return [float(r["amount"]) for r in rows]
+
+
+async def stop_descriptions(db: Database) -> list[str]:
+    rows = await db.fetch_all(
+        "SELECT description FROM treasury_transactions "
+        "WHERE transaction_type = 'bot_stopped_release'"
+    )
+    return [str(r["description"]) for r in rows]
+
+
+def test_open_order_statuses_match_tracker() -> None:
+    from ante.treasury.treasury import _OPEN_ORDER_STATUSES
+
+    assert set(_OPEN_ORDER_STATUSES) == {str(s) for s in OPEN_STATUSES}
+
+
+async def test_bot_stop_keeps_open_order_and_releases_untracked(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    await reserve(node, order_id=OTHER, amount=OTHER_AMOUNT)
+
+    await stop(node)
+
+    assert node.treasury.get_reservations(BOT) == {ORDER: RESERVED}
+    assert await stored(db) == {ORDER: RESERVED}
+    assert_budget(budget_of(node), ALLOCATED - RESERVED, RESERVED)
+    assert await budget_row(db) == pytest.approx((ALLOCATED - RESERVED, RESERVED))
+    assert await stop_releases(db) == [OTHER_AMOUNT]
+    assert await stop_descriptions(db) == ["1건 예약 해제, 1건 유지(열린 주문)"]
+
+
+async def test_bot_stop_keeps_partially_filled_remaining(db: Database) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    first = 4 * PRICE
+    await fill(node, 4, 4, PRICE)
+
+    await stop(node)
+
+    assert node.treasury.get_reservations(BOT) == {ORDER: RESERVED - first}
+    assert await stored(db) == {ORDER: RESERVED - first}
+    assert_budget(budget_of(node), ALLOCATED - RESERVED, RESERVED - first, first)
+    assert await stop_releases(db) == []
+
+
+@pytest.mark.parametrize("status", ["cancelled", "expired", "filled"])
+async def test_bot_stop_releases_terminal_tracked_order(
+    db: Database, status: str
+) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    if status == "filled":
+        await node.tracker.record_fill(ORDER, float(QTY), PRICE)
+    else:
+        await node.tracker.mark_terminal(ORDER, status)
+
+    await stop(node)
+
+    assert node.treasury.get_reservations(BOT) == {}
+    assert await stored(db) == {}
+    assert_budget(budget_of(node), ALLOCATED, 0.0)
+    assert await stop_releases(db) == [RESERVED]
+    assert await stop_descriptions(db) == ["1건 예약 해제, 0건 유지(열린 주문)"]
+
+
+async def test_deallocate_after_stop_cannot_take_kept_reservation(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    await stop(node)
+    available = ALLOCATED - RESERVED
+
+    with pytest.raises(TreasuryDeallocateExceedsAvailableError):
+        await node.treasury.deallocate(BOT, available + 1)
+    await node.treasury.deallocate(BOT, available)
+
+    budget = budget_of(node)
+    assert budget.available == 0.0
+    assert budget.reserved == RESERVED
+    assert node.treasury.get_reservations(BOT) == {ORDER: RESERVED}
+
+
+async def test_fill_after_stop_settles_from_kept_reservation(
+    db: Database, caplog: pytest.LogCaptureFixture
+) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    await stop(node)
+    cost = QTY * 9_000.0
+
+    with caplog.at_level(logging.WARNING, logger="ante.treasury.treasury"):
+        await fill(node, QTY, QTY, 9_000.0)
+
+    assert_budget(budget_of(node), ALLOCATED - cost, 0.0, cost)
+    assert await stored(db) == {}
+    shortfalls = [
+        r for r in caplog.records if "market_order_reserve_shortfall" in r.getMessage()
+    ]
+    assert shortfalls == []
+
+
+@pytest.mark.parametrize("event_type", [OrderCancelledEvent, OrderFailedEvent])
+async def test_cancel_or_fail_after_stop_releases_kept_reservation(
+    db: Database, event_type: type
+) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    await stop(node)
+
+    await node.bus.publish(
+        event_type(account_id=ACCOUNT_ID, order_id=ORDER, bot_id=BOT)
+    )
+
+    assert_budget(budget_of(node), ALLOCATED, 0.0)
+    assert node.treasury.get_reservations(BOT) == {}
+    assert await stored(db) == {}
+
+
+async def test_bot_stop_keeps_reservation_when_tracker_lookup_fails(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    await reserve(node, order_id=OTHER, amount=OTHER_AMOUNT)
+    original_get = node.tracker.get
+
+    async def failing_get(order_id: str):
+        if order_id == ORDER:
+            raise RuntimeError("io")
+        return await original_get(order_id)
+
+    with patch.object(node.tracker, "get", failing_get):
+        await stop(node)
+
+    assert node.treasury.get_reservations(BOT) == {ORDER: RESERVED}
+    assert await stored(db) == {ORDER: RESERVED}
+    assert await stop_releases(db) == [OTHER_AMOUNT]
+
+
+async def test_bot_stop_without_tracker_releases_all(db: Database) -> None:
+    node = await funded(db, with_tracker=False)
+    await reserve(node, tracked=True)
+    await reserve(node, order_id=OTHER, amount=OTHER_AMOUNT)
+
+    await stop(node)
+
+    assert node.treasury.get_reservations(BOT) == {}
+    assert await stored(db) == {}
+    assert_budget(budget_of(node), ALLOCATED, 0.0)
+    assert await stop_releases(db) == [RESERVED + OTHER_AMOUNT]
+
+
+async def test_kept_reservation_survives_restart_and_settles_late_fill(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    await stop(node)
+    cost = QTY * 9_000.0
+
+    node = await boot(db)
+    assert node.treasury.get_reservations(BOT) == {ORDER: RESERVED}
+    assert budget_of(node).reserved == RESERVED
+    await fill(node, QTY, QTY, 9_000.0)
+
+    assert_budget(budget_of(node), ALLOCATED - cost, 0.0, cost)
+    assert await stored(db) == {}
+
+
+async def test_bot_stop_with_only_open_orders_logs_nothing(db: Database) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+
+    await stop(node)
+
+    assert_budget(budget_of(node), ALLOCATED - RESERVED, RESERVED)
+    assert await stop_releases(db) == []
+
+
+async def test_bot_stop_releases_amount_settled_during_tracker_lookup(
+    db: Database,
+) -> None:
+    node = await funded(db)
+    await reserve(node, tracked=True)
+    first = 4 * PRICE
+    await node.tracker.record_fill(ORDER, 4.0, PRICE)
+    await node.tracker.mark_terminal(ORDER, "cancelled")
+    reached, gate = asyncio.Event(), asyncio.Event()
+    original_get = node.tracker.get
+
+    async def gated_get(order_id: str):
+        if not reached.is_set():
+            reached.set()
+            await gate.wait()
+        return await original_get(order_id)
+
+    with patch.object(node.tracker, "get", gated_get):
+        stopping = asyncio.create_task(stop(node))
+        await asyncio.wait_for(reached.wait(), timeout=5)
+        await node.treasury._on_order_filled(buy_fill_event(4, 4))
+        assert node.treasury.get_reservations(BOT) == {ORDER: RESERVED - first}
+        gate.set()
+        await stopping
+
+    assert_budget(budget_of(node), ALLOCATED - first, 0.0, first)
+    assert await full_row(db) == pytest.approx((ALLOCATED - first, 0.0, first))
+    assert node.treasury.get_reservations(BOT) == {}
+    assert await stop_releases(db) == [RESERVED - first]

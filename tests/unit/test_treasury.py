@@ -2334,10 +2334,10 @@ class TestPartialFillSettlement:
         assert budget.available == pytest.approx(750_000.0)
         _assert_treasury_invariant(treasury, "bot1")
 
-    async def test_partial_then_bot_stopped_releases_only_remaining(
+    async def test_partial_then_bot_stopped_keeps_open_remaining(
         self, tracked_treasury, order_tracker, eventbus
     ):
-        """부분체결 후 봇 중지 시 각 주문의 잔여 예약만 회수."""
+        """봇 정지는 열린 주문의 잔여 예약을 남기고, 그 주문의 취소·실패가 회수한다."""
         treasury = tracked_treasury
         await treasury.allocate("bot1", 1_000_000.0)
         await treasury.reserve_for_order("bot1", "ord1", 300_000.0)
@@ -2361,8 +2361,26 @@ class TestPartialFillSettlement:
             )
         )
 
-        # 봇 중지 → ord1 잔여(300,000-100,000=200,000) + ord2 전액(200,000) 회수
+        # 봇 정지 → 두 주문이 열려 있어 ord1 잔여 200,000 과 ord2 200,000 이 남는다
         await eventbus.publish(BotStoppedEvent(bot_id="bot1", account_id=ACCOUNT_ID))
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.spent == pytest.approx(100_000.0)
+        assert budget.reserved == pytest.approx(400_000.0)
+        assert budget.available == pytest.approx(500_000.0)
+        assert treasury.get_reservations("bot1") == pytest.approx(
+            {"ord1": 200_000.0, "ord2": 200_000.0}
+        )
+        _assert_treasury_invariant(treasury, "bot1")
+
+        # 정지 뒤 ord1 취소 · ord2 실패가 각자의 잔여 예약을 회수한다
+        await eventbus.publish(
+            OrderCancelledEvent(order_id="ord1", bot_id="bot1", account_id=ACCOUNT_ID)
+        )
+        await eventbus.publish(
+            OrderFailedEvent(order_id="ord2", bot_id="bot1", account_id=ACCOUNT_ID)
+        )
 
         budget = treasury.get_budget("bot1")
         assert budget is not None

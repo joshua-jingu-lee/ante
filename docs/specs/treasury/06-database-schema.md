@@ -10,7 +10,7 @@
 - `bot_budgets.account_id`: 소속 계좌 ID, fallback default 없음
 - `treasury_transactions`: 자금 거래 이력 (감사용)
 - `treasury_transactions.account_id`: 소속 계좌 ID, fallback default 없음
-- `treasury_transactions.transaction_type`: transaction_type vocabulary (5-value, SSOT): 'allocate'             : 봇에 예산 할당 'deallocate'           : 봇에서 예산 회수 'release'              : 봇 삭제 시 할당 예산 전액 환수 'fill'                 : 주문 체결로 인한 자금 이동 'bot_stopped_release'  : 봇 중지 시 잔여 예약 자금 환수 코드 SSOT: src/ante/treasury/treasury.py::TRANSACTION_TYPE_VOCABULARY
+- `treasury_transactions.transaction_type`: transaction_type vocabulary (5-value, SSOT): 'allocate'             : 봇에 예산 할당 'deallocate'           : 봇에서 예산 회수 'release'              : 봇 삭제 시 할당 예산 전액 환수 'fill'                 : 주문 체결로 인한 자금 이동 'bot_stopped_release'  : 봇 정지 때 회수한 잔여 예약(열린 주문의 예약 제외) 코드 SSOT: src/ante/treasury/treasury.py::TRANSACTION_TYPE_VOCABULARY
 - `treasury_fill_dedup`: 체결 이벤트 멱등 dedup (#1957) OrderFilledEvent 의 outbox at-least-once 재전달에 대해 Treasury 정산을 진짜 exactly-once-effect 로 만든다. fill_dedup_key(= #1949 결정적 키)를 PRIMARY KEY 로 두고, _on_order_filled 가 정산 트랜잭션 안에서 INSERT OR IGNORE ... RETURNING 으로 신규 여부를 판정한다(행 반환=신규=정산 1회, 충돌=이미 처리=정산 0회 추가). dedup-insert ⟺ 정산이 1:1 원자 결합된다.
 - `treasury_fill_dedup.fill_dedup_key`: order_id:canonical(confirmed_cumulative)
 - `treasury_state`: 계좌별 상태 저장
