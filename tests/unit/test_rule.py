@@ -31,6 +31,7 @@ from ante.rule import (
     UnrealizedLossLimitRule,
 )
 from ante.rule.exceptions import RuleConfigError
+from tests.unit._rule_engine_helpers import StubTreasury
 
 
 class _UserBaseException(BaseException):
@@ -808,6 +809,7 @@ class TestRuleEngineEventBus:
     @pytest.fixture
     async def engine(self, eventbus, mock_account_service):
         engine = RuleEngine(
+            treasury=StubTreasury(),
             eventbus=eventbus,
             account_id="domestic",
             account_service=mock_account_service,
@@ -4956,6 +4958,7 @@ class TestRuleEngineEventBus:
 
         bus = _FailingBus()
         engine = RuleEngine(
+            treasury=StubTreasury(),
             eventbus=bus,  # type: ignore[arg-type]
             account_id="domestic",
             account_service=mock_account_service,
@@ -4999,6 +5002,7 @@ class TestRuleEngineEventBus:
         }
         eventbus = EventBus()
         engine = RuleEngine(
+            treasury=StubTreasury(),
             eventbus=eventbus,
             account_id="domestic",
             account_service=mock_account_service,
@@ -5904,7 +5908,8 @@ class TestRuleEngineTreasuryIntegration:
         engine = RuleEngine(
             eventbus=EventBus(), treasury=mock_treasury, account_id="acc-test"
         )
-        data = await engine._query_treasury_data()
+        data, failure = await engine._query_treasury_data()
+        assert failure is None
         assert data["total_pnl"] == 500000.0
         assert data["total_asset"] == 100000000.0
         assert data["total_exposure"] == 20000000.0
@@ -5912,10 +5917,11 @@ class TestRuleEngineTreasuryIntegration:
         assert data["daily_pnl"] == -300000.0
 
     async def test_query_treasury_data_none(self):
-        """Treasury가 None이면 기본값 반환."""
+        """Treasury가 None이면 기본값과 실패 표시를 반환."""
         engine = RuleEngine(eventbus=EventBus(), treasury=None, account_id="acc-test")
-        data = await engine._query_treasury_data()
+        data, failure = await engine._query_treasury_data()
         assert all(v == 0.0 for v in data.values())
+        assert failure == "treasury_unavailable"
 
     async def test_query_treasury_data_exception(self, mock_treasury):
         """Treasury 조회 실패 시 기본값 fallback."""
@@ -5925,8 +5931,9 @@ class TestRuleEngineTreasuryIntegration:
         engine = RuleEngine(
             eventbus=EventBus(), treasury=mock_treasury, account_id="acc-test"
         )
-        data = await engine._query_treasury_data()
+        data, failure = await engine._query_treasury_data()
         assert all(v == 0.0 for v in data.values())
+        assert failure == "treasury_unavailable"
 
 
 # ── RuleEngine.start() 시그니처 회귀 테스트 ──────────────
@@ -5968,6 +5975,7 @@ class TestRuleEngineUnrealizedPnl:
     @pytest.fixture
     def engine(self, eventbus, mock_account_service, mock_trade_service):
         return RuleEngine(
+            treasury=StubTreasury(),
             eventbus=eventbus,
             account_id="domestic",
             account_service=mock_account_service,
@@ -6025,7 +6033,7 @@ class TestRuleEngineUnrealizedPnl:
 
     @pytest.mark.asyncio
     async def test_calculate_unrealized_pnl_exception(self, engine, mock_trade_service):
-        """조회 실패 시 0.0 반환."""
+        """조회 실패 시 실패 표시 None 반환."""
         mock_trade_service.get_positions = AsyncMock(
             side_effect=RuntimeError("DB error")
         )
@@ -6034,7 +6042,7 @@ class TestRuleEngineUnrealizedPnl:
             current_price=50000.0,
             order_symbol="005930",
         )
-        assert result == 0.0
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_order_request_injects_unrealized_pnl(
@@ -6314,6 +6322,7 @@ class TestRuleEngineWarnEventBus:
     @pytest.fixture
     async def engine(self, eventbus, mock_account_service):
         engine = RuleEngine(
+            treasury=StubTreasury(),
             eventbus=eventbus,
             account_id="domestic",
             account_service=mock_account_service,

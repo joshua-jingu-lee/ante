@@ -127,3 +127,15 @@ OrderRequestEvent preflight 도메인 검증(`side`/`order_type`/`symbol`/`price
 - `unrecovered_buy_guard_min_age`(기본 `60.0`)와 `allow_unrecovered_buy_overlap`(계좌 기본, 기본 `false`)은 `RuleEngine` 생성자 인자이며 `RuleEngineManager`를 통해 전파된다. 봇/전략 단위 opt-out은 `RuleEngine.set_unrecovered_buy_overlap(bot_id, allow)`로 등록하며, 미등록 봇은 계좌 기본값을 따른다.
 
 **fail-closed (audit trail 보존, #1302 invariant)**: 가드 활성 중 `OrderTracker.get_open_orders_for` 또는 `get_positions` 조회가 **예외**를 던지면, 가드 게이트는 이를 try/except로 삼켜 허용(silent-pass)하지 **않는다**. 예외는 `_on_order_request`의 catch-all로 전파되어 fail-closed generic `OrderRejectedEvent`로 audit trail이 잠긴다. 정상 DB의 일시적 조회 예외에서도 정상 주문이 보수적으로 reject될 수 있으나(과도 거부 trade-off), #2314 캐스케이드 회피를 외부 검출/통과 완전성보다 우선하는 의도적 안전 선택이다.
+
+### 판정 입력 조회 실패 (#3047)
+
+> 소스: `RuleEngine._on_order_request` (`src/ante/rule/engine.py`)
+
+미복구 매수 가드 뒤, RuleContext를 만들기 전에 엔진은 룰 판정 입력을 조회한다. Treasury에서 `get_summary`·`get_budget(bot_id)`(`bot_id`가 있을 때)·`get_daily_snapshot(전일)`·`get_latest_snapshot`을, TradeService에서 봇 포지션(`get_positions`)을 읽는다. 조회는 `buy`·`sell` 모두 수행한다.
+
+- **매수 거부**: `side == "buy"`이고 Treasury가 주입되지 않았거나 Treasury 조회 중 하나라도 예외를 던지면 `_build_safe_rejected_event(reason="account_not_ready: treasury_unavailable")`와 `build_not_ready_notification`을 한 건씩 발행하고 룰 평가 없이 return한다. 포지션 조회가 예외를 던지면 같은 모양으로 사유가 `account_not_ready: positions_unavailable`이다. 둘 다 실패하면 사유는 `treasury_unavailable`이다.
+- **룰 구성과 무관**: 계좌·전략에 켜진 룰이 그 값을 읽는지와 상관없이 거부한다. 손실 룰을 하나도 켜지 않은 계좌와 가상 계좌도 조회 장애 동안 매수가 막히고, 그 순간 트리거된 스탑 매수는 다시 걸리지 않는다(readiness 차단과 같은 성질).
+- **사유 토큰은 둘뿐**: 어느 조회가 실패했는지는 사유에 담지 않고 warning 로그로 남긴다. 알림의 중복 묶음 키가 장애 동안 바뀌지 않게 하기 위해서다.
+- **매도·정정은 불변**: `side == "sell"`(청산 매도·스탑 매도 트리거 포함)과 `OrderModifyEvent`는 실패한 값을 `0.0`으로 채워 룰을 평가한다.
+- **실패가 아닌 것**: 조회가 성공했지만 값이 없는 경우(전일·최신 스냅샷 없음, 봇 예산 없음)와 TradeService 미주입은 지금처럼 `0.0`으로 채우며 거부 사유가 아니다. 스냅샷이 없을 때의 처리는 #2622에서 정한다.

@@ -39,6 +39,7 @@ from tests.unit._readiness_gate_helpers import (
     not_ready_registry,
     ready_registry,
 )
+from tests.unit._rule_engine_helpers import StubTreasury
 
 ACCOUNT = "acc-001"
 BOT = "bot1"
@@ -148,6 +149,7 @@ class TestLayer1RuleEngine:
             eventbus=eventbus,
             account_id=ACCOUNT,
             account_service=_account_service(account),
+            treasury=StubTreasury(),
             account=account,
             runtime_readiness=registry,
         )
@@ -319,6 +321,7 @@ class TestLayer1RuleEngine:
             eventbus=bus,
             account_id=ACCOUNT,
             account_service=None,  # status 소스 미구성 — status 축 비활성.
+            treasury=StubTreasury(),
             account=account,
             runtime_readiness=ready_registry(ACCOUNT),
         )

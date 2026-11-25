@@ -36,6 +36,7 @@ from ante.eventbus.events import (
     OrderValidatedEvent,
 )
 from ante.rule import RuleEngine
+from tests.unit._rule_engine_helpers import StubTreasury, StubTreasuryManager
 
 ACCOUNT = "domestic"
 BOT = "bot1"
@@ -179,6 +180,7 @@ def _build_engine(
     return RuleEngine(
         eventbus=eventbus,
         account_id=ACCOUNT,
+        treasury=StubTreasury(),
         trade_service=trade_service,
         order_tracker=order_tracker,
         unrecovered_buy_guard_min_age=min_age,
@@ -683,6 +685,7 @@ class TestRuleEngineManagerPropagatesGuardConfig:
         manager = RuleEngineManager(
             eventbus=eventbus,
             account_service=account_service,
+            treasury_manager=StubTreasuryManager(),  # type: ignore[arg-type]
             trade_service=trade,  # type: ignore[arg-type]
             order_tracker=tracker,  # type: ignore[arg-type]
             unrecovered_buy_guard_min_age=min_age,
