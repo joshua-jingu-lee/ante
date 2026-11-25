@@ -99,9 +99,6 @@ jobs:
               }
 
               const prLine = summary.prNumber ? `- PR: #${summary.prNumber}` : "- PR: n-a";
-              const epicLine = summary.epicNumber
-                ? `- epic: #${summary.epicNumber} (${summary.epicStatus})`
-                : "- epic: n-a";
 
               await github.rest.issues.createComment({
                 owner,
@@ -112,7 +109,6 @@ jobs:
                   `${prLine}\n` +
                   `- issue checklist: ${summary.checkboxUpdated ? "updated" : "unchanged"}\n` +
                   `- issue state: ${summary.issueClosed ? "closed" : "already-closed"}\n` +
-                  `${epicLine}\n` +
                   "- source: post-merge.yml",
               });
             }
@@ -271,54 +267,10 @@ jobs:
                 issueClosed = true;
               }
 
-              const epicMatch = originalBody.match(/(?:에픽|Epic)\s*:\s*#(\d+)/i);
-              if (!epicMatch) {
-                await addPostMergeComment(issueNumber, {
-                  prNumber: pr?.number,
-                  checkboxUpdated,
-                  issueClosed,
-                });
-                return;
-              }
-
-              const epicNumber = Number(epicMatch[1]);
-              const epic = await github.rest.issues.get({ owner, repo, issue_number: epicNumber });
-              const epicBody = epic.data.body || "";
-              const updatedEpicBody = epicBody.replace(
-                new RegExp(`- \\[ \\](.*#${issueNumber}\\b)`, "g"),
-                "- [x]$1",
-              );
-              let epicChecklistUpdated = false;
-              let epicClosed = false;
-
-              if (updatedEpicBody !== epicBody) {
-                await github.rest.issues.update({
-                  owner,
-                  repo,
-                  issue_number: epicNumber,
-                  body: updatedEpicBody,
-                });
-                epicChecklistUpdated = true;
-              }
-
-              if (!updatedEpicBody.match(/^- \[ \]/m) && epic.data.state !== "closed") {
-                await github.rest.issues.update({
-                  owner,
-                  repo,
-                  issue_number: epicNumber,
-                  state: "closed",
-                });
-                epicClosed = true;
-              }
-
               await addPostMergeComment(issueNumber, {
                 prNumber: pr?.number,
                 checkboxUpdated,
                 issueClosed,
-                epicNumber,
-                epicStatus:
-                  `${epicChecklistUpdated ? "checklist-updated" : "checklist-unchanged"}, ` +
-                  `${epicClosed ? "closed" : "open-or-already-closed"}`,
               });
             }
 
