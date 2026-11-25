@@ -112,8 +112,8 @@ type마다 첫 항목의 원인(규칙이 읽지 않는 key, 범위 밖 값, 비
 `rule update`는 저장하기 전에 사전이 아닌 항목, 해시할 수 없는 `type`의 항목, 같은 type의 둘째 이후
 항목 가운데 룰로 만들 수 없는 것을 저장값에서 버리므로, 이 셋으로 막힌 계좌는 어느 type으로든 한 번
 하면 풀린다. 같은 type의 멀쩡한 둘째 이후 항목과 type이 없거나 등록되지 않은 항목은 남는다. 버린 항목은
-경고 로그(데몬 경로에서는 운영자 알림도)로 드러나고, 원문은 `ante config history`의 이전 값에 남는다
-(판정의 세부는 [07-rule-engine-core.md](07-rule-engine-core.md)).
+경고 로그(데몬 경로에서는 운영자 알림도)로 드러나고, 원문은 `ante config history`의 이전 값(seed에서
+읽었으면 설정 파일)에 남는다(판정의 세부는 [07-rule-engine-core.md](07-rule-engine-core.md)).
 런타임 수정은 항상 dynamic_config에 기록한다.
 
 ### 전략별 룰

@@ -653,8 +653,8 @@ async def test_dropped_item_is_logged_once_without_values(db, caplog) -> None:
     assert len(warnings) == 1
     message = warnings[0].getMessage()
     assert "acc1" in message
-    assert "index=1" in message
-    assert "index=2" in message
+    assert "stored_index=1" in message
+    assert "stored_index=2" in message
     assert "item=int" in message
     assert "item=dict" in message
     assert "type=list" in message
@@ -667,6 +667,7 @@ async def test_dropped_item_is_logged_once_without_values(db, caplog) -> None:
     assert "acc1" in note.message
     assert "2건" in note.message
     assert "ante config history accounts.acc1.rules" in note.message
+    assert "경고 로그에서 위치를 확인" in note.message
     for marker in ("9876543", "7.0371", "0.0371"):
         assert marker not in note.message
         assert marker not in note.title

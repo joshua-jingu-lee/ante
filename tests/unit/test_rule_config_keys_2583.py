@@ -877,7 +877,7 @@ async def test_second_broken_item_of_the_same_type_is_dropped(
     assert len(judged) == (0 if "priority" in broken else 1)
     for record in judged:
         assert record.exc_info is not None
-        assert "index=1" in record.getMessage()
+        assert "stored_index=1" in record.getMessage()
     drop_log = "\n".join(
         caplog.handler.format(r) for r in caplog.records if r.name == DROPPED_LOGGER
     )

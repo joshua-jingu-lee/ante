@@ -81,7 +81,8 @@ def _is_unwritable(
     except Exception:
         rule_type = item.get("type")
         logger.debug(
-            "저장된 규칙 항목을 규칙으로 만들 수 없다고 판정: index=%d, rule_type=%s",
+            "저장된 규칙 항목을 규칙으로 만들 수 없다고 판정: "
+            "stored_index=%d, rule_type=%s",
             index,
             rule_type if isinstance(rule_type, str) else None,
             exc_info=True,
@@ -125,7 +126,7 @@ def _describe_dropped(dropped: list[tuple[int, Any]]) -> str:
         type_name = type(field).__name__ if isinstance(item, dict) else "-"
         rule_type = field if isinstance(field, str) else None
         parts.append(
-            f"index={index} item={type(item).__name__} type={type_name} "
+            f"stored_index={index} item={type(item).__name__} type={type_name} "
             f"rule_type={rule_type}"
         )
     return "; ".join(parts)
@@ -149,7 +150,7 @@ async def _report_dropped(
             message=(
                 f"계좌 {account_id} 의 거래 규칙을 저장하면서 규칙으로 만들 수 없고 "
                 f"rule update로도 고칠 수 없는 항목 {len(dropped)}건을 버렸습니다. "
-                "오류 로그에서 위치를 확인하고, 원문은 "
+                "경고 로그에서 위치를 확인하고, 원문은 "
                 f"ante config history {key} 의 이전 값에서 확인하세요."
             ),
             category="system",
