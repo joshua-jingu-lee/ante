@@ -616,7 +616,7 @@ class Treasury:
         self, bot_id: str, order_id: str, amount: float
     ) -> bool:
         """주문 제출 시 자금 예약."""
-        if amount <= 0:
+        if not math.isfinite(amount) or amount <= 0:
             raise ValueError("amount must be positive")
         if order_id in self._reservations:
             raise DuplicateReservationError(order_id)
@@ -922,7 +922,10 @@ class Treasury:
             total_reserve_d = reserve_basis + commission_d
             total_reserve_market_buy = float(total_reserve_d)
 
-            if total_reserve_market_buy <= 0:
+            if (
+                not math.isfinite(total_reserve_market_buy)
+                or total_reserve_market_buy <= 0
+            ):
                 await self._eventbus.publish(
                     OrderRejectedEvent(
                         order_id=event.order_id,
@@ -1022,7 +1025,7 @@ class Treasury:
         total_reserve = estimated_cost + commission_estimate
 
         if event.side == "buy":
-            if total_reserve <= 0:
+            if not math.isfinite(total_reserve) or total_reserve <= 0:
                 await self._eventbus.publish(
                     OrderRejectedEvent(
                         order_id=event.order_id,

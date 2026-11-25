@@ -435,6 +435,27 @@ class TestReservation:
         with pytest.raises(ValueError, match="amount must be positive"):
             await treasury.reserve_for_order("bot1", "ord1", -100_000.0)
 
+    @pytest.mark.parametrize("amount", [float("nan"), float("inf"), float("-inf")])
+    async def test_reserve_non_finite_amount_raises_without_change(
+        self, db, treasury, amount
+    ):
+        """#3064: NaN·±Inf 금액은 예산·예약·DB 행을 바꾸지 않고 ValueError로 거부."""
+        await treasury.allocate("bot1", 1_000_000.0)
+        with pytest.raises(ValueError, match="amount must be positive"):
+            await treasury.reserve_for_order("bot1", "ord1", amount)
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.available == 1_000_000.0
+        assert budget.reserved == 0.0
+        assert treasury.get_reservations("bot1") == {}
+        row = await db.fetch_one(
+            "SELECT available, reserved FROM bot_budgets WHERE bot_id = ?", ("bot1",)
+        )
+        assert row is not None
+        assert (row["available"], row["reserved"]) == (1_000_000.0, 0.0)
+        rows = await db.fetch_all("SELECT order_id FROM treasury_reservations")
+        assert rows == []
+
     async def test_reserve_insufficient(self, treasury):
         """가용 예산 부족 시 예약 실패."""
         await treasury.allocate("bot1", 100_000.0)
@@ -1587,6 +1608,114 @@ class TestMarketBuyQuoteResolver:
         assert budget is not None
         assert budget.reserved == 0.0
         assert budget.available == 1_000_000.0
+
+    async def test_market_buy_overflowing_reserve_rejected_as_invalid(
+        self, db, eventbus
+    ):
+        """#3064: float 변환이 inf가 되는 시장가 예약 금액은 reserve_amount_invalid."""
+
+        async def resolver(symbol: str) -> float:
+            return 1e200
+
+        t = await self._make_treasury_with_buffer(
+            db, eventbus, buffer="0", resolver=resolver
+        )
+        await t.allocate("bot1", 1_000_000.0)
+
+        rejected: list = []
+        approved: list = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-overflow-mkt",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="A",
+                side="buy",
+                quantity=1e200,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert approved == []
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith("reserve_amount_invalid")
+        budget = t.get_budget("bot1")
+        assert budget is not None
+        assert budget.reserved == 0.0
+        assert budget.available == 1_000_000.0
+
+
+class TestLimitBuyOverflowingReserve:
+    """#3064: 수수료율 0에서 곱이 넘쳐 NaN이 되는 지정가 매수 예약 금액."""
+
+    @pytest.mark.parametrize(("quantity", "price"), [(1e200, 1e200), (10.0, 1e308)])
+    async def test_rejected_as_invalid_and_next_buy_approved(
+        self, db, eventbus, quantity, price
+    ):
+        t = Treasury(
+            db=db,
+            eventbus=eventbus,
+            account_id=ACCOUNT_ID,
+            currency=CURRENCY,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            runtime_readiness=_gate_ready_registry(),
+        )
+        await t.initialize()
+        await t.set_account_balance(10_000_000.0)
+        await t.allocate("bot1", 1_000_000.0)
+
+        rejected: list = []
+        approved: list = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-overflow",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=quantity,
+                price=price,
+                order_type="limit",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert approved == []
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith("reserve_amount_invalid")
+        budget = t.get_budget("bot1")
+        assert budget is not None
+        assert budget.available == 1_000_000.0
+        assert budget.reserved == 0.0
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-normal",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=1.0,
+                price=1000.0,
+                order_type="limit",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(rejected) == 1
+        assert len(approved) == 1
+        assert approved[0].reserved_amount == 1000.0
+        assert budget.reserved == 1000.0
+        assert budget.available == 999_000.0
 
 
 # -- #1333 shortfall 정산 -----
