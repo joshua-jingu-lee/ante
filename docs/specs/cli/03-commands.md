@@ -430,9 +430,10 @@ ante strategy summary <strategy_id> --period daily|weekly|monthly  # 전략 기�
 `strategy list`의 `--status` 값이 `StrategyStatus`의 값에 없으면 DB 접근 이전에
 `STRATEGY_VALIDATION_ERROR` 에러 코드와 exit code 1로 거부한다.
 
-`strategy info`는 전략의 `get_params()`가 사전이 아니거나 `get_risks()`가 리스트·튜플이
-아니어도 성공한다. text 모드는 그 값이 비어 있지 않으면 `repr` 한 줄로 내고, JSON 모드는
-그 값을 바꾸지 않는다. 전략 파일을 로드·인스턴스화하거나 메타를 읽다 실패하면 그 키들을 빼고
+`strategy info`는 전략의 `get_params()`가 Mapping이 아니거나 `get_risks()`가 리스트·튜플이
+아니어도, 그 값이 내장 타입만으로 이루어져 있으면 성공한다. text 모드는 그 값이 비어 있지
+않으면 `repr` 한 줄로 내고, JSON 출력은 전과 같다. 사용자 정의 객체(여러 줄을 내는
+`__repr__`, 진릿값이 모호한 배열 등)는 이 보장 밖이다. 전략 파일을 로드·인스턴스화하거나 메타를 읽다 실패하면 그 키들을 빼고
 성공하며 경고 로그 한 줄을 남긴다(파일이 없으면 로그 없이 뺀다).
 
 `strategy summary`는 전략의 `trades.strategy_id`(거래 시점 전략 귀속 키)로

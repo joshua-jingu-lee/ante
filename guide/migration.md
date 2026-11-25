@@ -3,7 +3,7 @@
 `--format json` 출력을 스크립트나 에이전트로 읽고 있다면, 이 문서에서 고쳐야 할 경로를 찾으세요.
 
 > [!NOTE]
-> 이 문서는 명령이 직접 만든 JSON 성공 출력을 내던 CLI 명령을 공통 성공 봉투로 옮긴 뒤 처음 나오는 릴리스에 맞춘 스냅샷입니다. 옮긴 대상은 `feed`·`init`·`update`와 `signal connect`를 뺀 계약 명령입니다(`system start`는 전부터 봉투를 직접 냅니다). 이 문서는 그 전환과 그에 딸린 실패 출력의 변경만 다루며, 그 뒤의 변경은 담지 않습니다. 명령과 옵션의 현재 목록은 [CLI 레퍼런스](cli.md)에 있습니다.
+> 이 문서는 명령이 직접 만든 JSON 성공 출력을 내던 CLI 명령을 공통 성공 봉투로 옮긴 뒤 처음 나오는 릴리스에 맞춘 스냅샷입니다. 옮긴 대상은 `feed`·`init`·`update`와 `signal connect`를 뺀 계약 명령입니다(`system start`는 전부터 봉투를 직접 냅니다). 이 문서는 그 전환과 그에 딸린 실패 출력의 변경, `strategy info`의 text 출력 변경만 다루며, 그 뒤의 변경은 담지 않습니다. 명령과 옵션의 현재 목록은 [CLI 레퍼런스](cli.md)에 있습니다.
 
 ## 요약
 
@@ -11,8 +11,8 @@
 
 다음은 바뀌지 않았습니다.
 
-- text 출력. 예외는 [실패 출력](#실패-출력의-변경)에 적은 것뿐입니다.
-- 종료 코드. 예외는 [text 출력의 예외 하나](#text-출력의-예외-하나)뿐입니다.
+- text 출력. 예외는 [실패 출력](#-실패-출력의-변경)과 [`strategy info`의 text 출력](#strategy-info의-text-출력-변경)에 적은 것뿐입니다.
+- 종료 코드. 예외는 [`strategy info`의 text 출력](#strategy-info의-text-출력-변경)의 첫째 자리뿐입니다.
 
 ```text
 # 전
@@ -334,16 +334,22 @@ JSON 모드의 실패는 다음 모양의 에러 봉투로 stdout에 한 줄로 
 | 시간 초과 | `서버 응답 시간 초과` | `Error: IPC_TIMEOUT: 서버 응답 시간 초과` |
 | 데몬이 거부 | `Invalid signal key` 등 | `Error: INVALID_SIGNAL_KEY: Invalid signal key` 등 |
 
-### text 출력의 예외 하나
+---
 
-`strategy info`는 전략의 파라미터가 사전이 아닐 때 전에는 표의 앞부분을 stdout에 낸 뒤 `Error: EXECUTION_ERROR: …`를 내고 종료 코드 1로 끝났습니다. 이제는 성공하고(종료 코드 0) 그 값을 `파라미터` 줄 한 줄로 냅니다.
+## `strategy info`의 text 출력 변경
+
+`strategy info`의 text 출력은 세 자리에서 달라졌습니다.
+
+- 파라미터가 Mapping이 아닐 때: 전에는 표의 앞부분을 stdout에 낸 뒤 `Error: EXECUTION_ERROR: …`를 내고 종료 코드 1로 끝났습니다. 이제는 성공하고(종료 코드 0) 그 값을 `파라미터` 줄 한 줄로 냅니다.
+- 위험 고지가 리스트·튜플이 아닐 때(문자열 등): 전에는 항목마다(문자열이면 글자마다) 한 줄을 냈습니다. 이제는 그 값을 `리스크` 줄 한 줄로 냅니다.
+- 전략 파일을 로드하거나 메타를 읽다 실패할 때: stdout은 전과 같고, stderr에 경고 한 줄이 새로 붙습니다(JSON 모드에서도 같습니다).
 
 ---
 
 ## ✅ 바뀌지 않은 것
 
-- **text 출력** — 위 실패 출력의 접두와 예외 하나를 빼고 그대로입니다.
-- **종료 코드** — 위 text 출력의 예외 하나를 빼고 이 문서의 명령 모두 그대로입니다.
+- **text 출력** — 위 실패 출력의 접두와 `strategy info`의 세 자리를 빼고 그대로입니다.
+- **종료 코드** — 위 `strategy info`의 첫째 자리를 빼고 이 문서의 명령 모두 그대로입니다.
 - **전부터 봉투였던 명령의 JSON** — 다음 명령은 전부터 `{"status": "ok", "message", "data"}`를 냈고 그대로입니다.
   - `account activate`·`create`·`delete`·`repair-timezone`·`suspend`
   - `approval approve`·`cancel`·`cancel-invalid`·`reject`·`reopen`·`request`·`review`
