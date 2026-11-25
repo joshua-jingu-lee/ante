@@ -316,10 +316,15 @@ class RuleEngine:
             try:
                 rule = self._create_rule(cfg)
             except Exception as exc:
+                rule_type = cfg.get("type") if isinstance(cfg, dict) else None
                 logger.error(
-                    "룰 항목을 만들지 못함: account=%s, index=%d, error=%s",
+                    "룰 항목을 만들지 못함: account=%s, "
+                    "effective_index=%d(기본 룰 병합 뒤 위치), item=%s, type=%s, "
+                    "error=%s",
                     self._account_id,
                     index,
+                    type(cfg).__name__,
+                    rule_type if isinstance(rule_type, str) else None,
                     type(exc).__name__,
                 )
                 raise

@@ -504,6 +504,33 @@ async def test_broken_item_blocks_only_that_account_at_startup(
     assert cap.rules_rejections("acc2") == []
 
 
+async def test_broken_item_log_names_effective_position_without_values(
+    db, caplog
+) -> None:
+    bus = EventBus()
+    account = make_account("kis", broker_type="kis-domestic")
+    dyn = DynamicConfigService(db, bus)
+    await dyn.initialize()
+    await dyn.set(
+        "accounts.kis.rules",
+        [{"type": "daily_loss_limit", "max_daily_loss_percent": 0.0371}, 5],
+        category="rule",
+        changed_by="test",
+    )
+    caplog.set_level(logging.INFO, logger="ante.rule.engine")
+    manager = RuleEngineManager(eventbus=bus, account_service=MagicMock())
+    await manager.initialize_all([account], dynamic_config=dyn)
+
+    assert manager.rules_unavailable_accounts() == {"kis": "invalid_item"}
+    built = [r for r in caplog.records if "룰 항목을 만들지 못함" in r.getMessage()]
+    assert len(built) == 1
+    message = built[0].getMessage()
+    assert "effective_index=2(기본 룰 병합 뒤 위치)" in message
+    assert "item=int" in message
+    assert "type=None" in message
+    assert "0.0371" not in caplog.text
+
+
 async def test_startup_notification_for_broken_item(db) -> None:
     value: list[Any] = [{"type": "daily_loss_limit"}, 5]
     world = await _item_broken_world(db, value, "dynamic")
