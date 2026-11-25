@@ -541,6 +541,32 @@ def test_updater_rejects_a_bad_artifact_set(tmp_path, mutate):
     assert not output.exists()
 
 
+def _updater_args(tmp_path: Path, *extra: str) -> tuple[list[str], Path]:
+    artifacts = tmp_path / "artifacts"
+    for name, text in _shard_artifacts().items():
+        target = artifacts / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    output = tmp_path / "out" / "shard_durations.json"
+    return [str(artifacts), "--output", str(output), *extra], output
+
+
+def test_updater_fails_when_collection_fails(tmp_path, capsys, monkeypatch):
+    updater = _load_updater()
+    monkeypatch.setattr(updater, "_collect_now", lambda: (2, UPDATE_COLLECTED))
+    argv, output = _updater_args(tmp_path)
+    assert updater.main(argv) == 1
+    assert "FAIL: pytest --collect-only exited 2" in capsys.readouterr().out
+    assert not output.exists()
+
+
+def test_updater_fails_when_the_collected_file_is_absent(tmp_path, capsys):
+    argv, output = _updater_args(tmp_path, "--collected", str(tmp_path / "no.txt"))
+    assert _load_updater().main(argv) == 1
+    assert "FAIL: collected list not found" in capsys.readouterr().out
+    assert not output.exists()
+
+
 # ── pytest 옵션 --shard-durations (#3036) ─────────────────────────────────
 
 

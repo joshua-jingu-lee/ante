@@ -42,6 +42,8 @@ def _load_import_guard():
 # --shard-durations=<path>는 파일별 소요 시간(setup·call·teardown 합, 정수
 # 센티초)을 기록 파일과 같은 형식으로 쓴다. 쓰기는 xdist 컨트롤러가 한다.
 # 셋 다 없으면 아무 일도 하지 않는다.
+# --shard가 있으면 머리말에 기록의 상태를 찍는다. 로컬 확인용이다. -q에서는
+# 머리말이 나오지 않는다(CI의 샤드 잡이 그렇다).
 
 _SHARD_KEY = pytest.StashKey["tuple[int, int] | None"]()
 _SHARD_MANIFEST: dict[str, object] = {}

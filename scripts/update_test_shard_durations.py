@@ -85,7 +85,7 @@ def collected_counts(text: str) -> dict[str, int]:
     return counts
 
 
-def _collect_now() -> str:
+def _collect_now() -> tuple[int, str]:
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/unit/", "--collect-only", "-q"]
         + ["-p", "no:xdist"],
@@ -94,7 +94,7 @@ def _collect_now() -> str:
         text=True,
         check=False,
     )
-    return result.stdout
+    return result.returncode, result.stdout
 
 
 def predicted_loads(
@@ -129,9 +129,15 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(errors))
         return 1
     if args.collected is not None:
+        if not args.collected.is_file():
+            print(f"FAIL: collected list not found: {args.collected}")
+            return 1
         text = args.collected.read_text(encoding="utf-8")
     else:
-        text = _collect_now()
+        code, text = _collect_now()
+        if code != 0:
+            print(f"FAIL: pytest --collect-only exited {code}")
+            return 1
     counts = collected_counts(text)
     if not counts:
         print("FAIL: collected list is empty")
