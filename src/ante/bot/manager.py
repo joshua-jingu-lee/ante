@@ -1063,7 +1063,12 @@ class BotManager:
         account_id = event.account_id
         stopped = []
         for bot in list(self._bots.values()):
-            if bot.config.account_id == account_id and bot.status == BotStatus.RUNNING:
+            if bot.config.account_id != account_id:
+                continue
+            restart = self._restart_tasks.pop(bot.bot_id, None)
+            if restart is not None:
+                restart.cancel()
+            if bot.status == BotStatus.RUNNING:
                 try:
                     await bot.stop()
                 except Exception:
@@ -1187,6 +1192,8 @@ class BotManager:
         except asyncio.CancelledError:
             raise
 
+        if not await self._account_allows_restart(bot):
+            return
         if bot.status != BotStatus.ERROR or not self._is_registered(bot):
             return
 
@@ -1199,6 +1206,31 @@ class BotManager:
             logger.error("봇 재시작 실패: %s — %s", bot_id, e)
         finally:
             self._restart_tasks.pop(bot_id, None)
+
+    async def _account_allows_restart(self, bot: Bot) -> bool:
+        """봇의 계좌가 ACTIVE인지 다시 본다. 조회가 실패하면 False."""
+        if self._account_service is None:
+            return True
+        account_id = bot.config.account_id
+        try:
+            account = await self._account_service.get(account_id)
+        except Exception:
+            logger.warning(
+                "봇 재시작 생략 — 계좌 조회 실패: bot=%s, account=%s",
+                bot.bot_id,
+                account_id,
+                exc_info=True,
+            )
+            return False
+        if account.status != AccountStatus.ACTIVE:
+            logger.warning(
+                "봇 재시작 생략 — 계좌가 활성 상태가 아님: bot=%s, account=%s (%s)",
+                bot.bot_id,
+                account_id,
+                account.status,
+            )
+            return False
+        return True
 
     def _schedule_restart_reset(self, bot_id: str) -> None:
         """정상 실행 유지 시 재시작 카운터 리셋 스케줄링."""

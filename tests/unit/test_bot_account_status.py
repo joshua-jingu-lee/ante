@@ -6,14 +6,17 @@ Refs #736
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
 
 from ante.account.errors import AccountDeletedException, AccountSuspendedError
 from ante.account.models import Account, AccountStatus
 from ante.bot import BotConfig, BotManager, BotStatus
+from ante.bot import manager as bot_manager_module
 from ante.core import Database
 from ante.eventbus import EventBus
+from ante.eventbus.events import BotErrorEvent, BotStartedEvent
 from ante.strategy import (
     DataProvider,
     OrderView,
@@ -204,3 +207,146 @@ class TestBotAccountStatusValidation:
         )
         with pytest.raises(AccountSuspendedError, match="정지된 계좌"):
             await manager.create_bot(config, NoMetaStrategy, ctx)
+
+
+class TestSuspendedAccountNoAutoRestart:
+    """정지된 계좌의 봇은 자동 재시작되지 않는다 (#2600)."""
+
+    @staticmethod
+    async def _error_bot(manager, account_service, bot_id: str, account_id: str):
+        await account_service.create(
+            Account(
+                account_id=account_id,
+                name=account_id,
+                exchange="KRX",
+                currency="KRW",
+                broker_type="test",
+                status=AccountStatus.ACTIVE,
+                credentials={"app_key": "test", "app_secret": "test"},
+            )
+        )
+        config = BotConfig(
+            bot_id=bot_id,
+            strategy_id="s1",
+            restart_cooldown_seconds=10,
+            max_restart_attempts=3,
+            account_id=account_id,
+        )
+        ctx = MagicMock()
+        ctx.get_positions.return_value = []
+        ctx.get_balance.return_value = 0.0
+        ctx._drain_actions.return_value = []
+        bot = await manager.create_bot(config, SimpleStrategy, ctx=ctx)
+        bot.status = BotStatus.ERROR
+        return bot
+
+    @staticmethod
+    def _gate_cooldown(monkeypatch) -> tuple[asyncio.Event, asyncio.Semaphore]:
+        wake = asyncio.Event()
+        entered = asyncio.Semaphore(0)
+
+        async def _wait_for_wake(seconds):  # noqa: ARG001
+            entered.release()
+            await wake.wait()
+
+        monkeypatch.setattr(bot_manager_module, "_cooldown_sleep", _wait_for_wake)
+        return wake, entered
+
+    @staticmethod
+    def _started(eventbus) -> list[BotStartedEvent]:
+        seen: list[BotStartedEvent] = []
+        eventbus.subscribe(BotStartedEvent, seen.append)
+        return seen
+
+    @staticmethod
+    async def _error(eventbus, bot_id: str, account_id: str) -> None:
+        await eventbus.publish(
+            BotErrorEvent(bot_id=bot_id, error_message="test", account_id=account_id)
+        )
+
+    async def test_suspend_cancels_scheduled_restart(
+        self, manager, account_service, eventbus, monkeypatch
+    ):
+        bot = await self._error_bot(manager, account_service, "b1", "acc-a")
+        wake, entered = self._gate_cooldown(monkeypatch)
+        started = self._started(eventbus)
+        await self._error(eventbus, "b1", "acc-a")
+        task = manager._restart_tasks["b1"]
+        await entered.acquire()
+
+        await account_service.suspend("acc-a", reason="test", suspended_by="test")
+        await asyncio.wait([task], timeout=5.0)
+
+        assert task.cancelled()
+        assert "b1" not in manager._restart_tasks
+
+        await account_service.activate("acc-a", activated_by="test")
+        wake.set()
+        await asyncio.sleep(0.05)
+
+        assert started == []
+        assert bot.status == BotStatus.ERROR
+
+    async def test_error_after_suspend_does_not_restart(
+        self, manager, account_service, eventbus, monkeypatch
+    ):
+        bot = await self._error_bot(manager, account_service, "b1", "acc-a")
+        wake, _ = self._gate_cooldown(monkeypatch)
+        wake.set()
+        started = self._started(eventbus)
+
+        await account_service.suspend("acc-a", reason="test", suspended_by="test")
+        await self._error(eventbus, "b1", "acc-a")
+        task = manager._restart_tasks["b1"]
+        await asyncio.wait([task], timeout=5.0)
+
+        assert task.done() and not task.cancelled()
+        assert task.exception() is None
+        assert started == []
+        assert bot.status == BotStatus.ERROR
+
+    async def test_account_lookup_failure_does_not_restart(
+        self, manager, account_service, eventbus, monkeypatch
+    ):
+        bot = await self._error_bot(manager, account_service, "b1", "acc-a")
+        wake, entered = self._gate_cooldown(monkeypatch)
+        started = self._started(eventbus)
+        await self._error(eventbus, "b1", "acc-a")
+        task = manager._restart_tasks["b1"]
+        await entered.acquire()
+
+        async def _fail_get(account_id):  # noqa: ARG001
+            raise RuntimeError("lookup failed")
+
+        monkeypatch.setattr(account_service, "get", _fail_get)
+        wake.set()
+        await asyncio.wait([task], timeout=5.0)
+
+        assert task.done() and not task.cancelled()
+        assert task.exception() is None
+        assert started == []
+        assert bot.status == BotStatus.ERROR
+
+    async def test_active_account_restarts_and_other_account_kept(
+        self, manager, account_service, eventbus, monkeypatch
+    ):
+        bot_a = await self._error_bot(manager, account_service, "b1", "acc-a")
+        bot_b = await self._error_bot(manager, account_service, "b2", "acc-b")
+        wake, entered = self._gate_cooldown(monkeypatch)
+        started = self._started(eventbus)
+        await self._error(eventbus, "b1", "acc-a")
+        await self._error(eventbus, "b2", "acc-b")
+        task_b = manager._restart_tasks["b2"]
+        await entered.acquire()
+        await entered.acquire()
+
+        await account_service.suspend("acc-a", reason="test", suspended_by="test")
+        assert manager._restart_tasks.get("b2") is task_b
+        assert not task_b.done()
+
+        wake.set()
+        await asyncio.wait([task_b], timeout=5.0)
+
+        assert [e.bot_id for e in started] == ["b2"]
+        assert bot_b.status == BotStatus.RUNNING
+        assert bot_a.status == BotStatus.ERROR
