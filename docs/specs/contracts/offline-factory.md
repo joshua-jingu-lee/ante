@@ -14,8 +14,8 @@ CLI `offline` 및 `cold-path` execution class (cf.
 다음 4개의 결정을 단일 위치에 lock 한다.
 
 1. CLI offline service factory의 **책임 / 비책임** 경계
-2. **`read_only`** 초기화 정책 (옵션 B: `Database` API 변경 없이 factory 레벨에서
-   `service.initialize()` skip)
+2. **`read_only`** 초기화 정책 (옵션 B: read-only 명령의 caller가
+   `service.initialize()`를 부르지 않는다)
 3. **ctx 기반 DB path resolution** 정책 (ctx 명시 전달 권장, 암시 fallback
    deprecated)
 4. **read-only 분류 예외 목록** — service `initialize()` 안에서 schema/DDL이
@@ -37,15 +37,6 @@ CLI offline service factory는 다음만 책임진다.
   - `await db.connect()` 호출
   - 정상/예외/취소(`asyncio.CancelledError`/`KeyboardInterrupt`) 경로 모두에서
     `await db.close()` 보장
-- **EventBus 생성**
-  - offline 명령이 EventBus를 필요로 하는 경우 `EventBus()` 생성. EventBus는
-    in-memory subscriber 없이 사용되며, factory 종료 시 별도 close 의무를
-    부여하지 않는다 (`EventBus` 자체가 close API를 가지지 않는다는 baseline 유지).
-- **Service lifecycle**
-  - 도메인 service 인스턴스 생성 (예: `AccountService(db=db, eventbus=eventbus)`)
-  - **read-write 명령**의 경우 `await service.initialize()` 호출
-  - **read-only 명령**의 경우 `service.initialize()` **skip** (§2 참조; 예외는
-    §4 참조)
 - **Cleanup 패턴 (#1722 baseline 유지)**
   - `service` 생성/`initialize()` 이후의 모든 라이프사이클을 `except BaseException`
     블록으로 감싸 실패 시 `await db.close()` 보장
@@ -66,6 +57,15 @@ CLI offline service factory는 다음만 책임진다.
 CLI offline service factory는 다음을 **수행하지 않는다**. 이 책임은 caller (CLI
 command 본체 또는 별도 wrapper)가 가진다.
 
+- **EventBus 생성** — offline 명령이 EventBus를 필요로 하는 경우 caller가
+  `EventBus()`를 생성한다. EventBus는 in-memory subscriber 없이 사용되며, 별도
+  close 의무를 부여하지 않는다 (`EventBus` 자체가 close API를 가지지 않는다는
+  baseline 유지).
+- **Service lifecycle** — caller가 다음을 수행한다.
+  - 도메인 service 인스턴스 생성 (예: `AccountService(db=db, eventbus=eventbus)`)
+  - **read-write 명령**의 경우 `await service.initialize()` 호출
+  - **read-only 명령**의 경우 `service.initialize()` **skip** (§2 참조; 예외는
+    §4 참조)
 - **IPC 호출 여부 결정** — IPC client 호출, IPC 응답 파싱, IPC 실패 시 fallback
   분기는 `runtime IPC` execution class의 책임이다. offline factory는 IPC-aware로
   가지 않는다.
@@ -97,12 +97,13 @@ command 본체 또는 별도 wrapper)가 가진다.
 
 ### 2.1 결정
 
-`read_only=True`는 **옵션 B (factory-level `initialize()` skip)**와 **옵션 A
-(`Database` SQLite read-only 연결 모드)**를 **함께** 의미한다(2026-05-31 KST
+read-only 명령은 **옵션 B (caller의 `initialize()` skip)**와 **옵션 A
+(`Database` SQLite read-only 연결 모드)**를 **함께** 적용한다(2026-05-31 KST
 #1974 R2 amend). 즉:
 
-> **`read_only=True` ≡ (a) `service.initialize()` skip(옵션 B) + (b) `Database`
-> 연결을 SQLite read-only(`mode=ro`)로 open(옵션 A).**
+> **factory 인자 `read_only=True`는 (b) `Database` 연결을 SQLite
+> read-only(`mode=ro`)로 open한다(옵션 A). (a) `service.initialize()` skip(옵션
+> B)은 같은 명령의 caller가 함께 지키는 규칙이다.**
 
 본 amend 이전(1.0)에는 옵션 B만 normative였고 §2.3에서 옵션 A를 보류했다. 그러나
 옵션 B만으로는 `service.initialize()`를 skip해도 `Database.connect()`가
@@ -111,14 +112,14 @@ writer+reader 두 연결을 열고 각각 `PRAGMA journal_mode=WAL`(쓰기 필�
 여전히 `attempt to write a readonly database`로 실패**한다(#1974 재현). 본
 amend는 §2.3의 보류를 해제하고 옵션 A를 normative로 채택해 이 gap을 닫는다.
 
-#### (a) 옵션 B — factory-level `initialize()` skip
+#### (a) 옵션 B — caller의 `initialize()` skip
 
-- factory가 호출 시점에 `read_only: bool` (또는 동등 분류) 값을 받아 다음을
+- caller(명령 본문)가 자기 명령의 read-only 여부(또는 동등 분류)에 따라 다음을
   결정한다.
-  - `read_only=True`: `service.initialize()` 호출을 **skip**한다. 해당 service
+  - read-only 명령: `service.initialize()` 호출을 **skip**한다. 해당 service
     가 `_db.execute_script(...)` / `_db.execute(ALTER ...)` 등의 schema/DDL
     trigger를 가지더라도 read-only 명령 경로에서는 그것을 발화하지 않는다.
-  - `read_only=False`: `service.initialize()`를 호출한다. schema migration /
+  - read-write 명령: `service.initialize()`를 호출한다. schema migration /
     DDL이 발동될 수 있다.
 
 #### (b) 옵션 A — `Database` SQLite read-only 연결 모드
@@ -417,6 +418,6 @@ account/member/approval을 같은 1차 PR(#1856)에 함께 다뤘다" — 가
 - runtime `src/ante/main.py` composition root에 `read_only` 적용 — 서버 runtime은
   write가 필요하다.
 - envelope/error taxonomy 본문 변경.
-- service `initialize()` schema 분리 — 본 spec §2가 옵션 B(factory-level skip) +
+- service `initialize()` schema 분리 — 본 spec §2가 옵션 B(skip) +
   옵션 A(Database read-only 연결 모드)를 lock하나, §4 예외 service의 read path와
   schema 부트스트랩 분리는 별도 spec change(§4.3)로 다룬다.
