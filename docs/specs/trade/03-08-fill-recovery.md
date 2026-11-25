@@ -78,6 +78,11 @@ quantity, price, commission, order_type, exchange, timestamp) -> bool`:
 - 멱등: `trade_id`를 내부 `order_id`에서 결정적으로 만들고(UUID5),
   `trades`에 `ON CONFLICT DO NOTHING RETURNING`으로 insert한다. 새 행일 때만
   `PositionHistory.on_trade`를 부르고 `True`, 이미 있으면 `False`를 반환한다.
+- 보유 초과 매도(#3068): 새 행을 insert한 뒤 같은 락·트랜잭션 블록 안에서, `PositionHistory.on_trade`를
+  부르기 전에 매도 `quantity`가 그 봇의 커밋된 포지션 보유 수량(`get_current`, 읽기 연결)보다 크면
+  `InsufficientHoldingsError`(`FillApplier.InsufficientHoldingsError`로도 노출)를 던져 rollback한다.
+  비교는 `on_trade` 자르기와 같은 `quantity > 보유`이고 허용 오차는 없다. 멱등 판정이 먼저라 같은
+  `order_id`의 재호출은 보유와 무관하게 `False`다. 겹친 매도는 락이 직렬화해 둘째가 첫째의 커밋을 본다.
 - 트랜잭션: 같은 `asyncio.Lock` 안에서 단일 `Database.transaction()`으로 insert와
   포지션 반영을 묶는다. 실패하면 rollback되고 예외가 호출자에게 전파된다.
 - 미발행: OrderTracker CAS·outbox enqueue·`OrderFilledEvent` 발행을 하지 않는다.
