@@ -62,7 +62,7 @@
 | `on_start` | — | `None` | 봇 시작 시 1회 호출. 초기화 로직 (선택) |
 | `on_stop` | — | `None` | 봇 중지 시 1회 호출. 정리 로직 (선택) |
 | `async on_step` **(필수)** | `context: dict[str, Any]` | `list[Signal]` | 주기적 호출. 매매 시그널 반환. context에 timestamp, portfolio, balance 등 포함 |
-| `async on_fill` | `fill: dict[str, Any]` | `list[Signal]` | 주문 체결 통보. 후속 주문(손절/익절) 발행 가능 (선택) |
+| `async on_fill` | `fill: dict[str, Any]` | `list[Signal]` | 주문 체결 통보. 후속 주문(손절/익절) 발행 가능 (선택). 취소·만료를 통보받은 주문에도 그 뒤에 관측된 체결로 불릴 수 있다([broker-adapter/18-fill-recovery.md](../broker-adapter/18-fill-recovery.md) §6.3) |
 | `async on_order_update` | `update: dict[str, Any]` | `None` | 주문 상태 변경(접수/거부/취소/정정거부/스탑 등록·발동·만료) 통보 (선택). 상태값과 키 명세는 아래 ["on_order_update 알림 명세"](#on_order_update-알림-명세) 참고 |
 | `async on_data` | `data: dict[str, Any]` | `list[Signal]` | 외부 데이터(뉴스, 이벤트, AI 시그널) 수신 시 호출. 즉시 주문 발행 가능 (선택) |
 | `async on_position_corrected` | `correction: dict[str, Any]` | `None` | 대사(Reconciliation) 포지션 보정 통보 (선택) |

@@ -120,7 +120,7 @@ self.ctx.cancel_order(order_id="ORD-001", reason="전략 조건 변경")
 |--------|----------|------|
 | `on_start()` | 봇 시작 시 1회 | — |
 | `on_stop()` | 봇 중지 시 1회 | — |
-| `on_fill(fill)` | 주문 체결 시 | `list[Signal]` (후속 주문 가능) |
+| `on_fill(fill)` | 주문 체결 시. 취소·만료를 통보받은 주문에 `on_fill`이 뒤따를 수 있습니다(취소 전에 체결된 수량이 나중에 확인된 경우). 취소 뒤 다시 낸 주문과 노출이 겹칠 수 있습니다 | `list[Signal]` (후속 주문 가능) |
 | `on_order_update(update)` | 주문 상태 변경 시 (접수/거부/취소/정정완료/정정거부) | — |
 | `on_data(data)` | 외부 시그널 수신 시 (`accepts_external_signals=True`) | `list[Signal]` |
 | `get_rules()` | 전략별 거래 룰 반환 | `dict` |
