@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Coroutine, Iterator
+from collections.abc import AsyncIterator, Coroutine, Iterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -434,7 +434,7 @@ def _info_params_lines(params: object, schema: object) -> Iterator[str]:
     """파라미터 섹션 줄을 만든다."""
     if not params:
         return
-    if not isinstance(params, dict):
+    if not isinstance(params, Mapping):
         yield f"  {'파라미터':15s}: {params!r}"
         return
     yield f"  {'파라미터':15s}:"

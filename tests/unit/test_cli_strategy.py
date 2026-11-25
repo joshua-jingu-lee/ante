@@ -394,6 +394,21 @@ class TestStrategyInfoOddStrategyFile:
         assert js.exit_code == 0, js.output
         assert json.loads(js.output)["data"]["params"] == eval(value)  # noqa: S307
 
+    def test_mapping_params_match_dict_bytes(self, runner, tmp_path):
+        schema = "    def get_param_schema(self):\n        return {'window': '기간'}\n"
+        as_dict = "    def get_params(self):\n        return {'window': 20, 'k': 0.5}\n"
+        as_mapping = (
+            "    def get_params(self):\n"
+            "        import types\n"
+            "        return types.MappingProxyType({'window': 20, 'k': 0.5})\n"
+        )
+        expected, _ = self._invoke(runner, tmp_path, as_dict + schema)
+        actual, _ = self._invoke(runner, tmp_path, as_mapping + schema)
+        assert expected.exit_code == 0, expected.output
+        assert "    window = 20  (기간)" in expected.output.splitlines()
+        assert actual.exit_code == 0, actual.output
+        assert actual.output == expected.output
+
     def test_str_risks_are_one_line(self, runner, tmp_path):
         body = "    def get_risks(self):\n        return '급락'\n"
         result, _ = self._invoke(runner, tmp_path, body)
@@ -407,8 +422,9 @@ class TestStrategyInfoOddStrategyFile:
         [
             "    def get_params(self):\n        raise RuntimeError('boom')\n",
             "    def __init__(self, ctx):\n        raise RuntimeError('boom')\n",
+            "    def get_params(self):\n        raise RuntimeError('bo\\nom')\n",
         ],
-        ids=["get_params_raises", "init_raises"],
+        ids=["get_params_raises", "init_raises", "message_with_newline"],
     )
     @pytest.mark.parametrize("fmt", ["text", "json"])
     def test_load_failure_leaves_one_warning(self, runner, tmp_path, caplog, body, fmt):
