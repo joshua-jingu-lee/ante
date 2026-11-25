@@ -6,7 +6,9 @@
 체결 반영 → 정산을 지난다. 체결 폴링은 부팅 뒤 약 60초에 처음, 약 120초에 두 번째로
 돈다(폴 주기는 ``DEFAULT_POLL_INTERVAL``). 지연 계좌는 두 번째 폴에서 체결되므로 그
 계좌의 주문 이력은 CLI로 읽지 않는다(그 조회도 mock의 횟수에 든다). 체결 대기의 기한은
-계좌마다 예약이 보인 시각부터 필요한 폴 수 × 폴 주기 + 여유로 잰다.
+계좌마다 예약이 보인 시각부터 필요한 폴 수 × 폴 주기 + 여유로 잰다. 지연 계좌 하나는
+체결 전에 봇을 정지해, 정지가 미체결 주문을 취소하고 두 번째 폴 뒤에도 체결이 없음을
+본다(#3049).
 
 알려진 한계: 시나리오가 KST 자정을 걸치면 주문 추적기가 열린 부분 체결 주문을
 만료로 처리할 수 있다. 재시작 뒤의 복구는 다루지 않는다(mock 장부는 메모리뿐이다).
@@ -88,7 +90,7 @@ class LiveCase:
 
     @property
     def strategy_name(self) -> str:
-        return f"e2e_mock_live_{self.fill_mode}"
+        return f"e2e_mock_live_{self.account_id}"
 
     @property
     def order_amount(self) -> float:
@@ -99,8 +101,9 @@ IMMEDIATE = LiveCase("liveimm", "immediate", 2, 3_000_000)
 PARTIAL = LiveCase("livepart", "partial", 4, 3_100_000)
 REJECT = LiveCase("liverej", "reject", 3, 3_200_000)
 DELAYED = LiveCase("livedel", "delayed", 5, 3_300_000, (f"delay_polls={DELAY_POLLS}",))
-CASES = (IMMEDIATE, PARTIAL, REJECT, DELAYED)
-OPEN_CASES = (IMMEDIATE, PARTIAL, DELAYED)
+STOPPED = LiveCase("livestop", "delayed", 6, 3_400_000, (f"delay_polls={DELAY_POLLS}",))
+CASES = (IMMEDIATE, PARTIAL, REJECT, DELAYED, STOPPED)
+OPEN_CASES = (IMMEDIATE, PARTIAL, DELAYED, STOPPED)
 
 
 def _create_account_args(case: LiveCase, prices_file: str) -> list[str]:
@@ -252,6 +255,12 @@ def test_mock_live_fill_modes(daemon: DaemonHarness) -> None:
         assert budget["reserved"] == pytest.approx(case.order_amount), budget
         assert _fills(daemon, case)["total"] == 0
 
+    stopped = daemon.cli("bot", "stop", STOPPED.bot_id)
+    assert stopped["data"]["bot"]["status"] == "stopped", stopped
+    stopped_trades = _trades(daemon, STOPPED)
+    assert [t["status"] for t in stopped_trades] == ["cancelled"], stopped_trades
+    assert _budget(daemon, STOPPED)["reserved"] == 0
+
     rejected_trades = wait_until(
         lambda: _trades(daemon, REJECT),
         lambda trades: len(trades) > 0,
@@ -330,8 +339,14 @@ def test_mock_live_fill_modes(daemon: DaemonHarness) -> None:
     budget = _budget(daemon, PARTIAL)
     assert budget["reserved"] == pytest.approx(half * PRICE), budget
     assert _position_quantity(daemon, PARTIAL) == half
+    assert _fills(daemon, STOPPED)["total"] == 0
+    assert _trades(daemon, STOPPED) == stopped_trades
+    assert _position_quantity(daemon, STOPPED) == 0
+    budget = _budget(daemon, STOPPED)
+    assert budget["reserved"] == 0, budget
+    assert budget["spent"] == 0, budget
 
-    for case in CASES:
+    for case in (IMMEDIATE, PARTIAL, REJECT, DELAYED):
         stopped = daemon.cli("bot", "stop", case.bot_id)
         assert stopped["data"]["bot"]["status"] == "stopped", stopped
 

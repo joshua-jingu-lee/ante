@@ -368,8 +368,10 @@ async def test_assign_strategy_cancels_before_restart(rig: Rig) -> None:
     assert await rig.status("ord-1") == "cancelled"
 
 
-@pytest.mark.parametrize("state", ["running", "stopped", "error"])
+@pytest.mark.parametrize("state", ["running", "stopped", "error", "running-failing"])
 async def test_delete_bot_cancels_before_liquidation(rig: Rig, state: str) -> None:
+    if state == "running-failing":
+        rig.broker.result = False
     if state == "error":
         await _errored(rig)
     else:
@@ -386,8 +388,12 @@ async def test_delete_bot_cancels_before_liquidation(rig: Rig, state: str) -> No
 
     names = rig.names()
     assert names.count("cancel") == 1
-    assert names.index("cancelled") < names.index("request")
-    assert await rig.status("ord-1") == "cancelled"
+    if state == "running-failing":
+        assert names.index("cancel_failed") < names.index("request")
+        assert await rig.status("ord-1") == "open"
+    else:
+        assert names.index("cancelled") < names.index("request")
+        assert await rig.status("ord-1") == "cancelled"
 
 
 async def test_self_stop_completes_broker_cancel(rig: Rig) -> None:
@@ -556,17 +562,31 @@ async def test_suppressed_notification_still_cancels(rig: Rig) -> None:
     assert cleanup.cancelled == 1
 
 
-async def test_stop_bot_result_is_not_mixed_with_earlier_stop(rig: Rig) -> None:
+@pytest.mark.parametrize("restart_before_cleanup", [False, True])
+async def test_stop_bot_result_is_not_mixed_with_earlier_stop(
+    rig: Rig, restart_before_cleanup: bool
+) -> None:
     bot = await _running(rig)
     await rig.seed("ord-1")
     await rig.bus.publish(AccountSuspendedEvent(account_id=ACCT, reason="halt"))
     assert bot.status == BotStatus.STOPPED
+    assert await rig.status("ord-1") == "cancelled"
 
     await rig.manager.start_bot(BOT)
+    if restart_before_cleanup:
+
+        async def _restart(event: object) -> None:
+            if isinstance(event, BotStoppedEvent) and bot.status == BotStatus.STOPPED:
+                await bot.start()
+
+        rig.bus.subscribe(BotStoppedEvent, _restart, priority=90)
     cleanup = await rig.manager.stop_bot(BOT)
 
-    assert cleanup is not None
-    assert (cleanup.cancelled, cleanup.failed, cleanup.stop_orders) == (0, 0, ())
+    if restart_before_cleanup:
+        assert cleanup is None
+    else:
+        assert cleanup is not None
+        assert (cleanup.cancelled, cleanup.failed, cleanup.stop_orders) == (0, 0, ())
 
 
 async def test_restarted_before_cleanup_skips(rig: Rig) -> None:
