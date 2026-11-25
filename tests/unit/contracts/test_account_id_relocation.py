@@ -30,6 +30,7 @@ ACCOUNT_ERROR_SUBCLASSES = [
     "AccountReconcileNotApplicableError",
     "AccountStructuralChangeRequiresStoppedServerError",
     "AccountSuspendAllFailedError",
+    "AccountSuspendNotPersistedError",
     "AccountSuspendedError",
     "BrokerReconnectFailedError",
     "InvalidAccountIdError",
