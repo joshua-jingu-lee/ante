@@ -284,6 +284,14 @@ class VirtualExecutor:
                     exchange=event.exchange,
                     timestamp=filled_at,
                 )
+            except self._fill_applier.InsufficientHoldingsError:
+                logger.warning(
+                    "Virtual 매도 보유 초과 — 주문 실패 종결 (order_id=%s)", order_id
+                )
+                await self._fail_order(
+                    event, error_message="virtual_insufficient_holdings"
+                )
+                return
             except Exception:
                 logger.exception(
                     "Virtual 체결 기록 실패 — 주문 실패 종결 (order_id=%s)", order_id
