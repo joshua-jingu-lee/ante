@@ -466,3 +466,225 @@ async def test_without_fill_applier_records_nothing_and_warns(
     assert await s.count("positions") == 0
     assert s.portfolio.get_positions(BOT) == {}
     assert any("fill_applier" in r.getMessage() for r in caplog.records)
+
+
+# ── #3068: 봇의 보유를 넘는 가상 매도는 체결 없이 실패로 끝난다 ─────────────
+
+INSUFFICIENT = "virtual_insufficient_holdings"
+
+
+def _order(
+    order_id: str,
+    side: str,
+    price: float,
+    quantity: float,
+    *,
+    order_type: str = "limit",
+    reason: str = "",
+) -> OrderValidatedEvent:
+    return OrderValidatedEvent(
+        account_id=ACCT,
+        order_id=order_id,
+        bot_id=BOT,
+        strategy_id="strat-v",
+        symbol=SYMBOL,
+        side=side,
+        quantity=quantity,
+        price=price,
+        order_type=order_type,
+        exchange="TEST",
+        reason=reason,
+    )
+
+
+async def _ledger(stack: _Stack) -> dict[str, Any]:
+    budget = stack.treasury.get_budget(BOT)
+    assert budget is not None
+    row = await stack.db.fetch_one(
+        "SELECT available, returned FROM bot_budgets WHERE bot_id = ?", (BOT,)
+    )
+    assert row is not None
+    positions = await stack.db.fetch_all(
+        "SELECT quantity, avg_entry_price, realized_pnl FROM positions"
+    )
+    history = await stack.db.fetch_all("SELECT action, quantity FROM position_history")
+    filled = await stack.db.fetch_all(
+        "SELECT side, quantity FROM trades WHERE status = 'filled'"
+    )
+    return {
+        "mem": (budget.available, budget.returned),
+        "db": (row["available"], row["returned"]),
+        "positions": [dict(p) for p in positions],
+        "history": [dict(h) for h in history],
+        "filled": [dict(t) for t in filled],
+    }
+
+
+async def _assert_rejected_unchanged(
+    stack: _Stack, before: dict[str, Any], order_id: str
+) -> None:
+    (failed,) = stack.of(OrderFailedEvent)
+    assert failed.order_id == order_id
+    assert failed.error_message == INSUFFICIENT
+    assert failed.error_code == ""
+    assert stack.of(OrderFilledEvent) == []
+    assert await _ledger(stack) == before
+    rows = await stack.db.fetch_all(
+        "SELECT reason FROM trades WHERE status = 'failed' AND side = 'sell'"
+    )
+    assert [r["reason"] for r in rows] == [INSUFFICIENT]
+
+
+async def test_sell_without_holdings_fails_without_side_effects(
+    stack: _Stack,
+) -> None:
+    before = await _ledger(stack)
+
+    await stack.bus.publish(_order("ord-sell", "sell", 10_000.0, 10.0))
+
+    await _assert_rejected_unchanged(stack, before, "ord-sell")
+
+
+async def test_sell_above_holdings_fails_and_keeps_position(stack: _Stack) -> None:
+    await stack.bus.publish(_order("ord-buy", "buy", 10_000.0, 5.0))
+    before = await _ledger(stack)
+    stack.events.clear()
+
+    await stack.bus.publish(_order("ord-sell", "sell", 10_000.0, 10.0))
+
+    await _assert_rejected_unchanged(stack, before, "ord-sell")
+    assert [p["quantity"] for p in before["positions"]] == [5.0]
+
+
+@pytest.mark.parametrize(
+    ("order_type", "reason"),
+    [("market", "stop_triggered: stop-1"), ("limit", "liquidation: bot stop")],
+)
+async def test_stop_and_liquidation_sells_above_holdings_fail_alike(
+    stack: _Stack, order_type: str, reason: str
+) -> None:
+    before = await _ledger(stack)
+
+    await stack.bus.publish(
+        _order("ord-sell", "sell", 10_000.0, 3.0, order_type=order_type, reason=reason)
+    )
+
+    await _assert_rejected_unchanged(stack, before, "ord-sell")
+
+
+async def test_overlapping_sells_of_full_holding_fill_only_one(stack: _Stack) -> None:
+    await stack.bus.publish(_order("ord-buy", "buy", 10_000.0, 10.0))
+    stack.events.clear()
+
+    await asyncio.gather(
+        stack.bus.publish(_order("ord-sell-a", "sell", 10_000.0, 10.0)),
+        stack.bus.publish(_order("ord-sell-b", "sell", 10_000.0, 10.0)),
+    )
+
+    assert len(stack.of(OrderFilledEvent)) == 1
+    (failed,) = stack.of(OrderFailedEvent)
+    assert failed.error_message == INSUFFICIENT
+    position = await stack.db.fetch_one("SELECT quantity FROM positions")
+    assert position is not None
+    assert position["quantity"] == 0
+    sells = await stack.db.fetch_all(
+        "SELECT quantity FROM trades WHERE status = 'filled' AND side = 'sell'"
+    )
+    assert [s["quantity"] for s in sells] == [10.0]
+    budget = stack.treasury.get_budget(BOT)
+    assert budget is not None
+    assert budget.returned == pytest.approx(100_000.0 * (1 - SELL_RATE))
+
+
+async def test_sell_within_holdings_still_fills_whole_quantity(stack: _Stack) -> None:
+    await stack.bus.publish(_order("ord-buy", "buy", 10_000.0, 10.0))
+    stack.events.clear()
+
+    await stack.bus.publish(_order("ord-sell", "sell", 10_000.0, 10.0))
+
+    assert stack.of(OrderFailedEvent) == []
+    (filled,) = stack.of(OrderFilledEvent)
+    assert filled.quantity == 10.0
+    position = await stack.db.fetch_one("SELECT quantity FROM positions")
+    assert position is not None
+    assert position["quantity"] == 0
+
+
+async def test_overflowing_sell_without_holdings_keeps_budget_finite(
+    stack: _Stack,
+) -> None:
+    before = await _ledger(stack)
+
+    await stack.bus.publish(_order("ord-sell", "sell", 1e200, 1e200))
+
+    await _assert_rejected_unchanged(stack, before, "ord-sell")
+    budget = stack.treasury.get_budget(BOT)
+    assert budget is not None
+    assert budget.available == before["mem"][0]
+
+
+async def test_direct_fill_raises_on_sell_above_holdings(stack: _Stack) -> None:
+    from ante.trade.fill_applier import InsufficientHoldingsError
+
+    assert FillApplier.InsufficientHoldingsError is InsufficientHoldingsError
+    with pytest.raises(InsufficientHoldingsError):
+        await stack.applier.apply_direct_fill(**_direct(side="sell"))
+
+    assert await stack.count("trades") == 0
+    assert await stack.count("positions") == 0
+    assert await stack.count("position_history") == 0
+
+
+async def test_direct_fill_replay_of_settled_sell_stays_idempotent(
+    stack: _Stack,
+) -> None:
+    assert await stack.applier.apply_direct_fill(**_direct()) is True
+    sell = _direct(order_id="ord-s", side="sell")
+    assert await stack.applier.apply_direct_fill(**sell) is True
+
+    assert await stack.applier.apply_direct_fill(**sell) is False
+    assert await stack.count("trades") == 2
+
+
+async def test_holdings_lookup_failure_ends_as_record_failure(
+    stack: _Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await stack.bus.publish(_order("ord-buy", "buy", 10_000.0, 10.0))
+    stack.events.clear()
+
+    async def _boom(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("positions read failed")
+
+    monkeypatch.setattr(stack.position_history, "get_current", _boom)
+
+    await stack.bus.publish(_order("ord-sell", "sell", 10_000.0, 10.0))
+
+    (failed,) = stack.of(OrderFailedEvent)
+    assert failed.error_message == "virtual_fill_record_failed"
+    sells = await stack.db.fetch_all(
+        "SELECT 1 FROM trades WHERE status = 'filled' AND side = 'sell'"
+    )
+    assert sells == []
+
+
+async def test_fractional_sells_compare_without_tolerance(stack: _Stack) -> None:
+    """알려진 한계: 부동소수 누적으로 마지막 소수 매도가 거부될 수 있다."""
+    from ante.trade.fill_applier import InsufficientHoldingsError
+
+    assert await stack.applier.apply_direct_fill(**_direct(quantity=0.3))
+    for n in range(2):
+        assert await stack.applier.apply_direct_fill(
+            **_direct(order_id=f"s{n}", side="sell", quantity=0.1)
+        )
+    with pytest.raises(InsufficientHoldingsError):
+        await stack.applier.apply_direct_fill(
+            **_direct(order_id="s2", side="sell", quantity=0.1)
+        )
+
+    for n in range(3):
+        assert await stack.applier.apply_direct_fill(
+            **_direct(order_id=f"b{n}", symbol="000002", quantity=0.1)
+        )
+    assert await stack.applier.apply_direct_fill(
+        **_direct(order_id="s-all", symbol="000002", side="sell", quantity=0.3)
+    )
