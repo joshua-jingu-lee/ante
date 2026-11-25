@@ -337,22 +337,258 @@ async def test_other_changes_do_not_release(db, event: ConfigChangedEvent) -> No
     assert manager.get("acc1").rules_unavailable is True
 
 
-async def test_failed_reload_does_not_release(db, monkeypatch) -> None:
+BROKEN_ITEMS = [
+    pytest.param(
+        [{"type": "total_exposure_limit"}, 5, {"type": "daily_loss_limit"}],
+        id="non_dict_item",
+    ),
+    pytest.param(
+        [
+            {"type": "daily_loss_limit", "priority": "1"},
+            {"type": "total_exposure_limit", "priority": 2},
+        ],
+        id="str_priority",
+    ),
+    pytest.param(
+        [
+            {"type": "daily_loss_limit", "priority": None},
+            {"type": "total_exposure_limit", "priority": 2},
+        ],
+        id="null_priority",
+    ),
+    pytest.param([{"type": ["x"]}], id="unhashable_type"),
+]
+RELOAD_FAILED_TITLE = "계좌 규칙을 다시 읽지 못함 — 이전 규칙 유지"
+
+
+def _assert_reload_failed_notice(cap: _Captured, value: list[Any]) -> None:
+    assert len(cap.notifications) == 1
+    note = cap.notifications[0]
+    assert note.level == "error"
+    assert note.category == "system"
+    assert note.title == RELOAD_FAILED_TITLE
+    assert "acc1" in note.message
+    assert json.dumps(value) not in note.message
+    for item in value:
+        if not isinstance(item, int):
+            assert json.dumps(item) not in note.message
+            assert str(item) not in note.message
+
+
+async def _normal_world(db: Database, config: Any = None) -> _World:
+    world = _World(db)
+    await world.store_rules()
+    await world.start(config)
+    return world
+
+
+@pytest.mark.parametrize("value", BROKEN_ITEMS)
+async def test_failed_reload_keeps_previous_rules(db, value: list[Any]) -> None:
+    world = await _normal_world(db)
+    manager = world.manager
+    assert manager is not None
+    engine = manager.get("acc1")
+    before = list(engine._account_rules)
+    assert _rule_types(engine) == ["daily_loss_limit"]
+    cap = _Captured(world.bus)
+
+    await engine._on_config_changed(_changed("rule", KEY1, value))
+
+    assert len(engine._account_rules) == len(before)
+    assert all(a is b for a, b in zip(engine._account_rules, before, strict=True))
+    assert engine.rules_unavailable is False
+    _assert_reload_failed_notice(cap, value)
+
+
+async def test_reload_skips_unknown_type_without_notice(db) -> None:
+    world = await _normal_world(db)
+    manager = world.manager
+    assert manager is not None
+    engine = manager.get("acc1")
+    cap = _Captured(world.bus)
+
+    await world.bus.publish(
+        _changed("rule", KEY1, [{"type": "total_exposure_limit"}, {"type": "nope"}])
+    )
+
+    assert _rule_types(engine) == ["total_exposure_limit"]
+    assert engine.rules_unavailable is False
+    assert cap.notifications == []
+
+
+@pytest.mark.parametrize("value", BROKEN_ITEMS)
+async def test_failed_reload_does_not_release(db, value: list[Any]) -> None:
     world = await _broken_world(db, '"off"')
     manager = world.manager
     assert manager is not None
     engine = manager.get("acc1")
+    cap = _Captured(world.bus)
 
-    def _boom(_configs: Any) -> None:
-        raise RuntimeError("reload failed")
+    await engine._on_config_changed(_changed("rule", KEY1, value))
 
-    monkeypatch.setattr(engine, "load_rules_from_config", _boom)
-    with pytest.raises(RuntimeError):
-        await engine._on_config_changed(
-            _changed("rule", KEY1, [{"type": "daily_loss_limit", **RULE_PARAMS}])
-        )
+    assert engine.rules_unavailable_cause == "not_list"
+    assert engine._account_rules == []
+    _assert_reload_failed_notice(cap, value)
 
-    assert engine.rules_unavailable is True
+
+async def test_global_rule_list_does_not_change_account_rules(db, caplog) -> None:
+    world = await _normal_world(db)
+    manager = world.manager
+    assert manager is not None
+    caplog.set_level(logging.INFO, logger="ante.rule.engine")
+
+    await world.bus.publish(
+        _changed("global_rule", KEY1, [{"type": "total_exposure_limit"}])
+    )
+    await world.bus.publish(
+        _changed("global_rule", "rules.global", [{"type": "total_exposure_limit"}])
+    )
+
+    assert _rule_types(manager.get("acc1")) == ["daily_loss_limit"]
+    assert _rule_types(manager.get("acc2")) == ["daily_loss_limit"]
+    assert [r for r in caplog.records if "재로딩" in r.getMessage()] == []
+
+
+async def _item_broken_world(db: Database, value: list[Any], source: str) -> _World:
+    world = _World(db)
+    await world.dyn.initialize()
+    if source == "dynamic":
+        await world.store_rules()
+        await world.break_acc1(json.dumps(value))
+        await world.start()
+    else:
+        await world.update("acc2")
+        await world.start(_StaticSeed({KEY1: value}))
+    return world
+
+
+@pytest.mark.parametrize("source", ["dynamic", "seed"])
+@pytest.mark.parametrize("value", BROKEN_ITEMS)
+async def test_broken_item_blocks_only_that_account_at_startup(
+    db, caplog, value: list[Any], source: str
+) -> None:
+    caplog.set_level(logging.INFO)
+    world = await _item_broken_world(db, value, source)
+    manager = world.manager
+    assert manager is not None
+    cap = _Captured(world.bus)
+
+    acc1 = manager.get("acc1")
+    acc2 = manager.get("acc2")
+    assert acc1.rules_unavailable_cause == "invalid_item"
+    assert acc1._account_rules == []
+    assert acc2.rules_unavailable is False
+    assert _rule_types(acc2) == ["daily_loss_limit"]
+    assert manager.rules_unavailable_accounts() == {"acc1": "invalid_item"}
+    errors = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.ERROR and r.name == "ante.rule.manager"
+    ]
+    assert len(errors) == 1
+    assert "acc1" in errors[0].getMessage()
+    assert "invalid_item" in errors[0].getMessage()
+
+    await world.bus.publish(_request("acc1"))
+    await world.bus.publish(_request("acc1", side="sell", reason="liquidation:bot"))
+    blocked = _modify("acc1")
+    await world.bus.publish(blocked)
+
+    assert cap.validated == []
+    assert len(cap.rules_rejections("acc1")) == 2
+    assert len(cap.modify_rejected) == 1
+    assert "rules_unavailable" in cap.modify_rejected[0].reason
+    assert getattr(blocked, "_consumed", False) is True
+
+    await world.bus.publish(_request("acc2"))
+    assert cap.rules_rejections("acc2") == []
+
+
+async def test_broken_item_log_names_effective_position_without_values(
+    db, caplog
+) -> None:
+    bus = EventBus()
+    account = make_account("kis", broker_type="kis-domestic")
+    dyn = DynamicConfigService(db, bus)
+    await dyn.initialize()
+    await dyn.set(
+        "accounts.kis.rules",
+        [{"type": "daily_loss_limit", "max_daily_loss_percent": 0.0371}, 5],
+        category="rule",
+        changed_by="test",
+    )
+    caplog.set_level(logging.INFO, logger="ante.rule.engine")
+    manager = RuleEngineManager(eventbus=bus, account_service=MagicMock())
+    await manager.initialize_all([account], dynamic_config=dyn)
+
+    assert manager.rules_unavailable_accounts() == {"kis": "invalid_item"}
+    built = [r for r in caplog.records if "룰 항목을 만들지 못함" in r.getMessage()]
+    assert len(built) == 1
+    message = built[0].getMessage()
+    assert "effective_index=2(기본 룰 병합 뒤 위치)" in message
+    assert "item=int" in message
+    assert "type=None" in message
+    assert "0.0371" not in caplog.text
+
+
+async def test_startup_notification_for_broken_item(db) -> None:
+    value: list[Any] = [{"type": "daily_loss_limit"}, 5]
+    world = await _item_broken_world(db, value, "dynamic")
+    cap = _Captured(world.bus)
+
+    await _notify_rules_unavailable(_services(world.manager, world.bus))
+
+    assert len(cap.notifications) == 1
+    note = cap.notifications[0]
+    assert note.level == "error"
+    assert note.category == "system"
+    assert "acc1" in note.message
+    assert "규칙으로 만들 수 없는 항목" in note.message
+    assert "복원되지 않습니다" not in note.message
+    assert json.dumps(value) not in note.message
+
+
+async def test_rule_update_of_that_type_releases_str_priority(db) -> None:
+    value = [
+        {"type": "daily_loss_limit", "priority": "1"},
+        {"type": "total_exposure_limit", "priority": 2},
+    ]
+    world = await _item_broken_world(db, value, "dynamic")
+    manager = world.manager
+    assert manager is not None
+
+    await world.update("acc1")
+
+    engine = manager.get("acc1")
+    assert engine.rules_unavailable is False
+    assert sorted(_rule_types(engine)) == ["daily_loss_limit", "total_exposure_limit"]
+
+
+async def test_rule_update_does_not_release_non_dict_item_after_target(db) -> None:
+    world = await _item_broken_world(db, [{"type": "daily_loss_limit"}, 5], "dynamic")
+    manager = world.manager
+    assert manager is not None
+    cap = _Captured(world.bus)
+
+    await world.update("acc1")
+
+    assert await world.dyn.get(KEY1) == [
+        {"type": "daily_loss_limit", "enabled": True, **RULE_PARAMS},
+        5,
+    ]
+    assert manager.get("acc1").rules_unavailable_cause == "invalid_item"
+    assert [n.title for n in cap.notifications] == [RELOAD_FAILED_TITLE]
+
+
+async def test_rule_update_fails_on_non_dict_item_before_target(db) -> None:
+    world = await _item_broken_world(db, [5, {"type": "daily_loss_limit"}], "dynamic")
+    manager = world.manager
+    assert manager is not None
+
+    with pytest.raises(AttributeError):
+        await world.update("acc1")
+
+    assert manager.get("acc1").rules_unavailable_cause == "invalid_item"
 
 
 def _services(manager: Any, bus: EventBus | None) -> Any:

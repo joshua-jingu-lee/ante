@@ -5221,8 +5221,8 @@ class TestRuleEngineConfigReload:
         engine.start()
         return engine
 
-    async def test_global_rule_reload_on_config_changed(self, engine, eventbus):
-        """category='global_rule' ConfigChangedEvent 발행 시 계좌 룰이 재로드된다."""
+    async def test_global_rule_category_does_not_reload(self, engine, eventbus):
+        """#3009 category='global_rule' 리스트 이벤트는 계좌 룰을 바꾸지 않는다."""
         import json
 
         from ante.eventbus.events import ConfigChangedEvent
@@ -5252,10 +5252,7 @@ class TestRuleEngineConfigReload:
             )
         )
 
-        assert len(engine._global_rules) == 2
-        rule_ids = {r.rule_id for r in engine._global_rules}
-        assert rule_ids == {"exp", "th"}
-        assert "dl" not in rule_ids
+        assert [r.rule_id for r in engine._global_rules] == ["dl"]
 
     async def test_rule_category_reload(self, engine, eventbus):
         """category='rule'도 계좌 룰 재로드를 트리거한다 (자기 계좌 키일 때만)."""
@@ -5370,8 +5367,8 @@ class TestRuleEngineConfigReload:
 
         await eventbus.publish(
             ConfigChangedEvent(
-                category="global_rule",
-                key="rules.global",
+                category="rule",
+                key="accounts.domestic.rules",
                 new_value="not-valid-json{{{",
             )
         )
@@ -5392,8 +5389,8 @@ class TestRuleEngineConfigReload:
 
         await eventbus.publish(
             ConfigChangedEvent(
-                category="global_rule",
-                key="rules.global",
+                category="rule",
+                key="accounts.domestic.rules",
                 new_value=json.dumps({"not": "a list"}),
             )
         )

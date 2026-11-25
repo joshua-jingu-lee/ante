@@ -120,7 +120,8 @@ class RuleEngineManager:
         Stored rules 우선순위: ``dynamic_config`` 행(사용자가 명시적으로 비활성화한
         룰이 default 재주입으로 되살아나지 않도록 static보다 우선) → 정적 ``config``
         seed → broker_type별 default. ``dynamic_config`` 행의 값이 리스트가 아니거나
-        조회가 예외를 내면 그 계좌만 계좌 룰 없이 ``rules_unavailable`` 엔진으로 둔다.
+        조회가 예외를 내거나, 항목으로 룰을 만들지 못하면 그 계좌만 계좌 룰 없이
+        ``rules_unavailable`` 엔진으로 둔다.
         """
         for account in accounts:
             key = account_rules_config_key(account.account_id)
@@ -139,14 +140,11 @@ class RuleEngineManager:
                         cause = f"not_list:{type(dyn_rules).__name__}"
                 if cause is not None:
                     logger.error(
-                        "계좌 룰 저장값을 읽지 못해 주문 차단: account=%s, cause=%s",
+                        "계좌 룰을 로드하지 못해 주문 차단: account=%s, cause=%s",
                         account.account_id,
                         cause,
                     )
-                    engine = self.create_engine(
-                        account.account_id, None, account=account
-                    )
-                    engine.mark_rules_unavailable(cause.split(":", 1)[0])
+                    self._create_blocked_engine(account, cause)
                     continue
 
             if stored_rules is None and config is not None and hasattr(config, "get"):
@@ -154,14 +152,34 @@ class RuleEngineManager:
                 if isinstance(account_rules, list):
                     stored_rules = account_rules
 
-            rule_configs = resolve_effective_rules(account, stored_rules)
-
-            self.create_engine(account.account_id, rule_configs, account=account)
+            self._create_engine_or_block(account, stored_rules)
 
         logger.info("RuleEngineManager 초기화 완료: %d개 계좌", len(self._engines))
 
+    def _create_engine_or_block(
+        self, account: Account, stored_rules: list[dict[str, Any]] | None
+    ) -> None:
+        """룰을 만들 수 없으면 그 계좌만 ``invalid_item`` 차단 엔진으로 둔다."""
+        try:
+            rule_configs = resolve_effective_rules(account, stored_rules)
+            self.create_engine(account.account_id, rule_configs, account=account)
+        except Exception as exc:
+            cause = f"invalid_item:{type(exc).__name__}"
+            logger.error(
+                "계좌 룰을 로드하지 못해 주문 차단: account=%s, cause=%s",
+                account.account_id,
+                cause,
+                exc_info=True,
+            )
+            self._create_blocked_engine(account, cause)
+
+    def _create_blocked_engine(self, account: Account, cause: str) -> None:
+        """계좌 룰 없이 ``rules_unavailable`` 엔진을 만든다(``cause``는 원인:상세)."""
+        engine = self.create_engine(account.account_id, None, account=account)
+        engine.mark_rules_unavailable(cause.split(":", 1)[0])
+
     def rules_unavailable_accounts(self) -> dict[str, str]:
-        """저장된 계좌 룰을 읽지 못한 계좌 ID → 원인(``not_list`` | ``read_error``)."""
+        """막힌 계좌 ID → 원인(``not_list`` | ``read_error`` | ``invalid_item``)."""
         return {
             account_id: engine.rules_unavailable_cause
             for account_id, engine in self._engines.items()

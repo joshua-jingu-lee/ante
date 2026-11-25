@@ -204,7 +204,7 @@ class RuleEngine:
 
     @property
     def rules_unavailable_cause(self) -> str | None:
-        """막힌 원인(``not_list`` | ``read_error``). 막히지 않았으면 ``None``."""
+        """막힌 원인(``not_list``|``read_error``|``invalid_item``). 아니면 ``None``."""
         return self._rules_unavailable_cause
 
     def mark_rules_unavailable(self, cause: str) -> None:
@@ -297,12 +297,9 @@ class RuleEngine:
         self._strategy_rules.clear()
 
     def load_rules_from_config(self, rule_configs: list[dict[str, Any]]) -> None:
-        """룰 설정 리스트에서 계좌 룰 인스턴스 생성."""
-        for cfg in rule_configs:
-            rule = self._create_rule(cfg)
-            if rule is not None:
-                self._account_rules.append(rule)
-        self._account_rules.sort(key=lambda r: r.priority)
+        """룰 설정 리스트로 계좌 룰을 만들어 더한다. 실패하면 기존 룰을 그대로 둔다."""
+        merged = self._account_rules + self._build_rules(rule_configs)
+        self._account_rules = self._sorted_rules(merged)
 
     def load_strategy_rules_from_config(
         self,
@@ -310,13 +307,43 @@ class RuleEngine:
         rule_configs: list[dict[str, Any]],
     ) -> None:
         """룰 설정 리스트에서 전략별 룰 인스턴스 생성."""
+        self._strategy_rules[strategy_id] = self._build_rules(rule_configs)
+
+    def _build_rules(self, rule_configs: list[dict[str, Any]]) -> list[Rule]:
+        """설정 리스트로 룰을 끝까지 만들고 정렬한다. 도중의 예외는 그대로 낸다."""
         rules: list[Rule] = []
-        for cfg in rule_configs:
-            rule = self._create_rule(cfg)
+        for index, cfg in enumerate(rule_configs):
+            try:
+                rule = self._create_rule(cfg)
+            except Exception as exc:
+                rule_type = cfg.get("type") if isinstance(cfg, dict) else None
+                logger.error(
+                    "룰 항목을 만들지 못함: account=%s, "
+                    "effective_index=%d(기본 룰 병합 뒤 위치), item=%s, type=%s, "
+                    "error=%s",
+                    self._account_id,
+                    index,
+                    type(cfg).__name__,
+                    rule_type if isinstance(rule_type, str) else None,
+                    type(exc).__name__,
+                )
+                raise
             if rule is not None:
                 rules.append(rule)
-        rules.sort(key=lambda r: r.priority)
-        self._strategy_rules[strategy_id] = rules
+        return self._sorted_rules(rules)
+
+    def _sorted_rules(self, rules: list[Rule]) -> list[Rule]:
+        """priority로 정렬한 새 리스트. 비교할 수 없으면 priority 타입을 남기고 낸다."""
+        try:
+            return sorted(rules, key=lambda r: r.priority)
+        except Exception as exc:
+            logger.error(
+                "룰 priority로 정렬하지 못함: account=%s, priorities=%s, error=%s",
+                self._account_id,
+                [(r.config.get("type"), type(r.priority).__name__) for r in rules],
+                type(exc).__name__,
+            )
+            raise
 
     @staticmethod
     def _create_rule(config: dict[str, Any]) -> Rule | None:
@@ -1216,15 +1243,49 @@ class RuleEngine:
             [rule.config.get("type") for rule in self._account_rules],
         )
 
+    def _swap_account_rules(self, new_rules: list[dict[str, Any]]) -> str | None:
+        """새 계좌 룰을 다 만든 뒤에만 바꿔 끼운다. 실패하면 예외 타입 이름을 낸다."""
+        try:
+            effective = new_rules
+            if self._account is not None:
+                from ante.rule.defaults import resolve_effective_rules
+
+                effective = resolve_effective_rules(self._account, new_rules)
+            rules = self._build_rules(effective)
+        except Exception as exc:
+            logger.error(
+                "계좌 룰 재로드 실패 — 이전 룰 유지: account=%s",
+                self._account_id,
+                exc_info=True,
+            )
+            return type(exc).__name__
+        self._account_rules = rules
+        logger.info("계좌 룰 재로드 완료: %d건", len(self._account_rules))
+        return None
+
+    def _reload_failed_message(self, error: str) -> str:
+        """실행 중 계좌 룰 재로드 실패 알림 본문(저장값 원문 없음)."""
+        state = (
+            "이 계좌는 계속 주문이 막혀 있습니다."
+            if self.rules_unavailable
+            else "이전 규칙으로 계속 검증하며, 저장값을 고치지 않고 재기동하면 "
+            "이 계좌의 주문이 막힙니다."
+        )
+        return (
+            f"계좌 {self._account_id} 의 새 거래 규칙 저장값으로 규칙을 만들지 못해 "
+            f"({error}) 바꾸지 않았습니다. {state} 오류 로그에서 문제의 항목을 "
+            "확인하세요."
+        )
+
     async def _on_config_changed(self, event: object) -> None:
         """설정 변경 시 룰 재로딩."""
         import json
 
-        from ante.eventbus.events import ConfigChangedEvent
+        from ante.eventbus.events import ConfigChangedEvent, NotificationEvent
 
         if not isinstance(event, ConfigChangedEvent):
             return
-        if event.category not in ("rule", "global_rule", "strategy_rule"):
+        if event.category not in ("rule", "strategy_rule"):
             return
 
         if event.category == "rule":
@@ -1244,16 +1305,18 @@ class RuleEngine:
             logger.warning("룰 설정이 list가 아님 — 재로딩 건너뜀: %s", event.key)
             return
 
-        if event.category in ("rule", "global_rule"):
-            self._account_rules.clear()
-            if self._account is not None:
-                from ante.rule.defaults import resolve_effective_rules
-
-                effective = resolve_effective_rules(self._account, new_rules)
-                self.load_rules_from_config(effective)
-            else:
-                self.load_rules_from_config(new_rules)
-            logger.info("계좌 룰 재로드 완료: %d건", len(self._account_rules))
+        if event.category == "rule":
+            error = self._swap_account_rules(new_rules)
+            if error is not None:
+                await self._eventbus.publish(
+                    NotificationEvent(
+                        level="error",
+                        title="계좌 규칙을 다시 읽지 못함 — 이전 규칙 유지",
+                        message=self._reload_failed_message(error),
+                        category="system",
+                    )
+                )
+                return
             self._release_rules_unavailable(event.category)
         elif event.category == "strategy_rule":
             parts = event.key.rsplit(".", 1)
