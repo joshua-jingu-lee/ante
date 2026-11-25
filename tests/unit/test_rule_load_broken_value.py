@@ -431,10 +431,11 @@ async def test_failed_reload_does_not_release(db, value: list[Any]) -> None:
     _assert_reload_failed_notice(cap, value)
 
 
-async def test_global_rule_list_does_not_change_account_rules(db) -> None:
+async def test_global_rule_list_does_not_change_account_rules(db, caplog) -> None:
     world = await _normal_world(db)
     manager = world.manager
     assert manager is not None
+    caplog.set_level(logging.INFO, logger="ante.rule.engine")
 
     await world.bus.publish(
         _changed("global_rule", KEY1, [{"type": "total_exposure_limit"}])
@@ -445,6 +446,7 @@ async def test_global_rule_list_does_not_change_account_rules(db) -> None:
 
     assert _rule_types(manager.get("acc1")) == ["daily_loss_limit"]
     assert _rule_types(manager.get("acc2")) == ["daily_loss_limit"]
+    assert [r for r in caplog.records if "재로딩" in r.getMessage()] == []
 
 
 async def _item_broken_world(db: Database, value: list[Any], source: str) -> _World:

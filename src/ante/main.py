@@ -1752,23 +1752,32 @@ async def _init_notification(s: Services) -> None:
         logger.info("TelegramCommandReceiver 건너뜀 — TELEGRAM_CHAT_ID 미설정")
 
 
+_RULES_UNAVAILABLE_HISTORY_HINT = (
+    " ante config history accounts.{id}.rules 로 이전 값을 확인하고 필요한 규칙을 "
+    "모두 다시 저장하세요 — 깨지기 전의 다른 규칙은 복원되지 않습니다."
+)
+
 _RULES_UNAVAILABLE_MESSAGES = {
     "not_list": (
         "계좌 {id} 의 거래 규칙 저장값이 규칙 목록 형식이 아니어서 이 계좌의 주문을 "
         "막았습니다. ante rule update <rule_type> --account {id} 로 규칙을 다시 "
-        "저장하면 재기동 없이 풀립니다."
+        "저장하면 재기동 없이 풀립니다." + _RULES_UNAVAILABLE_HISTORY_HINT
     ),
     "read_error": (
         "계좌 {id} 의 거래 규칙 저장값을 읽는 중 오류가 나 이 계좌의 주문을 "
         "막았습니다. 저장값은 멀쩡할 수 있으며 재기동으로 풀릴 수 있습니다. 풀리지 "
         "않으면 ante rule update <rule_type> --account {id} 로 규칙을 다시 저장하세요."
+        + _RULES_UNAVAILABLE_HISTORY_HINT
+    ),
+    "invalid_item": (
+        "계좌 {id} 의 거래 규칙 저장값에 규칙으로 만들 수 없는 항목이 있어 이 계좌의 "
+        "주문을 막았습니다. 오류 로그에서 문제의 항목을 확인하세요. 다른 항목은 "
+        "저장값에 그대로 남아 있습니다. priority 값이 원인이면 그 항목의 규칙 유형으로 "
+        "ante rule update <rule_type> --account {id} 를 한 번 하면 재기동 없이 "
+        "풀립니다. 규칙 객체가 아닌 항목(숫자·문자열 등)은 rule update로 풀리지 "
+        "않습니다."
     ),
 }
-
-_RULES_UNAVAILABLE_HISTORY_HINT = (
-    " ante config history accounts.{id}.rules 로 이전 값을 확인하고 필요한 규칙을 "
-    "모두 다시 저장하세요 — 깨지기 전의 다른 규칙은 복원되지 않습니다."
-)
 
 
 async def _notify_rules_unavailable(s: Services) -> None:
@@ -1776,7 +1785,7 @@ async def _notify_rules_unavailable(s: Services) -> None:
     if s.rule_engine_manager is None or s.eventbus is None:
         return
     for account_id, cause in s.rule_engine_manager.rules_unavailable_accounts().items():
-        message = _RULES_UNAVAILABLE_MESSAGES[cause] + _RULES_UNAVAILABLE_HISTORY_HINT
+        message = _RULES_UNAVAILABLE_MESSAGES[cause]
         await s.eventbus.publish(
             NotificationEvent(
                 level="error",
