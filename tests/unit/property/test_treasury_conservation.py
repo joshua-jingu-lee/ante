@@ -172,8 +172,12 @@ class TreasuryMachine(RuleBasedStateMachine):
     def _publish(self, event: Event) -> None:
         self._run(self.bus.publish(event))
 
-    def _close_bot_orders(self, bot_id: str) -> None:
-        for order_id in [o for o, v in self.open_orders.items() if v.bot_id == bot_id]:
+    def _close_bot_orders(self, bot_id: str, *, untracked_only: bool = False) -> None:
+        for order_id in [
+            o
+            for o, v in self.open_orders.items()
+            if v.bot_id == bot_id and not (untracked_only and v.tracked)
+        ]:
             del self.open_orders[order_id]
 
     def _budget_values(self) -> dict[str, tuple[float, ...]]:
@@ -229,14 +233,30 @@ class TreasuryMachine(RuleBasedStateMachine):
         """봇 정지(``BotStoppedEvent``) 또는 봇 삭제(``release_budget``).
 
         한 규칙으로 묶는 이유: hypothesis는 인자가 적은 규칙을 앞에 두고 앞의 규칙을
-        자주 고른다. 따로 두면 주문을 모두 닫는 이 둘이 걸음의 3할을 차지했다.
+        자주 고른다. 따로 두면 주문을 닫는 이 둘이 걸음의 3할을 차지했다.
+
+        정지는 추적기에서 열린 주문의 예약을 남기고 미추적 주문의 예약만 회수한다
+        (#3048). 그래서 정지 뒤에도 추적 주문의 체결·취소·실패가 이어진다. 삭제는
+        그 봇의 주문을 모두 닫는다.
         """
         if delete:
             self._run(self.treasury.release_budget(bot))
             self.funded.discard(bot)
-        else:
-            self._publish(BotStoppedEvent(account_id=ACCOUNT_ID, bot_id=bot))
-        self._close_bot_orders(bot)
+            self._close_bot_orders(bot)
+            return
+        table = self.treasury.get_reservations(bot)
+        kept = {
+            o: table[o]
+            for o, v in self.open_orders.items()
+            if v.bot_id == bot and v.tracked and o in table
+        }
+        self._publish(BotStoppedEvent(account_id=ACCOUNT_ID, bot_id=bot))
+        after = self.treasury.get_reservations(bot)
+        assert {o: after.get(o) for o in kept} == kept, (
+            "정지가 열린 주문의 예약을 회수했다"
+        )
+        assert set(after) <= set(kept), f"정지가 남긴 예약 {after} != 열린 주문 {kept}"
+        self._close_bot_orders(bot, untracked_only=True)
 
     # ── 주문 ────────────────────────────────────────────────────────
 

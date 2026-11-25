@@ -41,7 +41,7 @@
 
 스트림/폴 fill-recovery 경로(`FillApplier`)는 **체결 delta마다** `OrderFilledEvent`를
 발행한다. 따라서 한 주문이 여러 번에 나눠 체결되면 Treasury는 fill마다 그 delta의
-실비용만큼만 예약을 차감하고, **주문이 terminal(전량 체결/취소/실패/봇중지)에 도달한
+실비용만큼만 예약을 차감하고, **주문이 terminal(전량 체결/취소/실패)에 도달한
 경우에만** 잔여 예약을 회수한다. 첫 partial 체결이 전체 예약을 통째로 해제하지 않는다.
 
 주문별로 **잔여 예약**(`remaining_reserved`)을 추적한다. `reserve_for_order()`가 예약
@@ -65,9 +65,10 @@ reserved`, under-fill surplus)을 `reserved → available`로 회수하고 추�
 기존 full-fill pop-once semantics(전액 예약 차감 + surplus/shortfall 1회 정산)로
 fallback한다. 단일 full-fill엔 pop-once가 정확하다.
 
-**취소/실패/봇중지**: 부분체결 후 취소/실패/봇중지 시 이미 체결된 분은 위 per-fill
+**취소/실패**: 부분체결 후 취소/실패 시 이미 체결된 분은 위 per-fill
 정산으로 `spent`에 반영되어 `reserved`에서 빠진 상태이므로, **잔여 예약만** 회수해
-기체결분을 보존한다.
+기체결분을 보존한다. 봇 정지는 추적기에서 열린(`open`·`partially_filled`) 주문의 잔여
+예약을 남기고, 추적 기록이 없거나 이미 종결된 주문의 잔여 예약만 회수한다.
 
 이 전 구간에서 불변식 `available = allocated - reserved - spent + returned`가 유지된다.
 
@@ -82,9 +83,9 @@ fallback한다. 단일 full-fill엔 pop-once가 정확하다.
 
 주문별 잔여 예약(`remaining_reserved`)은 Treasury 소유 테이블 `treasury_reservations`에
 계좌별로 영속되고, `initialize()`가 `bot_budgets`와 함께 복원한다. 재시작 뒤에도 미종결
-매수 주문의 취소·실패·체결·봇 중지가 재시작 전과 같은 잔여 예약을 정산한다.
+매수 주문의 취소·실패·체결·봇 정지의 회수(열린 주문 제외)가 재시작 전과 같은 잔여 예약을 정산한다.
 
-- 예약·체결 정산·취소/실패 회수·봇 중지 회수는 예약 표의 변경을 그 행에 쓰는 일과
+- 예약·체결 정산·취소/실패 회수·봇 정지의 회수(열린 주문 제외)는 예약 표의 변경을 그 행에 쓰는 일과
   `bot_budgets` 저장을 한 트랜잭션으로 한다. 실패하면 그 연산의 증감과 그 주문의 예약 항목만
   되돌려 그 사이 다른 연산의 변경은 남긴다. 예약 항목을 바꾼 연산은 그 항목이 이 연산이 남긴
   그대로일 때만 되돌리고, 다른 연산이 그 주문의 예약을 이미 바꾸거나 회수했으면 되돌리지 않는다.

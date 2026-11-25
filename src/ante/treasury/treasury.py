@@ -141,6 +141,8 @@ _SNAPSHOT_RETENTION_DAYS = 365 * 5
 
 _PURCHASABLE_PROBE_SYMBOL = "005930"
 
+_OPEN_ORDER_STATUSES: frozenset[str] = frozenset({"open", "partially_filled"})
+
 
 class Treasury:
     """계좌별 중앙 자금(예산) 관리자.
@@ -1325,7 +1327,7 @@ class Treasury:
         await self.release_reservation(event.bot_id, event.order_id)
 
     async def _on_bot_stopped(self, event: object) -> None:
-        """봇 중지 시 해당 봇의 모든 주문 **잔여 예약**을 일괄 회수."""
+        """봇 정지 시 열린 주문을 뺀 그 봇의 **잔여 예약**을 회수한다."""
         from ante.eventbus.events import BotStoppedEvent
 
         if not isinstance(event, BotStoppedEvent):
@@ -1335,9 +1337,16 @@ class Treasury:
             return
 
         bot_id = event.bot_id
-        pending = self.get_reservations(bot_id)
+        looked_up = list(self.get_reservations(bot_id))
+        if not looked_up:
+            return
+
+        closed = [oid for oid in looked_up if not await self._order_still_open(oid)]
+        current = self.get_reservations(bot_id)
+        pending = {oid: current[oid] for oid in closed if oid in current}
         if not pending:
             return
+        held = len(current) - len(pending)
 
         total_released = await self._release_bot_reservations(bot_id, pending)
 
@@ -1345,14 +1354,30 @@ class Treasury:
             bot_id=bot_id,
             tx_type="bot_stopped_release",
             amount=total_released,
-            description=f"{len(pending)}건 예약 해제",
+            description=f"{len(pending)}건 예약 해제, {held}건 유지(열린 주문)",
         )
         logger.info(
-            "봇 중지 예약 해제: %s -- %d건, %s원",
+            "봇 정지 예약 해제: %s -- %d건, %s원, 유지 %d건",
             bot_id,
             len(pending),
             f"{total_released:,.0f}",
+            held,
         )
+
+    async def _order_still_open(self, order_id: str) -> bool:
+        """추적기에서 열린 주문이거나 조회가 실패한 주문이면 참이다."""
+        if self._order_tracker is None:
+            return False
+        try:
+            record = await self._order_tracker.get(order_id)
+        except Exception:
+            logger.warning(
+                "봇 정지: 주문 %s 의 추적 조회 실패 -- 예약 유지",
+                order_id,
+                exc_info=True,
+            )
+            return True
+        return record is not None and record.status in _OPEN_ORDER_STATUSES
 
     async def _release_bot_reservations(
         self, bot_id: str, pending: dict[str, float]
