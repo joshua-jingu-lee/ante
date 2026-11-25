@@ -133,6 +133,16 @@ def _describe_dropped(dropped: list[tuple[int, Any]]) -> str:
     return "; ".join(parts)
 
 
+def _dropped_summary(dropped: list[tuple[int, Any]]) -> list[dict[str, Any]]:
+    """Return dropped items as stored positions and string type names, never values."""
+    summary: list[dict[str, Any]] = []
+    for index, item in dropped:
+        field = item.get("type") if isinstance(item, dict) else None
+        rule_type = field if isinstance(field, str) else None
+        summary.append({"stored_index": index, "rule_type": rule_type})
+    return summary
+
+
 async def _report_dropped(
     account_id: str, key: str, dropped: list[tuple[int, Any]], eventbus: Any | None
 ) -> None:
@@ -253,4 +263,5 @@ async def update_account_rule_config(
         "account_id": account_id,
         "rule_type": rule_type,
         "rule": rule_config_to_item(new_config),
+        "dropped_items": _dropped_summary(dropped),
     }

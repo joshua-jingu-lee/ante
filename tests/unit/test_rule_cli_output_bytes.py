@@ -49,7 +49,14 @@ _UPDATE_RESULT: dict[str, Any] = {
         "enabled": True,
         "params": {"max_count": 20},
     },
+    "dropped_items": [],
 }
+
+_DROPPED = [
+    {"stored_index": 1, "rule_type": "nope"},
+    {"stored_index": 3, "rule_type": None},
+    {"stored_index": 4, "rule_type": "a\nb"},
+]
 
 _UPDATE = [
     "rule",
@@ -69,7 +76,10 @@ _CASES: dict[str, list[str]] = {
     "info": ["rule", "info", "max_position_count", "--account", "acct-001"],
     "update_ipc": list(_UPDATE),
     "update_ipc_no_rule": list(_UPDATE),
+    "update_ipc_no_dropped_key": list(_UPDATE),
+    "update_ipc_dropped": list(_UPDATE),
     "update_direct": list(_UPDATE),
+    "update_direct_dropped": list(_UPDATE),
     "update_direct_disabled": [
         "rule",
         "update",
@@ -82,7 +92,12 @@ _CASES: dict[str, list[str]] = {
     ],
 }
 
-_IPC_CALLS = {"update_ipc": 1, "update_ipc_no_rule": 1}
+_IPC_CALLS = {
+    "update_ipc": 1,
+    "update_ipc_no_rule": 1,
+    "update_ipc_no_dropped_key": 1,
+    "update_ipc_dropped": 1,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -126,6 +141,10 @@ def _invoke_case(
     ipc_result = dict(_UPDATE_RESULT)
     if branch == "update_ipc_no_rule":
         del ipc_result["rule"]
+    if branch == "update_ipc_no_dropped_key":
+        del ipc_result["dropped_items"]
+    if branch == "update_ipc_dropped":
+        ipc_result["dropped_items"] = list(_DROPPED)
     ipc_send = AsyncMock(return_value=ipc_result)
     direct_result = dict(_UPDATE_RESULT)
     if branch == "update_direct_disabled":
@@ -134,6 +153,8 @@ def _invoke_case(
             "enabled": False,
             "params": {"max_count": 5},
         }
+    if branch == "update_direct_dropped":
+        direct_result["dropped_items"] = list(_DROPPED)
     update = AsyncMock(return_value=direct_result)
     active = branch.startswith("update_ipc")
     args = list(_CASES[branch])
@@ -157,6 +178,45 @@ def _invoke_case(
         )
     return result, ipc_send, update
 
+
+_DROPPED_TEXT = (
+    "룰 수정 완료: acct-001 max_position_count enabled=True\n"
+    "저장값에서 쓸 수 없는 항목 3건을 버림: stored_index=1 rule_type='nope', "
+    "stored_index=3 rule_type=None, stored_index=4 rule_type='a\\nb' "
+    "(원문은 ante config history accounts.acct-001.rules의 이전 값, "
+    "seed에서 읽었으면 설정 파일에 남음)\n"
+)
+_DROPPED_JSON = (
+    "{\n"
+    '  "status": "ok",\n'
+    '  "message": "",\n'
+    '  "data": {\n'
+    '    "account_id": "acct-001",\n'
+    '    "rule_type": "max_position_count",\n'
+    '    "rule": {\n'
+    '      "type": "max_position_count",\n'
+    '      "enabled": true,\n'
+    '      "params": {\n'
+    '        "max_count": 20\n'
+    "      }\n"
+    "    },\n"
+    '    "dropped_items": [\n'
+    "      {\n"
+    '        "stored_index": 1,\n'
+    '        "rule_type": "nope"\n'
+    "      },\n"
+    "      {\n"
+    '        "stored_index": 3,\n'
+    '        "rule_type": null\n'
+    "      },\n"
+    "      {\n"
+    '        "stored_index": 4,\n'
+    '        "rule_type": "a\\nb"\n'
+    "      }\n"
+    "    ]\n"
+    "  }\n"
+    "}\n"
+)
 
 _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ("list_empty", "text"): ("등록된 룰이 없습니다.\n"),
@@ -290,7 +350,8 @@ _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         '      "params": {\n'
         '        "max_count": 20\n'
         "      }\n"
-        "    }\n"
+        "    },\n"
+        '    "dropped_items": []\n'
         "  }\n"
         "}\n"
     ),
@@ -303,7 +364,8 @@ _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         '  "message": "",\n'
         '  "data": {\n'
         '    "account_id": "acct-001",\n'
-        '    "rule_type": "max_position_count"\n'
+        '    "rule_type": "max_position_count",\n'
+        '    "dropped_items": []\n'
         "  }\n"
         "}\n"
     ),
@@ -323,7 +385,8 @@ _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         '      "params": {\n'
         '        "max_count": 20\n'
         "      }\n"
-        "    }\n"
+        "    },\n"
+        '    "dropped_items": []\n'
         "  }\n"
         "}\n"
     ),
@@ -343,10 +406,35 @@ _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         '      "params": {\n'
         '        "max_count": 5\n'
         "      }\n"
+        "    },\n"
+        '    "dropped_items": []\n'
+        "  }\n"
+        "}\n"
+    ),
+    ("update_ipc_no_dropped_key", "text"): (
+        "룰 수정 완료: acct-001 max_position_count enabled=True\n"
+    ),
+    ("update_ipc_no_dropped_key", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "account_id": "acct-001",\n'
+        '    "rule_type": "max_position_count",\n'
+        '    "rule": {\n'
+        '      "type": "max_position_count",\n'
+        '      "enabled": true,\n'
+        '      "params": {\n'
+        '        "max_count": 20\n'
+        "      }\n"
         "    }\n"
         "  }\n"
         "}\n"
     ),
+    ("update_ipc_dropped", "text"): _DROPPED_TEXT,
+    ("update_ipc_dropped", "json"): _DROPPED_JSON,
+    ("update_direct_dropped", "text"): _DROPPED_TEXT,
+    ("update_direct_dropped", "json"): _DROPPED_JSON,
 }
 
 
