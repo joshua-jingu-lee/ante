@@ -13,6 +13,8 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "post-merge.yml"
+CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+NODE_TEST_CMD = "node --test .github/scripts/*.test.js"
 SCRIPTS_DIR = ".github/scripts"
 REQUIRE_PREFIX = "${process.env.GITHUB_WORKSPACE}/"
 REQUIRE_CALL = re.compile(r"require\(\s*`([^`]*)`\s*,?\s*\)")
@@ -75,3 +77,17 @@ def test_checkout_does_not_persist_credentials():
 
 def test_checkout_ref_is_the_running_workflow_commit():
     assert _checkout_with().get("ref") == "${{ github.sha }}"
+
+
+def test_ci_node_test_step_fails_on_unmatched_glob():
+    data = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    steps = [
+        step
+        for step in data["jobs"]["lint"]["steps"]
+        if NODE_TEST_CMD in str(step.get("run", ""))
+    ]
+    assert len(steps) == 1, f"lint 잡의 node --test 단계 {len(steps)}개(기대 1)"
+    assert steps[0].get("shell") == "bash"
+    commands = [line.strip() for line in str(steps[0]["run"]).splitlines()]
+    assert "shopt -s failglob" in commands
+    assert commands.index("shopt -s failglob") < commands.index(NODE_TEST_CMD)
