@@ -251,7 +251,7 @@ class FeedConfig:
         try:
             text = self.env_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            raise ValueError("feed .env 파일을 UTF-8로 읽을 수 없습니다.") from None
+            raise OSError("feed .env 파일을 UTF-8로 읽을 수 없습니다.") from None
         for line in text.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
