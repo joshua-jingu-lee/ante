@@ -26,6 +26,7 @@ from ante.eventbus.events import (
 )
 from ante.rule import RuleEngine
 from ante.rule.global_rules import DailyLossLimitRule, TotalExposureLimitRule
+from tests.unit._rule_engine_helpers import TREASURY_QUERIES, StubTreasury
 
 ACCOUNT = "domestic"
 BOT = "bot1"
@@ -34,60 +35,18 @@ SYMBOL = "005930"
 TREASURY_REASON = "account_not_ready: treasury_unavailable"
 POSITIONS_REASON = "account_not_ready: positions_unavailable"
 
-TREASURY_QUERIES = (
-    "get_summary",
-    "get_budget",
-    "get_daily_snapshot",
-    "get_latest_snapshot",
-)
 
-
-@dataclass
-class _Budget:
-    allocated: float
-
-
-class StubTreasury:
-    """룰 엔진이 읽는 조회 넷을 흉내 내고, 지정한 조회만 예외를 던진다."""
-
-    def __init__(
-        self,
-        *,
-        fail: str | None = None,
-        summary: dict[str, float] | None = None,
-        budget: float | None = 1_000_000.0,
-        prev_snapshot: dict[str, float] | None = None,
-        latest_snapshot: dict[str, float] | None = None,
-    ) -> None:
-        self._fail = fail
-        self._summary = summary or {
+def _healthy(**overrides: Any) -> StubTreasury:
+    kwargs: dict[str, Any] = {
+        "summary": {
             "total_profit_loss": 0.0,
             "total_evaluation": 1_000_000.0,
             "ante_eval_amount": 0.0,
-        }
-        self._budget = budget
-        self._prev = prev_snapshot
-        self._latest = latest_snapshot
-
-    def _maybe_fail(self, name: str) -> None:
-        if self._fail == name:
-            raise RuntimeError(f"simulated {name} failure")
-
-    def get_summary(self) -> dict[str, float]:
-        self._maybe_fail("get_summary")
-        return dict(self._summary)
-
-    def get_budget(self, bot_id: str) -> _Budget | None:
-        self._maybe_fail("get_budget")
-        return None if self._budget is None else _Budget(self._budget)
-
-    async def get_daily_snapshot(self, date: str) -> dict[str, float] | None:
-        self._maybe_fail("get_daily_snapshot")
-        return self._prev
-
-    async def get_latest_snapshot(self) -> dict[str, float] | None:
-        self._maybe_fail("get_latest_snapshot")
-        return self._latest
+        },
+        "budget": 1_000_000.0,
+    }
+    kwargs.update(overrides)
+    return StubTreasury(**kwargs)
 
 
 @dataclass
@@ -192,7 +151,7 @@ class TestBuyRejectedOnQueryFailure:
     @pytest.mark.parametrize("failing", TREASURY_QUERIES)
     async def test_treasury_query_exception_rejects_buy(self, failing: str) -> None:
         eventbus, _, cap = _build(
-            treasury=StubTreasury(fail=failing), trade_service=StubTradeService()
+            treasury=_healthy(fail=failing), trade_service=StubTradeService()
         )
 
         await eventbus.publish(_order("buy"))
@@ -210,7 +169,7 @@ class TestBuyRejectedOnQueryFailure:
     @pytest.mark.asyncio
     async def test_positions_exception_rejects_buy(self) -> None:
         eventbus, _, cap = _build(
-            treasury=StubTreasury(), trade_service=StubTradeService(fail=True)
+            treasury=_healthy(), trade_service=StubTradeService(fail=True)
         )
 
         await eventbus.publish(_order("buy"))
@@ -220,7 +179,7 @@ class TestBuyRejectedOnQueryFailure:
     @pytest.mark.asyncio
     async def test_treasury_reason_wins_when_both_fail(self) -> None:
         eventbus, _, cap = _build(
-            treasury=StubTreasury(fail="get_latest_snapshot"),
+            treasury=_healthy(fail="get_latest_snapshot"),
             trade_service=StubTradeService(fail=True),
         )
 
@@ -231,7 +190,7 @@ class TestBuyRejectedOnQueryFailure:
     @pytest.mark.asyncio
     async def test_exposure_rule_does_not_rescue_failed_query(self) -> None:
         eventbus, engine, cap = _build(
-            treasury=StubTreasury(fail="get_summary"),
+            treasury=_healthy(fail="get_summary"),
             trade_service=StubTradeService(),
         )
         engine.add_account_rule(
@@ -248,7 +207,7 @@ class TestSellUnchanged:
     @pytest.mark.parametrize("failing", TREASURY_QUERIES)
     async def test_treasury_query_exception_allows_sell(self, failing: str) -> None:
         eventbus, _, cap = _build(
-            treasury=StubTreasury(fail=failing), trade_service=StubTradeService()
+            treasury=_healthy(fail=failing), trade_service=StubTradeService()
         )
 
         await eventbus.publish(_order("sell"))
@@ -270,7 +229,7 @@ class TestSellUnchanged:
     @pytest.mark.asyncio
     async def test_positions_exception_allows_sell(self) -> None:
         eventbus, _, cap = _build(
-            treasury=StubTreasury(), trade_service=StubTradeService(fail=True)
+            treasury=_healthy(), trade_service=StubTradeService(fail=True)
         )
 
         await eventbus.publish(_order("sell"))
@@ -284,7 +243,7 @@ class TestControls:
     @pytest.mark.asyncio
     async def test_healthy_treasury_over_limit_rejected_by_rule(self) -> None:
         eventbus, engine, cap = _build(
-            treasury=StubTreasury(
+            treasury=_healthy(
                 summary={
                     "total_profit_loss": 0.0,
                     "total_evaluation": 1_000_000.0,
@@ -307,7 +266,7 @@ class TestControls:
     @pytest.mark.asyncio
     async def test_healthy_treasury_within_limit_validated(self) -> None:
         eventbus, engine, cap = _build(
-            treasury=StubTreasury(), trade_service=StubTradeService()
+            treasury=_healthy(), trade_service=StubTradeService()
         )
         engine.add_account_rule(
             TotalExposureLimitRule("exp", {"max_exposure_percent": 0.2})
@@ -322,9 +281,7 @@ class TestControls:
     @pytest.mark.asyncio
     async def test_missing_snapshots_and_budget_still_validate_buy(self) -> None:
         eventbus, engine, cap = _build(
-            treasury=StubTreasury(
-                budget=None, prev_snapshot=None, latest_snapshot=None
-            ),
+            treasury=_healthy(budget=None, prev_snapshot=None, latest_snapshot=None),
             trade_service=StubTradeService(),
         )
         engine.add_account_rule(
@@ -339,7 +296,7 @@ class TestControls:
 
     @pytest.mark.asyncio
     async def test_missing_trade_service_still_validates_buy(self) -> None:
-        eventbus, _, cap = _build(treasury=StubTreasury(), trade_service=None)
+        eventbus, _, cap = _build(treasury=_healthy(), trade_service=None)
 
         await eventbus.publish(_order("buy"))
 
@@ -354,8 +311,8 @@ class TestModifyUnchanged:
         ("treasury", "trade_fail"),
         [
             (None, False),
-            (StubTreasury(fail="get_latest_snapshot"), False),
-            (StubTreasury(), True),
+            (_healthy(fail="get_latest_snapshot"), False),
+            (_healthy(), True),
         ],
         ids=["no_treasury", "treasury_exception", "positions_exception"],
     )
