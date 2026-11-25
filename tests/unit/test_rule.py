@@ -6406,7 +6406,6 @@ class TestRuleEngineWarnEventBus:
 
 _NUMERIC_RULE_PARAMS = [
     ("daily_loss_limit", "max_daily_loss_percent"),
-    ("daily_loss_limit", "max_loss_pct"),
     ("total_exposure_limit", "max_exposure_percent"),
     ("total_exposure_limit", "max_exposure_amount"),
     ("position_size", "max_position_percent"),

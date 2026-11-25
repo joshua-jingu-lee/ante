@@ -18,6 +18,7 @@ from ante.rule.base import (
     RuleResult,
 )
 from ante.rule.config_update import account_rules_config_key
+from ante.rule.exceptions import RuleConfigError
 from ante.rule.global_rules import (
     DailyLossLimitRule,
     TotalExposureLimitRule,
@@ -347,7 +348,7 @@ class RuleEngine:
 
     @staticmethod
     def _create_rule(config: dict[str, Any]) -> Rule | None:
-        """룰 설정에서 룰 인스턴스 생성."""
+        """룰 설정에서 룰 인스턴스 생성. 쓸 수 없는 config면 ``RuleConfigError``."""
         rule_type = config.get("type")
         if not isinstance(rule_type, str):
             logger.warning("알 수 없는 룰 타입: %s", rule_type)
@@ -356,6 +357,9 @@ class RuleEngine:
         if rule_class is None:
             logger.warning("알 수 없는 룰 타입: %s", rule_type)
             return None
+        errors = rule_class.config_errors(config)
+        if errors:
+            raise RuleConfigError(f"룰 config 검증 실패: {'; '.join(errors)}")
         rule_id: str = config.get("id", rule_type)
         return rule_class(rule_id, config)
 

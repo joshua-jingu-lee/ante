@@ -118,11 +118,15 @@ def rule_engine(eventbus, mock_account_service):
 def strategy_rule_configs():
     return {
         "momentum_v1": [
-            {"type": "position_size", "id": "ps1", "max_quantity": 100},
-            {"type": "trade_frequency", "id": "tf1", "max_trades_per_day": 10},
+            {"type": "position_size", "id": "ps1", "max_position_amount": 100},
+            {"type": "trade_frequency", "id": "tf1", "max_trades_per_hour": 10},
         ],
         "mean_revert_v1": [
-            {"type": "unrealized_loss_limit", "id": "ul1", "max_loss_pct": 5.0},
+            {
+                "type": "unrealized_loss_limit",
+                "id": "ul1",
+                "max_unrealized_loss_percent": 0.05,
+            },
         ],
     }
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleResult
 from ante.rule.global_rules import _is_finite_numeric
@@ -10,6 +10,10 @@ from ante.rule.global_rules import _is_finite_numeric
 
 class PositionSizeRule(Rule):
     """포지션 사이즈 제한."""
+
+    CONFIG_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"max_position_percent", "max_position_amount"}
+    )
 
     @classmethod
     def validate_config(cls, params: dict[str, Any]) -> list[str]:
@@ -75,6 +79,8 @@ class UnrealizedLossLimitRule(Rule):
     context.unrealized_pnl과 context.bot_allocated_budget을 참조.
     """
 
+    CONFIG_KEYS: ClassVar[frozenset[str]] = frozenset({"max_unrealized_loss_percent"})
+
     @classmethod
     def validate_config(cls, params: dict[str, Any]) -> list[str]:
         errors: list[str] = []
@@ -127,6 +133,8 @@ class TradeFrequencyRule(Rule):
 
     context.metadata["recent_trade_count"]에서 최근 거래 수를 참조.
     """
+
+    CONFIG_KEYS: ClassVar[frozenset[str]] = frozenset({"max_trades_per_hour"})
 
     @classmethod
     def validate_config(cls, params: dict[str, Any]) -> list[str]:

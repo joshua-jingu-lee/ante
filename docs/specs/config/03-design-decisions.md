@@ -94,18 +94,11 @@ TELEGRAM_CHAT_ID=987654321
 
 **저장 대상**:
 
-*글로벌 안전장치 (RuleEngine이 검증)*:
-
-| 키 | 카테고리 | 설명 | 예시 값 |
-|----|---------|------|--------|
-| `rule.max_daily_loss_rate` | trading | 일일 누적 손실 한도 기본값. 계좌별 룰이 없을 때 seed로 사용 가능 | `0.03` |
-| `rule.max_total_exposure` | trading | 최대 총 노출 비율 기본값. 계좌별 룰이 없을 때 seed로 사용 가능 | `0.30` |
-
 *계좌별 룰 (RuleEngine이 런타임 재로드)*:
 
 | 키 | 카테고리 | 설명 | 예시 값 |
 |----|---------|------|--------|
-| `accounts.{account_id}.rules` | rule | 계좌별 리스크 룰 리스트. 런타임 룰 변경의 SSOT | `[{"type":"daily_loss_limit","enabled":true,"max_daily_loss_rate":0.03,"action":"halt"}]` |
+| `accounts.{account_id}.rules` | rule | 계좌별 리스크 룰 리스트. 런타임 룰 변경의 SSOT | `[{"type":"daily_loss_limit","enabled":true,"max_daily_loss_percent":0.03}]` |
 
 계좌별 룰은 per-rule key로 나누지 않는다. `ante rule update <rule_type> --account <account_id>`는
 해당 rule만 수정하더라도 `accounts.{account_id}.rules` 리스트 전체를 갱신하고,

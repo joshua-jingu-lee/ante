@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, ClassVar
 
 from ante.core import clock
 from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleResult
@@ -24,9 +24,10 @@ def _is_finite_numeric(value: Any) -> bool:
 class DailyLossLimitRule(Rule):
     """일일 손실 한도 초과 시 계좌 중지."""
 
+    CONFIG_KEYS: ClassVar[frozenset[str]] = frozenset({"max_daily_loss_percent"})
+
     _PARAM_LIMITS: dict[str, float] = {
         "max_daily_loss_percent": 1,
-        "max_loss_pct": 100,
     }
 
     @classmethod
@@ -98,6 +99,10 @@ class DailyLossLimitRule(Rule):
 
 class TotalExposureLimitRule(Rule):
     """총 포지션 노출 한도 초과 시 거래 제한."""
+
+    CONFIG_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"max_exposure_percent", "max_exposure_amount"}
+    )
 
     @classmethod
     def validate_config(cls, params: dict[str, Any]) -> list[str]:
@@ -175,17 +180,13 @@ class TradingHoursRule(Rule):
     받을 수 있다. 없으면 실제 시각을 사용한다.
     """
 
+    CONFIG_KEYS: ClassVar[frozenset[str]] = frozenset({"allowed_hours", "timezone"})
+
     @classmethod
     def validate_config(cls, params: dict[str, Any]) -> list[str]:
         from datetime import time
 
         errors: list[str] = []
-        for key in ("allowed_hours_start", "allowed_hours_end"):
-            if key in params:
-                try:
-                    time.fromisoformat(params[key])
-                except (TypeError, ValueError):
-                    errors.append(f"{key} must be a valid time (HH:MM)")
         if "allowed_hours" in params:
             v = params["allowed_hours"]
             if isinstance(v, str) and "-" in v:
