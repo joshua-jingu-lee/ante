@@ -8,7 +8,7 @@
 
 | 이벤트 | 발행 시점 | 구독자 |
 |--------|----------|--------|
-| `AccountSuspendedEvent` | `suspend()` 호출 시 | BotManager (소속 봇 전체 중지), RuleEngine, Notification |
+| `AccountSuspendedEvent` | `suspend()` 호출 시 (상태 DB 쓰기가 `Exception`으로 실패해도 발행) | BotManager (소속 봇 전체 중지), RuleEngine, Notification |
 | `AccountActivatedEvent` | `activate()` 호출 시 | BotManager (계좌 상태 변화 인지 + 로깅만; 자동 재시작은 수행하지 않음), RuleEngine, Notification |
 
 `AccountCreatedEvent`와 `AccountDeletedEvent`는 1.0 런타임 EventBus 계약에 포함하지 않는다.

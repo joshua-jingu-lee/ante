@@ -369,13 +369,15 @@ class TelegramCommandReceiver:
         return "알 수 없는 명령입니다."
 
     async def _all_accounts_suspended(self) -> bool:
-        """모든 계좌가 SUSPENDED 상태인지 확인."""
+        """모든 계좌가 SUSPENDED이고 DB에 기록되지 않은 정지가 없는지 확인."""
         if not self._account_service:
             return False
         from ante.account.models import AccountStatus
 
         accounts = await self._account_service.list()
         if not accounts:
+            return False
+        if self._account_service.has_unpersisted_suspensions():
             return False
         return all(a.status == AccountStatus.SUSPENDED for a in accounts)
 

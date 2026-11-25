@@ -1,8 +1,9 @@
 """계좌 상태 UPDATE가 실패할 때 캐시와 DB가 어긋나지 않는지 검증한다 (#2667).
 
 ``activate``·``delete``는 실패하면(취소 포함) 캐시의 ``status``·``updated_at``을
-호출 전 값으로 되돌리고 같은 예외를 다시 올린다. ``suspend``의 실패 정책은
-유지관리자 결정 대기라 지금의 동작(메모리만 정지로 남는다)을 그대로 잠근다.
+호출 전 값으로 되돌리고 같은 예외를 다시 올린다. ``suspend``는 실패해도
+정지를 유지하고 정지 이벤트와 실패 알림을 낸 뒤 오류를 올리며, 다시 보낸
+정지가 DB 쓰기를 다시 시도한다 (#2858).
 """
 
 from __future__ import annotations
@@ -18,7 +19,9 @@ import pytest_asyncio
 
 from ante.account.errors import (
     AccountActivateAllFailedError,
+    AccountAlreadySuspendedError,
     AccountSuspendAllFailedError,
+    AccountSuspendNotPersistedError,
 )
 from ante.account.models import Account, AccountStatus
 from ante.account.service import AccountService
@@ -277,24 +280,222 @@ async def test_overlapping_activate_returns_early_while_first_write_is_in_flight
 # 이것을 바꾸지 않는다.
 
 
+_NOT_PERSISTED_MESSAGE = (
+    "계좌 'main'의 정지는 적용됐지만 DB에 기록되지 않았습니다. "
+    "재시작하면 활성으로 돌아옵니다. 정지를 다시 보내면 기록을 다시 시도합니다."
+)
+_FAILURE_NOTICE = (
+    "계좌 `main` 정지(SUSPENDED)는 적용됐지만 DB에 기록되지 않았습니다.\n"
+    "재시작하면 활성으로 돌아옵니다. 정지를 다시 보내 기록하세요.\n"
+    "사유: 킬 스위치\n"
+    "실행: `admin`"
+)
+
+
+async def _failed_suspend(
+    service: AccountService, monkeypatch, account_id: str = "main"
+) -> Account:
+    await service.create(_make_account(account_id))
+    _fail_status_update(monkeypatch, service)
+    with pytest.raises(AccountSuspendNotPersistedError):
+        await service.suspend(account_id, reason="킬 스위치", suspended_by="admin")
+    monkeypatch.undo()
+    return service._accounts[account_id]
+
+
 @pytest.mark.asyncio
-async def test_suspend_failure_keeps_memory_suspended_pending_maintainer_decision(
+async def test_suspend_write_failure_keeps_suspended_stops_bots_and_raises(
     service, db, published, monkeypatch
 ):
     await service.create(_make_account())
     account = service._accounts["main"]
     _fail_status_update(monkeypatch, service)
 
-    with pytest.raises(_WriteError):
+    with pytest.raises(AccountSuspendNotPersistedError) as caught:
         await service.suspend("main", reason="킬 스위치", suspended_by="admin")
 
-    reason = (
-        "suspend 실패 정책은 유지관리자 결정 대기(#2667): 결정 전까지 "
-        "메모리는 정지로 남고 DB는 활성이며 이벤트는 나가지 않는다"
+    exc = caught.value
+    assert exc.code == "EXECUTION_ERROR"
+    assert isinstance(exc.__cause__, _WriteError)
+    assert str(exc) == _NOT_PERSISTED_MESSAGE
+    assert "디스크 오류" not in str(exc)
+    assert account.status == AccountStatus.SUSPENDED
+    assert (await _db_status(db, "main"))[0] == AccountStatus.ACTIVE
+    assert service.has_unpersisted_suspensions() is True
+    assert [type(e) for e in published] == [AccountSuspendedEvent, NotificationEvent]
+    event, notice = published
+    assert (event.account_id, event.reason, event.suspended_by) == (
+        "main",
+        "킬 스위치",
+        "admin",
     )
-    assert account.status == AccountStatus.SUSPENDED, reason
-    assert (await _db_status(db, "main"))[0] == AccountStatus.ACTIVE, reason
-    assert published == [], reason
+    assert notice.level == "critical"
+    assert notice.category == "system"
+    assert notice.message == _FAILURE_NOTICE
+
+
+@pytest.mark.asyncio
+async def test_resuspend_retries_write_and_then_reports_already_suspended(
+    service, db, published, monkeypatch
+):
+    account = await _failed_suspend(service, monkeypatch)
+    published.clear()
+
+    await service.suspend("main", reason="킬 스위치", suspended_by="admin")
+
+    assert account.status == AccountStatus.SUSPENDED
+    assert (await _db_status(db, "main"))[0] == AccountStatus.SUSPENDED
+    assert service.has_unpersisted_suspensions() is False
+    assert [type(e) for e in published] == [AccountSuspendedEvent, NotificationEvent]
+    assert published[1].message == (
+        "계좌 `main` 정지(SUSPENDED)\n사유: 킬 스위치\n실행: `admin`"
+    )
+    with pytest.raises(AccountAlreadySuspendedError):
+        await service.suspend("main", reason="킬 스위치", suspended_by="admin")
+
+
+@pytest.mark.asyncio
+async def test_resuspend_failing_again_raises_again(
+    service, db, published, monkeypatch
+):
+    account = await _failed_suspend(service, monkeypatch)
+    published.clear()
+    _fail_status_update(monkeypatch, service)
+
+    for _ in range(2):
+        with pytest.raises(AccountSuspendNotPersistedError):
+            await service.suspend("main", reason="킬 스위치", suspended_by="admin")
+
+    assert account.status == AccountStatus.SUSPENDED
+    assert (await _db_status(db, "main"))[0] == AccountStatus.ACTIVE
+    assert service.has_unpersisted_suspensions() is True
+    assert [type(e) for e in published] == [
+        AccountSuspendedEvent,
+        NotificationEvent,
+        AccountSuspendedEvent,
+        NotificationEvent,
+    ]
+    assert [e.message for e in published[1::2]] == [_FAILURE_NOTICE] * 2
+
+
+def _cancel_status_update(monkeypatch, service: AccountService) -> None:
+    real_execute = service._db.execute
+
+    async def execute(sql: str, params: tuple[Any, ...] = ()) -> None:
+        if _is_status_update(sql):
+            raise asyncio.CancelledError
+        await real_execute(sql, params)
+
+    monkeypatch.setattr(service._db, "execute", execute)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_suspend_keeps_mark_and_publishes_nothing(
+    service, db, published, monkeypatch
+):
+    await service.create(_make_account())
+    account = service._accounts["main"]
+    _cancel_status_update(monkeypatch, service)
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.suspend("main", reason="킬 스위치", suspended_by="admin")
+
+    assert account.status == AccountStatus.SUSPENDED
+    assert (await _db_status(db, "main"))[0] == AccountStatus.ACTIVE
+    assert service.has_unpersisted_suspensions() is True
+    assert published == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_retry_keeps_mark_and_publishes_nothing(
+    service, db, published, monkeypatch
+):
+    await _failed_suspend(service, monkeypatch)
+    published.clear()
+    _cancel_status_update(monkeypatch, service)
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.suspend("main", reason="킬 스위치", suspended_by="admin")
+
+    assert service.has_unpersisted_suspensions() is True
+    assert published == []
+    monkeypatch.undo()
+    await service.suspend("main", reason="킬 스위치", suspended_by="admin")
+    assert (await _db_status(db, "main"))[0] == AccountStatus.SUSPENDED
+
+
+@pytest.mark.asyncio
+async def test_overlapping_suspend_while_first_write_is_in_flight_is_already_suspended(
+    service, db, published, monkeypatch
+):
+    await service.create(_make_account())
+    real_execute = service._db.execute
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def execute(sql: str, params: tuple[Any, ...] = ()) -> None:
+        if _is_status_update(sql):
+            entered.set()
+            await release.wait()
+        await real_execute(sql, params)
+
+    monkeypatch.setattr(service._db, "execute", execute)
+    first = asyncio.create_task(
+        service.suspend("main", reason="킬 스위치", suspended_by="admin")
+    )
+    await asyncio.wait_for(entered.wait(), timeout=5)
+    try:
+        assert service.has_unpersisted_suspensions() is False
+        with pytest.raises(AccountAlreadySuspendedError):
+            await service.suspend("main", reason="킬 스위치", suspended_by="admin")
+    finally:
+        release.set()
+    await first
+    assert (await _db_status(db, "main"))[0] == AccountStatus.SUSPENDED
+    assert service.has_unpersisted_suspensions() is False
+    assert [type(e) for e in published] == [AccountSuspendedEvent, NotificationEvent]
+
+
+@pytest.mark.asyncio
+async def test_activate_clears_unpersisted_mark(service, db, published, monkeypatch):
+    account = await _failed_suspend(service, monkeypatch)
+
+    await service.activate("main", activated_by="admin")
+
+    assert account.status == AccountStatus.ACTIVE
+    assert service.has_unpersisted_suspensions() is False
+    await service.suspend("main", reason="킬 스위치", suspended_by="admin")
+    with pytest.raises(AccountAlreadySuspendedError):
+        await service.suspend("main", reason="킬 스위치", suspended_by="admin")
+
+
+@pytest.mark.asyncio
+async def test_activate_failure_keeps_unpersisted_mark(
+    service, db, published, monkeypatch
+):
+    account = await _failed_suspend(service, monkeypatch)
+    _fail_status_update(monkeypatch, service)
+
+    with pytest.raises(_WriteError):
+        await service.activate("main", activated_by="admin")
+
+    assert account.status == AccountStatus.SUSPENDED
+    assert service.has_unpersisted_suspensions() is True
+    monkeypatch.undo()
+    await service.suspend("main", reason="킬 스위치", suspended_by="admin")
+    assert (await _db_status(db, "main"))[0] == AccountStatus.SUSPENDED
+
+
+@pytest.mark.asyncio
+async def test_delete_clears_unpersisted_mark(service, db, published, monkeypatch):
+    await _failed_suspend(service, monkeypatch)
+    published.clear()
+
+    await service.delete("main", deleted_by="admin")
+
+    assert service.has_unpersisted_suspensions() is False
+    assert (await _db_status(db, "main"))[0] == AccountStatus.DELETED
+    assert published == []
 
 
 _SUSPEND_ALL_MESSAGE = (
@@ -343,13 +544,64 @@ async def test_suspend_all_tries_every_account_and_reports_failed_one(
     suspended_ids = {
         e.account_id for e in published if isinstance(e, AccountSuspendedEvent)
     }
-    assert suspended_ids == {"acct1", "acct3"}
-    assert sum(isinstance(e, NotificationEvent) for e in published) == 2
+    assert service._accounts["acct2"].status == AccountStatus.SUSPENDED
+    assert (await _db_status(db, "acct2"))[0] == AccountStatus.ACTIVE
+    assert suspended_ids == {"acct1", "acct2", "acct3"}
+    notices = [e for e in published if isinstance(e, NotificationEvent)]
+    assert [n.level for n in notices] == ["critical"] * 3
+    assert sum("DB에 기록되지 않았습니다" in n.message for n in notices) == 1
     exc = caught.value
     assert exc.failed_account_ids == ("acct2",)
     assert exc.suspended_count == 2
     assert str(exc) == _SUSPEND_ALL_MESSAGE
     assert "디스크 오류" not in str(exc)
+
+
+@pytest.mark.asyncio
+async def test_suspend_all_retries_unpersisted_account(
+    service, db, published, monkeypatch
+):
+    await _three_active(service)
+    _fail_status_update(monkeypatch, service, only_account="acct2")
+    with pytest.raises(AccountSuspendAllFailedError):
+        await service.suspend_all(reason="킬 스위치", suspended_by="admin")
+    monkeypatch.undo()
+    published.clear()
+
+    results = await service.suspend_all(reason="킬 스위치", suspended_by="admin")
+
+    assert results == [
+        {
+            "account_id": account_id,
+            "previous_status": "suspended",
+            "status": "suspended",
+            "changed": False,
+        }
+        for account_id in ("acct1", "acct2", "acct3")
+    ]
+    assert (await _db_status(db, "acct2"))[0] == AccountStatus.SUSPENDED
+    assert service.has_unpersisted_suspensions() is False
+    assert [
+        e.account_id for e in published if isinstance(e, AccountSuspendedEvent)
+    ] == ["acct2"]
+
+
+@pytest.mark.asyncio
+async def test_suspend_all_retry_failing_again_is_suspend_all_failed(
+    service, db, monkeypatch
+):
+    await _three_active(service)
+    _fail_status_update(monkeypatch, service, only_account="acct2")
+    with pytest.raises(AccountSuspendAllFailedError):
+        await service.suspend_all(reason="킬 스위치", suspended_by="admin")
+
+    with pytest.raises(AccountSuspendAllFailedError) as caught:
+        await service.suspend_all(reason="킬 스위치", suspended_by="admin")
+
+    assert caught.value.failed_account_ids == ("acct2",)
+    assert caught.value.suspended_count == 0
+    assert (await _db_status(db, "acct2"))[0] == AccountStatus.ACTIVE
+    assert service.has_unpersisted_suspensions() is True
 
 
 @pytest.mark.asyncio
@@ -391,11 +643,18 @@ def _kill_switch_server(service: AccountService, audit_log: AsyncMock) -> IPCSer
     return IPCServer(str(Path(socket_dir) / "t.sock"), svc_registry, cmd_registry)
 
 
-async def _dispatch(server: IPCServer, command: str) -> dict[str, Any]:
+async def _dispatch(
+    server: IPCServer, command: str, args: dict[str, Any] | None = None
+) -> dict[str, Any]:
     await server.start()
     try:
         return await server._dispatch(
-            {"id": "1", "command": command, "args": {"reason": "r"}, "actor": "ops"}
+            {
+                "id": "1",
+                "command": command,
+                "args": args or {"reason": "r"},
+                "actor": "ops",
+            }
         )
     finally:
         await server.stop()
@@ -476,3 +735,45 @@ async def test_system_halt_audit_failure_does_not_mask_partial_failure(
         "message": _SUSPEND_ALL_MESSAGE,
     }
     audit_log.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_account_suspend_write_failure_is_execution_error_envelope(
+    service, monkeypatch
+):
+    await service.create(_make_account())
+    _fail_status_update(monkeypatch, service)
+    audit_log = AsyncMock(return_value=None)
+
+    response = await _dispatch(
+        _kill_switch_server(service, audit_log),
+        "account.suspend",
+        {"account_id": "main", "reason": "킬 스위치"},
+    )
+
+    assert response == {
+        "id": "1",
+        "status": "error",
+        "error": {"code": "EXECUTION_ERROR", "message": _NOT_PERSISTED_MESSAGE},
+    }
+
+
+@pytest.mark.asyncio
+async def test_system_halt_resend_after_partial_failure_succeeds(service, monkeypatch):
+    await _three_active(service)
+    _fail_status_update(monkeypatch, service, only_account="acct2")
+    with pytest.raises(AccountSuspendAllFailedError):
+        await service.suspend_all(reason="킬 스위치", suspended_by="admin")
+    monkeypatch.undo()
+    audit_log = AsyncMock(return_value=None)
+
+    response = await _dispatch(_kill_switch_server(service, audit_log), "system.halt")
+
+    assert response["status"] == "ok"
+    assert response["result"]["accounts_changed"] == 0
+    assert {a["account_id"] for a in response["result"]["accounts"]} == {
+        "acct1",
+        "acct2",
+        "acct3",
+    }
+    assert service.has_unpersisted_suspensions() is False
