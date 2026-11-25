@@ -7,7 +7,7 @@ import logging
 import math
 import uuid
 from datetime import UTC
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 from uuid import uuid4
 
 from ante.account.scoping import require_account_id
@@ -28,8 +28,16 @@ logger = logging.getLogger(__name__)
 _VIRTUAL_TRADE_NAMESPACE = uuid.UUID("5b0c7f3e-2611-4a5e-9d1c-7f3a2b8e6c41")
 
 
+class InsufficientHoldingsError(Exception):
+    """가상 매도 수량이 그 봇의 포지션 보유를 넘는다."""
+
+
 class FillApplier:
     """체결 반영 단일 권위자. 단일 인스턴스로 운영한다."""
+
+    InsufficientHoldingsError: ClassVar[type[InsufficientHoldingsError]] = (
+        InsufficientHoldingsError
+    )
 
     def __init__(
         self,
@@ -370,6 +378,16 @@ class FillApplier:
                     )
                     if inserted is None:
                         return False
+                    if side == "sell":
+                        position = await self._position_history.get_current(
+                            bot_id, symbol, account_id=validated
+                        )
+                        if quantity > position["quantity"]:
+                            raise InsufficientHoldingsError(
+                                f"apply_direct_fill: sell quantity {quantity} exceeds "
+                                f"holdings {position['quantity']} "
+                                f"(bot={bot_id}, symbol={symbol})"
+                            )
                     await self._position_history.on_trade(trade)
         logger.info(
             "가상 체결 기록: order=%s %s %s qty=%s @ %s commission=%s",
