@@ -12,6 +12,7 @@ from ante.eventbus import EventBus
 from ante.trade.fill_applier import FillApplier
 from ante.trade.models import TradeRecord, TradeStatus
 from ante.trade.order_tracker import OrderTracker
+from ante.trade.performance import PerformanceTracker
 from ante.trade.position import PositionHistory
 from ante.trade.recorder import TradeRecorder
 
@@ -102,6 +103,75 @@ class TestRecorderExchangeColumn:
         assert rows[0]["exchange"] == "NASDAQ"
 
 
+ROW_TO_RECORD = pytest.mark.parametrize(
+    "row_to_record",
+    [TradeRecorder._row_to_record, PerformanceTracker._row_to_record],
+    ids=["recorder", "performance"],
+)
+
+
+def _make_row(**overrides: object) -> dict:
+    base: dict = {
+        "trade_id": str(uuid4()),
+        "bot_id": "bot1",
+        "strategy_id": "s1",
+        "symbol": "005930",
+        "side": "buy",
+        "quantity": 10,
+        "price": 50000,
+        "status": "filled",
+        "order_type": "market",
+        "reason": "",
+        "commission": 0.0,
+        "timestamp": "2026-03-20 10:00:00",
+        "order_id": None,
+        "account_id": "acc-test",
+        "currency": "KRW",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestRowToRecordExchange:
+    """두 ``_row_to_record`` 가 trades 행의 exchange 를 복원한다 (#3028)."""
+
+    @ROW_TO_RECORD
+    @pytest.mark.parametrize("exchange", ["TEST", "NYSE"])
+    def test_stored_exchange_restored(self, row_to_record, exchange):
+        """KRX 가 아닌 저장값이 그대로 돌아온다."""
+        assert row_to_record(_make_row(exchange=exchange)).exchange == exchange
+
+    @ROW_TO_RECORD
+    def test_null_exchange_falls_back_to_krx(self, row_to_record):
+        """exchange 열이 NULL 이면 기본값 KRX."""
+        assert row_to_record(_make_row(exchange=None)).exchange == "KRX"
+
+    @ROW_TO_RECORD
+    def test_missing_exchange_key_falls_back_to_krx(self, row_to_record):
+        """행에 exchange 키가 없으면 기본값 KRX."""
+        assert row_to_record(_make_row()).exchange == "KRX"
+
+
+class TestTradeReadPathExchangeRoundtrip:
+    """저장 → 두 읽기 경로 왕복에서 exchange 가 보존된다 (#3028)."""
+
+    async def test_recorder_get_trades_roundtrip(self, recorder):
+        """``TradeRecorder.get_trades`` 가 저장한 exchange 를 돌려준다."""
+        await recorder.save(_make_record(exchange="TEST"))
+
+        trades = await recorder.get_trades(account_id="acc-test")
+        assert len(trades) == 1
+        assert trades[0].exchange == "TEST"
+
+    async def test_performance_filled_trades_roundtrip(self, recorder, db):
+        """``PerformanceTracker`` 의 FILLED 읽기 경로도 저장한 exchange 를 돌려준다."""
+        await recorder.save(_make_record(exchange="TEST"))
+
+        trades = await PerformanceTracker(db)._get_filled_trades(account_id="acc-test")
+        assert len(trades) == 1
+        assert trades[0].exchange == "TEST"
+
+
 class TestPositionHistoryExchangeColumn:
     """position_history._save_history()가 exchange 값을 DB에 기록하는지 확인."""
 
@@ -150,8 +220,8 @@ class TestFillPathExchangePropagation:
     경로(``tracker.open`` → ``applier.apply_cumulative``)를 구동해 그 구간을
     잠근다.
 
-    검증은 **raw SQL** 로 한다 — ``_row_to_record`` / ``_row_to_snapshot`` 은
-    exchange 를 복원하지 않으므로(이 PR 범위 밖) ORM-ish 조회로는 확인할 수
+    검증은 **raw SQL** 로 한다 — ``_row_to_snapshot`` 은 exchange 를 복원하지
+    않으므로(positions 테이블에 exchange 열이 없다) ORM-ish 조회로는 확인할 수
     없다.
     """
 
