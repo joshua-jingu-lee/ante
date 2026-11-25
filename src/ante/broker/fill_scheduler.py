@@ -141,7 +141,7 @@ class FillReconcileScheduler:
     async def catch_up_once(self) -> CatchUpResult:
         """기동 카치업: open 주문이 있으면 1회 폴 → FillApplier.
 
-        다운타임 중 발생한 체결을 멱등 따라잡는다. open 이 없으면 0콜·0건이며
+        다운타임 체결을 멱등 따라잡는다. open·감시 대상이 없으면 0콜·0건이며
         명시적 **성공**(``succeeded=True``)으로 본다.
 
         폴 자체가 CB/rate/network 로 실패하면 **bounded backoff 로 재시도**하고,
