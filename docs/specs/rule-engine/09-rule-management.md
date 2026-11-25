@@ -61,8 +61,8 @@ CLI `rule update`는 stored rules만 갱신한다. effective rules의 별도 노
 스펙의 후속 이슈에서 다룬다.
 `enabled`(CLI `--enabled/--disabled`, IPC `rule.update.enabled`)를 생략하거나
 `null`로 보내면 동적 설정(`accounts.{id}.rules`)에 저장된 같은 type의 항목의 값을
-유지하고, 그 항목이 없으면 `true`다(데몬 없이 직접 실행할 때 동적 설정이 비어 있으면
-정적 TOML seed에 있는 같은 type 항목의 값을 쓴다).
+유지하고, 그 항목이 없으면 `true`다(동적 설정이 비어 있으면 정적 TOML seed에 있는 같은
+type 항목의 값을 쓴다).
 
 `rule update`의 params(CLI `--param`·`--params-json`, IPC `rule.update.params`)는 규칙
 항목의 `type`·`id`·`enabled`를 담을 수 없다 — 담으면 저장하지 않고 요청을 거부한다(규칙
@@ -119,6 +119,8 @@ rules = [
 늘 실린다. 버린 항목마다 `{"stored_index": <읽은 목록에서의 위치>, "rule_type": <type이 문자열이면 그 값, 아니면 null>}`을
 읽은 순서대로 담고, 버린 것이 없으면 `[]`이다. 저장값의 다른 내용(파라미터 값)은 싣지 않는다. text 출력은
 `dropped_items`가 비어 있지 않을 때만 둘째 줄에 그 수와 위치·유형 이름(repr로 이스케이프)과 원문의 위치를 알린다.
+`rule update`는 동적 저장값이 없으면 데몬 경로(IPC)·직접 경로 모두 seed 위에 한 유형을 갱신해
+저장한다(broker_type 기본 룰은 저장값에 넣지 않는다).
 런타임 수정은 항상 dynamic_config에 기록한다.
 
 ### 전략별 룰
