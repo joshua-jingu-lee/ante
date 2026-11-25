@@ -87,6 +87,7 @@ class Bot:
 
         self._generation += 1
         self._orders_closed = False
+        self._consecutive_failures = 0
         _transition_status(self, BotStatus.RUNNING)
         self.started_at = clock.now(UTC)
         self._task = asyncio.create_task(
