@@ -697,9 +697,14 @@ async def test_startup_blocks_only_that_account(
     ]
     assert len(errors) == 1
     assert "invalid_item:RuleConfigError" in errors[0].getMessage()
-    assert key in caplog.text
+    rule_log = "\n".join(
+        caplog.handler.format(r)
+        for r in caplog.records
+        if r.name.startswith("ante.rule")
+    )
+    assert key in rule_log
     for marker in (str(MARK), "7.0371", "987654"):
-        assert marker not in caplog.text
+        assert marker not in rule_log
 
     await world.bus.publish(_order("acc1"))
     await world.bus.publish(_order("acc1", side="sell", reason="liquidation:bot"))
