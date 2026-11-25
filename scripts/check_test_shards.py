@@ -1,6 +1,10 @@
 """단위 테스트 샤드의 분할과, 샤드 목록이 전체를 빠짐없이 나눴는지의 검사 (#2786).
 
 ``tests/conftest.py``가 ``--shard``의 해석과 분할에 이 모듈의 함수를 쓴다.
+분할은 ``tests/shard_durations.json``의 파일별 소요 시간(정수 센티초)으로
+샤드의 부하를 고르게 맞춘다(#3036). 기록이 없거나 깨졌거나 수집된 파일과
+겹치지 않으면 파일 경로의 crc32로 나눈다. 어느 쪽이든 파일 하나는 정확히
+한 샤드에 든다.
 CI의 ``test`` 잡은 이 파일을 스크립트로 실행해 샤드들이 실행한 테스트의
 목록을 ``pytest --collect-only -q``의 전체 목록과 견주고, 커버리지 자료 파일이
 샤드마다 하나씩 있는지 센다. 하나라도 어긋나면 exit 1이다.
@@ -12,6 +16,7 @@ CI의 ``test`` 잡은 이 파일을 스크립트로 실행해 샤드들이 실�
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 import zlib
@@ -21,6 +26,8 @@ MANIFEST_GLOB = "test-shard-*.txt"
 COVERAGE_GLOB = "coverage-shard-*.data"
 NODEID_LINE = re.compile(r"^tests/unit/.*::")
 DIFF_LIMIT = 20
+RECORD_PATH = Path(__file__).resolve().parents[1] / "tests" / "shard_durations.json"
+RECORD_VERSION = 1
 
 
 def parse_shard(value: str) -> tuple[int, int]:
@@ -37,6 +44,84 @@ def parse_shard(value: str) -> tuple[int, int]:
 def shard_of(path: str, total: int) -> int:
     """테스트 파일 경로(rootdir 기준, POSIX 구분자)가 드는 샤드 번호(1부터)."""
     return zlib.crc32(path.encode("utf-8")) % total + 1
+
+
+def _is_centiseconds(value: object) -> bool:
+    return type(value) is int and value >= 0
+
+
+def parse_record(text: str) -> dict[str, int] | None:
+    """기록 JSON의 ``files``(경로 → 정수 센티초). 형식이 어긋나면 None."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or set(data) != {"version", "files"}:
+        return None
+    version, files = data["version"], data["files"]
+    if type(version) is not int or version != RECORD_VERSION:
+        return None
+    if not isinstance(files, dict):
+        return None
+    if not all(_is_centiseconds(value) for value in files.values()):
+        return None
+    return dict(files)
+
+
+def load_record(path: str | Path) -> dict[str, int] | None:
+    """기록 파일을 읽는다. 없거나 읽을 수 없거나 형식이 어긋나면 None."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return parse_record(text)
+
+
+def record_text(files: dict[str, int]) -> str:
+    """기록 파일의 내용. 키를 정렬하고 끝에 줄바꿈을 둔다."""
+    payload = {"version": RECORD_VERSION, "files": dict(sorted(files.items()))}
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def file_weights(
+    file_counts: dict[str, int], record: dict[str, int] | None
+) -> dict[str, int] | None:
+    """파일별 무게(센티초). 기록에 없는 파일은 기록된 건당 시간으로 어림한다.
+
+    기록이 없거나 수집된 파일과 하나도 겹치지 않으면 None이다.
+    """
+    if not record:
+        return None
+    known = sorted(path for path in file_counts if path in record)
+    if not known:
+        return None
+    seconds = sum(record[path] for path in known)
+    count = sum(file_counts[path] for path in known)
+    if count == 0:
+        return None
+    return {
+        path: record[path] if path in record else file_counts[path] * seconds // count
+        for path in file_counts
+    }
+
+
+def assign_shards(
+    file_counts: dict[str, int], record: dict[str, int] | None, total: int
+) -> dict[str, int]:
+    """파일 → 샤드 번호(1부터). 무거운 파일부터 가장 가벼운 샤드에 넣는다.
+
+    무게를 낼 수 없으면 ``shard_of``로 나눈다. 결과는 입력의 순서와 무관하다.
+    """
+    weights = file_weights(file_counts, record)
+    if weights is None:
+        return {path: shard_of(path, total) for path in file_counts}
+    loads = {index: 0 for index in range(1, total + 1)}
+    assignment: dict[str, int] = {}
+    for path in sorted(weights, key=lambda p: (-weights[p], p)):
+        index = min(loads, key=lambda i: (loads[i], i))
+        assignment[path] = index
+        loads[index] += weights[path]
+    return assignment
 
 
 def resolve_manifest(value: str, base: str | Path) -> Path:

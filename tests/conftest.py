@@ -35,12 +35,17 @@ def _load_import_guard():
 
 # ── 단위 테스트 샤드 (#2786) ──────────────────────────────────────────────
 #
-# --shard=<i>/<n>은 파일 경로의 crc32로 테스트 파일을 n개로 나눠 i번째만 남긴다.
+# --shard=<i>/<n>은 테스트 파일을 n개로 나눠 i번째만 남긴다. 나누는 법은
+# tests/shard_durations.json의 파일별 소요 시간으로 부하를 고르게 맞추고, 기록이
+# 없거나 깨졌거나 수집된 파일과 겹치지 않으면 파일 경로의 crc32다 (#3036).
 # --shard-manifest=<path>는 실행된(setup 보고가 있는) 테스트의 nodeid를 쓴다.
-# 둘 다 없으면 아무 일도 하지 않는다.
+# --shard-durations=<path>는 파일별 소요 시간(setup·call·teardown 합, 정수
+# 센티초)을 기록 파일과 같은 형식으로 쓴다. 쓰기는 xdist 컨트롤러가 한다.
+# 셋 다 없으면 아무 일도 하지 않는다.
 
 _SHARD_KEY = pytest.StashKey["tuple[int, int] | None"]()
 _SHARD_MANIFEST: dict[str, object] = {}
+_SHARD_DURATIONS: dict[str, object] = {}
 
 
 def _load_shard_tools():
@@ -62,13 +67,22 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--shard",
         default=None,
         metavar="I/N",
-        help="run only the test files whose path crc32 %% N == I - 1",
+        help=(
+            "run only the I-th of N test file groups, balanced by "
+            "tests/shard_durations.json (path crc32 %% N == I - 1 without it)"
+        ),
     )
     group.addoption(
         "--shard-manifest",
         default=None,
         metavar="PATH",
         help="write the sorted nodeids of the tests that ran to PATH",
+    )
+    group.addoption(
+        "--shard-durations",
+        default=None,
+        metavar="PATH",
+        help="write per-file durations (centiseconds) of the tests that ran to PATH",
     )
 
 
@@ -85,6 +99,23 @@ def _configure_shard(config: pytest.Config) -> None:
     if manifest is not None:
         path = _SHARD_TOOLS.resolve_manifest(manifest, config.invocation_params.dir)
         _SHARD_MANIFEST.update(path=str(path), ran=set())
+    durations = config.getoption("--shard-durations")
+    if durations is not None:
+        path = _SHARD_TOOLS.resolve_manifest(durations, config.invocation_params.dir)
+        _SHARD_DURATIONS.update(path=str(path), seconds={})
+
+
+def pytest_report_header(config: pytest.Config) -> str | None:
+    if config.stash.get(_SHARD_KEY, None) is None:
+        return None
+    record_path = _SHARD_TOOLS.RECORD_PATH
+    if not record_path.is_file():
+        return "ante-shards: record missing → hash"
+    record = _SHARD_TOOLS.load_record(record_path)
+    if record is None:
+        return "ante-shards: record invalid → hash"
+    version = _SHARD_TOOLS.RECORD_VERSION
+    return f"ante-shards: record valid (version {version}, {len(record)} files)"
 
 
 def pytest_collection_modifyitems(
@@ -94,11 +125,17 @@ def pytest_collection_modifyitems(
     if shard is None:
         return
     index, total = shard
+    counts: dict[str, int] = {}
+    for item in items:
+        path = item.nodeid.split("::", 1)[0]
+        counts[path] = counts.get(path, 0) + 1
+    record = _SHARD_TOOLS.load_record(_SHARD_TOOLS.RECORD_PATH)
+    assignment = _SHARD_TOOLS.assign_shards(counts, record, total)
     keep: list[pytest.Item] = []
     drop: list[pytest.Item] = []
     for item in items:
         path = item.nodeid.split("::", 1)[0]
-        (keep if _SHARD_TOOLS.shard_of(path, total) == index else drop).append(item)
+        (keep if assignment[path] == index else drop).append(item)
     if drop:
         config.hook.pytest_deselected(items=drop)
         items[:] = keep
@@ -108,6 +145,17 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     ran = _SHARD_MANIFEST.get("ran")
     if isinstance(ran, set) and report.when == "setup":
         ran.add(report.nodeid)
+    seconds = _SHARD_DURATIONS.get("seconds")
+    if isinstance(seconds, dict):
+        path = report.nodeid.split("::", 1)[0]
+        seconds[path] = seconds.get(path, 0.0) + report.duration
+
+
+def _write_shard_durations() -> None:
+    path, seconds = _SHARD_DURATIONS.get("path"), _SHARD_DURATIONS.get("seconds")
+    if isinstance(path, str) and isinstance(seconds, dict):
+        files = {name: round(value * 100) for name, value in seconds.items()}
+        Path(path).write_text(_SHARD_TOOLS.record_text(files), encoding="utf-8")
 
 
 def _write_shard_manifest() -> None:
@@ -455,6 +503,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         config.workeroutput[_WORKEROUTPUT_KEY] = leftover
         return
     _write_shard_manifest()
+    _write_shard_durations()
     violations = _COLLECTED_WORKER_VIOLATIONS + leftover
     if not violations:
         return

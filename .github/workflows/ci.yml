@@ -74,7 +74,9 @@ jobs:
       - name: Entry ratchet check
         run: python scripts/check_entry_ratchet.py
 
-  # 단위 테스트를 파일 경로의 crc32로 나눠 동시에 돌린다 (#2786).
+  # 단위 테스트를 파일별 소요 시간 기록(tests/shard_durations.json)으로 고르게 나눠
+  # 동시에 돌린다. 기록이 없거나 깨졌으면 파일 경로의 crc32로 나눈다 (#2786, #3036).
+  # 각 샤드는 그 기록을 다시 만들 재료 durations-shard-<i>.json을 산출물에 싣는다.
   # 샤드 수는 아래 matrix 목록 한 곳에서 정해지고, 샤드는 strategy.job-total로,
   # test 잡은 이 잡의 출력 shards로 읽는다.
   test-shard:
@@ -104,6 +106,7 @@ jobs:
           pytest tests/unit/ -x -n auto --tb=short -q
           --shard=${{ matrix.shard }}/${{ strategy.job-total }}
           --shard-manifest=test-shard-${{ matrix.shard }}.txt
+          --shard-durations=durations-shard-${{ matrix.shard }}.json
           --cov=src/ante --cov-report= --cov-fail-under=0
 
       - id: count
@@ -115,6 +118,7 @@ jobs:
           path: |
             coverage-shard-${{ matrix.shard }}.data
             test-shard-${{ matrix.shard }}.txt
+            durations-shard-${{ matrix.shard }}.json
           if-no-files-found: error
           overwrite: true
           retention-days: 3
