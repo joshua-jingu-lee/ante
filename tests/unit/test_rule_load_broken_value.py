@@ -400,20 +400,21 @@ async def test_failed_reload_keeps_previous_rules(db, value: list[Any]) -> None:
     _assert_reload_failed_notice(cap, value)
 
 
-async def test_reload_skips_unknown_type_without_notice(db) -> None:
+async def test_reload_with_unknown_type_keeps_previous_rules(db) -> None:
     world = await _normal_world(db)
     manager = world.manager
     assert manager is not None
     engine = manager.get("acc1")
+    before = list(engine._account_rules)
     cap = _Captured(world.bus)
+    value: list[Any] = [{"type": "total_exposure_limit"}, {"type": "nope"}]
 
-    await world.bus.publish(
-        _changed("rule", KEY1, [{"type": "total_exposure_limit"}, {"type": "nope"}])
-    )
+    await world.bus.publish(_changed("rule", KEY1, value))
 
-    assert _rule_types(engine) == ["total_exposure_limit"]
+    assert _rule_types(engine) == ["daily_loss_limit"]
+    assert all(a is b for a, b in zip(engine._account_rules, before, strict=True))
     assert engine.rules_unavailable is False
-    assert cap.notifications == []
+    _assert_reload_failed_notice(cap, value)
 
 
 @pytest.mark.parametrize("value", BROKEN_ITEMS)

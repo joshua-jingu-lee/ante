@@ -576,18 +576,56 @@ def test_unknown_key_and_non_str_id_are_rejected_at_creation(
         _engine().load_rules_from_config([item])
 
 
-def test_creation_keeps_seed_and_unknown_type_skip() -> None:
+def test_creation_rejects_unknown_type_and_keeps_seed() -> None:
+    engine = _engine()
+    engine.load_rules_from_config([{"type": "trading_hours", "enabled": True}])
+    before = list(engine._account_rules)
+
+    with pytest.raises(RuleConfigError, match="알 수 없는 룰 타입: 'nope'"):
+        engine.load_rules_from_config(
+            [
+                {"type": "nope", "whatever": 1},
+                {"type": "daily_loss_limit", "id": "d1", "name": "n", **LIMIT},
+            ]
+        )
+
+    assert len(engine._account_rules) == 1
+    assert engine._account_rules[0] is before[0]
+    assert engine._account_rules[0].rule_id == "trading_hours"
+
+
+def _unregistered(base: dict[str, Any], enabled: bool) -> dict[str, Any]:
+    return {**base, "enabled": enabled}
+
+
+UNREGISTERED_BASES = [
+    pytest.param({"type": "nope", "x": 1}, id="unregistered"),
+    pytest.param({"type": ""}, id="empty"),
+    pytest.param({"max_daily_loss_percent": 0.5}, id="no-type"),
+    pytest.param({"type": None}, id="null-type"),
+    pytest.param({"type": 7}, id="int-type"),
+    pytest.param({"type": True}, id="bool-type"),
+]
+ENABLED = [pytest.param(True, id="on"), pytest.param(False, id="off")]
+
+
+@pytest.mark.parametrize("enabled", ENABLED)
+@pytest.mark.parametrize("base", UNREGISTERED_BASES)
+def test_unregistered_type_is_rejected_at_creation(
+    base: dict[str, Any], enabled: bool
+) -> None:
     engine = _engine()
 
-    engine.load_rules_from_config(
-        [
-            {"type": "trading_hours", "enabled": True},
-            {"type": "nope", "whatever": 1},
-            {"type": "daily_loss_limit", "id": "d1", "name": "n", **LIMIT},
-        ]
-    )
+    with pytest.raises(RuleConfigError) as raised:
+        engine.load_rules_from_config([_unregistered(base, enabled)])
 
-    assert [r.rule_id for r in engine._account_rules] == ["trading_hours", "d1"]
+    rule_type = base.get("type")
+    if isinstance(rule_type, str):
+        assert str(raised.value) == f"알 수 없는 룰 타입: {rule_type!r}"
+    else:
+        name = type(rule_type).__name__
+        assert str(raised.value) == f"룰 type이 문자열이 아님: {name}"
+    assert engine._account_rules == []
 
 
 @pytest.mark.parametrize(
@@ -597,10 +635,23 @@ def test_creation_keeps_seed_and_unknown_type_skip() -> None:
             [{"type": "position_size", "max_position_percent": math.nan}], id="nan"
         ),
         pytest.param([{"type": "position_size", "max_quantity": 1}], id="unknown-key"),
+        pytest.param([{"type": "nope"}], id="unregistered"),
+        pytest.param([{"type": "nope", "enabled": False}], id="unregistered-off"),
+        pytest.param([{"type": ""}], id="empty-type"),
+        pytest.param([{"max_position_percent": 0.1}], id="no-type"),
+        pytest.param([{"type": 7, "enabled": False}], id="int-type-off"),
+        pytest.param(
+            [{"type": "position_size", "max_position_percent": 0.2}, {"type": None}],
+            id="null-type-after-healthy",
+        ),
     ],
 )
 async def test_approval_rule_change_fails_execution(db, rules: list[Any]) -> None:
     engine = _engine()
+    engine.load_strategy_rules_from_config(
+        "s1", [{"type": "position_size", "max_position_percent": 0.1}]
+    )
+    before = list(engine._strategy_rules["s1"])
     deps = SimpleNamespace(rule_engine_manager=SimpleNamespace(get=lambda a: engine))
     svc = ApprovalService(db=db, eventbus=EventBus(), executors=build_executors(deps))
     await svc.initialize()
@@ -616,7 +667,11 @@ async def test_approval_rule_change_fails_execution(db, rules: list[Any]) -> Non
     stored = await svc.get(req.id)
     assert stored is not None
     assert stored.status == ApprovalStatus.EXECUTION_FAILED
-    assert "s1" not in engine._strategy_rules
+    failed = [h for h in stored.history if h["action"] == "execution_failed"]
+    assert len(failed) == 1
+    assert failed[0]["detail"]
+    assert len(engine._strategy_rules["s1"]) == 1
+    assert engine._strategy_rules["s1"][0] is before[0]
 
 
 # ── 기동 ─────────────────────────────────────────────────────────────────────
@@ -752,9 +807,9 @@ def test_startup_notice_names_the_new_causes_without_keys() -> None:
     assert "ante rule update <rule_type> --account {id}" in message
     assert "max_daily_loss" not in message
     assert (
-        "규칙 객체가 아닌 항목·해시할 수 없는 type의 항목·같은 유형의 둘째 이후 "
-        "깨진 항목은 어느 유형으로든 rule update를 한 번 하면 저장값에서 버려져 "
-        "풀립니다" in message
+        "규칙 객체가 아닌 항목·해시할 수 없는 type의 항목·등록되지 않았거나 없는 "
+        "type의 항목·같은 유형의 둘째 이후 깨진 항목은 어느 유형으로든 rule update를 "
+        "한 번 하면 저장값에서 버려져 풀립니다" in message
     )
     assert "rule update로 풀리지 않습니다" not in message
 
@@ -923,16 +978,6 @@ async def test_broken_first_then_healthy_second_keeps_the_second(db) -> None:
             [{"type": "daily_loss_limit", "id": "b", "enabled": False, **LIMIT}],
             id="disabled-healthy-duplicate",
         ),
-        pytest.param([{"type": "no_such_rule", "x": 1}], id="unregistered"),
-        pytest.param([{"max_daily_loss_rate": MARK}], id="no-type"),
-        pytest.param([{"type": 7}], id="non-str-type"),
-        pytest.param(
-            [{"type": "no_such_rule"}, {"type": "no_such_rule", "priority": "1"}],
-            id="unregistered-duplicate-str-priority",
-        ),
-        pytest.param(
-            [{"priority": 1}, {"priority": "1"}], id="no-type-duplicate-str-priority"
-        ),
     ],
 )
 async def test_items_that_do_not_block_are_kept(db, kept: list[Any]) -> None:
@@ -999,3 +1044,157 @@ async def test_running_account_drops_and_reloads(db, caplog) -> None:
         r.name == DROPPED_LOGGER and r.levelno == logging.WARNING
         for r in caplog.records
     )
+
+
+# ── 등록되지 않은 type (#3035) ───────────────────────────────────────────────
+
+
+async def _unregistered_world(db: Database, source: str, value: list[Any]) -> _World:
+    world = _World(db)
+    await world.dyn.initialize()
+    await world.update("daily_loss_limit", dict(LIMIT), account_id="acc2")
+    if source == "seed":
+        await world.start(_StaticSeed({KEY1: value}))
+    else:
+        await world.store_raw("acc1", value)
+        await world.start()
+    return world
+
+
+@pytest.mark.parametrize("source", ["dynamic", "seed"])
+@pytest.mark.parametrize("enabled", ENABLED)
+@pytest.mark.parametrize("base", UNREGISTERED_BASES)
+async def test_unregistered_type_blocks_only_that_account_at_startup(
+    db, caplog, base: dict[str, Any], enabled: bool, source: str
+) -> None:
+    caplog.set_level(logging.INFO)
+    value = [{"type": "daily_loss_limit", **LIMIT}, _unregistered(base, enabled)]
+    world = await _unregistered_world(db, source, value)
+    assert world.manager is not None
+    cap = _Captured(world.bus)
+
+    assert world.manager.rules_unavailable_accounts() == {"acc1": "invalid_item"}
+    assert world.engine("acc1")._account_rules == []
+    assert world.engine("acc2").rules_unavailable is False
+    assert len(world.engine("acc2")._account_rules) == 1
+    errors = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.ERROR and r.name == "ante.rule.manager"
+    ]
+    assert len(errors) == 1
+    assert "invalid_item:RuleConfigError" in errors[0].getMessage()
+
+    await world.bus.publish(_order("acc1"))
+    await world.bus.publish(_order("acc2"))
+    blocked = [e for e in cap.rejected if "rules_unavailable" in e.reason]
+    assert [e.account_id for e in blocked] == ["acc1"]
+    assert all(e.account_id != "acc1" for e in cap.validated)
+
+
+@pytest.mark.parametrize("enabled", ENABLED)
+@pytest.mark.parametrize("base", UNREGISTERED_BASES)
+async def test_unregistered_type_reload_keeps_previous_rules(
+    world: _World, base: dict[str, Any], enabled: bool
+) -> None:
+    engine = world.engine()
+    before = list(engine._account_rules)
+    assert len(before) == 1
+    cap = _Captured(world.bus)
+
+    await world.store_raw(
+        "acc1", [{"type": "daily_loss_limit", **LIMIT}, _unregistered(base, enabled)]
+    )
+
+    assert len(engine._account_rules) == 1
+    assert engine._account_rules[0] is before[0]
+    assert engine.rules_unavailable is False
+    assert [n.title for n in cap.notifications] == [
+        "계좌 규칙을 다시 읽지 못함 — 이전 규칙 유지"
+    ]
+    assert cap.notifications[0].level == "error"
+    assert "RuleConfigError" in cap.notifications[0].message
+    assert world.result(0.02) == RuleResult.REJECT
+
+
+def _released_by_any_type() -> list[Any]:
+    cases = []
+    for base in UNREGISTERED_BASES:
+        for enabled in ENABLED:
+            item = _unregistered(base.values[0], enabled.values[0])
+            label = f"{base.id}-{enabled.id}"
+            cases.append(pytest.param([item], id=f"{label}-first"))
+            cases.append(pytest.param([item, dict(item)], id=f"{label}-second"))
+    cases += [
+        pytest.param(
+            [{"type": "no_such_rule"}, {"type": "no_such_rule", "priority": "1"}],
+            id="unregistered-duplicate-str-priority",
+        ),
+        pytest.param(
+            [{"priority": 1}, {"priority": "1"}], id="no-type-duplicate-str-priority"
+        ),
+        pytest.param([{"max_daily_loss_rate": MARK}], id="no-type-unknown-key"),
+    ]
+    return cases
+
+
+EXPOSURE = {"max_exposure_percent": 0.95}
+STORED_EXPOSURE = {"type": "total_exposure_limit", "enabled": True, **EXPOSURE}
+
+
+def _drop_warnings(caplog: Any) -> list[logging.LogRecord]:
+    return [
+        r
+        for r in caplog.records
+        if r.name == DROPPED_LOGGER and r.levelno == logging.WARNING
+    ]
+
+
+@pytest.mark.parametrize("broken", _released_by_any_type())
+async def test_unregistered_type_is_dropped_by_rule_update_of_any_type(
+    db, caplog, broken: list[Any]
+) -> None:
+    world = await _unregistered_world(
+        db, "dynamic", [{"type": "daily_loss_limit", **LIMIT}, *broken]
+    )
+    assert world.engine().rules_unavailable_cause == "invalid_item"
+    cap = _Captured(world.bus)
+    caplog.set_level(logging.INFO, logger=DROPPED_LOGGER)
+
+    response = await _ipc_update(world, "total_exposure_limit", dict(EXPOSURE))
+
+    assert response["status"] == "ok", response
+    assert json.loads(await world.raw() or "null") == [
+        {"type": "daily_loss_limit", **LIMIT},
+        STORED_EXPOSURE,
+    ]
+    assert world.engine().rules_unavailable is False
+    assert world.result(0.02) == RuleResult.REJECT
+    assert len(_dropped_notices(cap)) == 1
+    warnings = _drop_warnings(caplog)
+    assert len(warnings) == 1
+    for index in range(1, len(broken) + 1):
+        assert f"stored_index={index}" in warnings[0].getMessage()
+    assert str(MARK) not in warnings[0].getMessage()
+
+
+async def test_unregistered_type_is_dropped_by_direct_rule_update(db, caplog) -> None:
+    world = await _unregistered_world(
+        db, "dynamic", [{"type": "daily_loss_limit", **LIMIT}, {"type": "nope"}]
+    )
+    assert world.engine().rules_unavailable_cause == "invalid_item"
+    cap = _Captured(world.bus)
+    caplog.set_level(logging.INFO, logger=DROPPED_LOGGER)
+
+    await world.update("total_exposure_limit", dict(EXPOSURE))
+
+    assert json.loads(await world.raw() or "null") == [
+        {"type": "daily_loss_limit", **LIMIT},
+        STORED_EXPOSURE,
+    ]
+    assert world.engine().rules_unavailable is False
+    assert world.result(0.02) == RuleResult.REJECT
+    warnings = _drop_warnings(caplog)
+    assert len(warnings) == 1
+    assert "stored_index=1" in warnings[0].getMessage()
+    assert cap.notifications == []

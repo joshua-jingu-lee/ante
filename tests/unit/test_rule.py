@@ -30,6 +30,7 @@ from ante.rule import (
     TradingHoursRule,
     UnrealizedLossLimitRule,
 )
+from ante.rule.exceptions import RuleConfigError
 
 
 class _UserBaseException(BaseException):
@@ -736,9 +737,15 @@ class TestRuleEngine:
         assert len(result.evaluations) == 2
 
     def test_load_unknown_rule_type(self, engine):
-        """알 수 없는 룰 타입은 무시."""
-        engine.load_rules_from_config([{"type": "nonexistent", "id": "x"}])
-        assert len(engine._global_rules) == 0
+        """알 수 없는 룰 타입은 RuleConfigError이고 기존 룰을 그대로 둔다."""
+        engine.load_rules_from_config(
+            [{"type": "daily_loss_limit", "max_daily_loss_percent": 0.05}]
+        )
+        before = list(engine._account_rules)
+        with pytest.raises(RuleConfigError, match="알 수 없는 룰 타입"):
+            engine.load_rules_from_config([{"type": "nonexistent", "id": "x"}])
+        assert len(engine._account_rules) == 1
+        assert engine._account_rules[0] is before[0]
 
     def test_clear_rules(self, engine):
         """룰 초기화."""
