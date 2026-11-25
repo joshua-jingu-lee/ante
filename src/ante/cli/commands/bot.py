@@ -39,6 +39,11 @@ if TYPE_CHECKING:
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
+_SIGNAL_KEY_UNKNOWN_OUTCOME = (
+    "시그널 키 재발급이 서버에서 이미 처리됐을 수 있습니다. 기존 키는 무효일 수 "
+    "있으니 'ante bot signal-key {bot_id}'로 지금 키를 확인하세요."
+)
+
 
 @click.group()
 def bot() -> None:
@@ -349,6 +354,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> CommandResu
                 {"bot_id": bot_id},
                 actor=actor,
                 required=("signal_key",),
+                unknown_outcome=_SIGNAL_KEY_UNKNOWN_OUTCOME.format(bot_id=bot_id),
             )
 
         result = _run(_run_rotate())
