@@ -113,8 +113,12 @@ rules = [
 `rule update`는 저장하기 전에 사전이 아닌 항목, `type`이 없거나 등록된 문자열이 아닌 항목(첫 항목이어도),
 등록된 같은 type의 둘째 이후 항목 가운데 룰로 만들 수 없는 것을 저장값에서 버리므로, 이 셋으로 막힌
 계좌는 어느 type으로든 한 번 하면 풀린다. 같은 type의 멀쩡한 둘째 이후 항목은 남는다. 버린 항목은
-경고 로그(데몬 경로에서는 운영자 알림도)로 드러나고, 원문은 `ante config history`의 이전 값(seed에서
-읽었으면 설정 파일)에 남는다(판정의 세부는 [07-rule-engine-core.md](07-rule-engine-core.md)).
+경고 로그(데몬 경로에서는 운영자 알림도)와 `rule update`의 응답으로 드러나고, 원문은 `ante config history`의
+이전 값(seed에서 읽었으면 설정 파일)에 남는다(판정의 세부는 [07-rule-engine-core.md](07-rule-engine-core.md)).
+`rule update`의 응답(데몬 없는 CLI와 IPC `rule.update`가 같은 모양)에는 기존 키에 더해 `dropped_items`가
+늘 실린다. 버린 항목마다 `{"stored_index": <읽은 목록에서의 위치>, "rule_type": <type이 문자열이면 그 값, 아니면 null>}`을
+읽은 순서대로 담고, 버린 것이 없으면 `[]`이다. 저장값의 다른 내용(파라미터 값)은 싣지 않는다. text 출력은
+`dropped_items`가 비어 있지 않을 때만 둘째 줄에 그 수와 위치·유형 이름(repr로 이스케이프)과 원문의 위치를 알린다.
 런타임 수정은 항상 dynamic_config에 기록한다.
 
 ### 전략별 룰

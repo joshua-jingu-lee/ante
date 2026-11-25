@@ -31,6 +31,7 @@ RULE_RESULT = {
     "account_id": "acct-2",
     "rule_type": "daily_loss_limit",
     "rule": {"type": "daily_loss_limit", "enabled": False, "params": {}},
+    "dropped_items": [],
 }
 
 

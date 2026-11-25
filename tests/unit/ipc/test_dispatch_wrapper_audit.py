@@ -1339,7 +1339,13 @@ async def test_rule_update_audits_exactly_once(socket_path: str) -> None:
         )
         assert response["status"] == "ok", response
         fake_dynamic_config.set.assert_awaited_once()
-        assert set(response["result"]) == {"account_id", "rule_type", "rule"}
+        assert set(response["result"]) == {
+            "account_id",
+            "rule_type",
+            "rule",
+            "dropped_items",
+        }
+        assert response["result"]["dropped_items"] == []
 
         assert audit_logger.log.await_count == 1
         assert audit_logger.log.await_args.kwargs["action"] == "account.rule.update"
