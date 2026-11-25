@@ -383,6 +383,7 @@ scripts/
 ├── scan_create_services_anti_pattern.py
 ├── spec_code_block_baseline.json
 ├── uninstall-service.sh              # 서비스 제거
+├── update_test_shard_durations.py
 └── verify-install.py                 # 설치 검증 스크립트
 ```
 
