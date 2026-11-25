@@ -439,6 +439,22 @@ def test_record_path_is_the_fixed_repository_path():
     assert shards.RECORD_PATH == REPO_ROOT / "tests" / "shard_durations.json"
 
 
+def test_committed_record_is_valid():
+    record = shards.load_record(shards.RECORD_PATH)
+    assert record is not None, f"invalid or missing record: {shards.RECORD_PATH}"
+    assert record
+    assert all(type(value) is int and value >= 0 for value in record.values())
+
+
+def test_committed_record_overlaps_the_unit_test_files():
+    record = shards.load_record(shards.RECORD_PATH)
+    assert record is not None
+    assert set(record) & set(FILES), (
+        "the record shares no file with tests/unit — the split would fall back "
+        "to the hash; rebuild it with scripts/update_test_shard_durations.py"
+    )
+
+
 # ── 기록 갱신 스크립트 (#3036) ────────────────────────────────────────────
 
 
