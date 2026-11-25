@@ -8,8 +8,8 @@
 
 | 이벤트 | 발행 시점 | 구독자 |
 |--------|----------|--------|
-| `AccountSuspendedEvent` | `suspend()` 호출 시 (상태 DB 쓰기가 `Exception`으로 실패해도 발행) | BotManager (소속 봇 전체 중지), RuleEngine, Notification |
-| `AccountActivatedEvent` | `activate()` 호출 시 | BotManager (계좌 상태 변화 인지 + 로깅만; 자동 재시작은 수행하지 않음), RuleEngine, Notification |
+| `AccountSuspendedEvent` | `suspend()` 호출 시 (상태 DB 쓰기가 `Exception`으로 실패해도 발행); `delete()`가 직전 상태가 SUSPENDED가 아닌 계좌를 지울 때 (사유 `"Account deletion"`, cold-path 전용이라 런타임 구독자는 없다) | BotManager (소속 봇 전체 중지). 알림은 구독이 아니다 — `AccountService`가 같은 자리에서 별도의 `NotificationEvent`로 낸다 (`delete`는 알림을 내지 않는다) |
+| `AccountActivatedEvent` | `activate()` 호출 시 | BotManager (계좌 상태 변화 인지 + 로깅만; 자동 재시작은 수행하지 않음). 알림은 구독이 아니다 — `AccountService`가 같은 자리에서 별도의 `NotificationEvent`로 낸다 |
 
 `AccountCreatedEvent`와 `AccountDeletedEvent`는 1.0 런타임 EventBus 계약에 포함하지 않는다.
 계좌 생성/삭제는 cold-path 전용이며 active Ante runtime이 없는 상태에서만 수행되므로,
