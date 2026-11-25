@@ -5,8 +5,18 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
+from ante.broker.exceptions import BrokerError
+
 if TYPE_CHECKING:
     from ante.broker.models import CommissionInfo
+
+ORDER_SIDES: frozenset[str] = frozenset({"buy", "sell"})
+
+
+def ensure_order_side(side: object) -> None:
+    """``side``가 ``ORDER_SIDES``의 문자열이 아니면 ``BrokerError``를 낸다."""
+    if not isinstance(side, str) or side not in ORDER_SIDES:
+        raise BrokerError(f"지원하지 않는 주문 side: {side!r}")
 
 
 class BrokerAdapter(ABC):

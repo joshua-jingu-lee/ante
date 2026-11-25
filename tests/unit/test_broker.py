@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ante.account.errors import InvalidAccountIdError
+from ante.backtest import executor as backtest_executor
 from ante.broker import (
     APIError,
     AuthenticationError,
@@ -20,7 +21,19 @@ from ante.broker import (
     OrderRegistry,
     RateLimitError,
 )
+from ante.broker.base import ORDER_SIDES
 from ante.core import Database
+from ante.rule import engine as rule_engine
+
+# ── 주문 side 집합 (#3056) ─────────────────────────
+
+
+def test_order_sides_match_rule_engine_and_backtest() -> None:
+    """브로커·규칙 엔진·백테스트의 허용 side 집합이 같다."""
+    assert ORDER_SIDES == frozenset({"buy", "sell"})
+    assert set(ORDER_SIDES) == set(rule_engine._VALID_ORDER_SIDES)
+    assert set(ORDER_SIDES) == set(backtest_executor._ALLOWED_SIDES)
+
 
 # ── 예외 계층 ──────────────────────────────────────
 

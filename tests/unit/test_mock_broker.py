@@ -690,3 +690,40 @@ async def test_multiple_buys_avg_price(broker: MockBrokerAdapter) -> None:
     positions = await broker.get_positions()
     assert positions[0]["quantity"] == 20
     assert positions[0]["avg_price"] == 55_000  # (50000*10 + 60000*10) / 20
+
+
+# ── side 거부 (#3056) ─────────────────────────────────
+
+_INVALID_SIDES = ["BUY", "hold", "", None, ["buy"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fill_mode", ["immediate", "delayed"])
+@pytest.mark.parametrize("side", _INVALID_SIDES)
+async def test_invalid_side_rejected_without_side_effects(
+    fill_mode: str, side: object
+) -> None:
+    """buy·sell이 아닌 side는 체결·주문 저장 전에 BrokerError로 거부된다."""
+    broker = MockBrokerAdapter(
+        {
+            "fill_mode": fill_mode,
+            "delay_polls": 1,
+            "initial_cash": 10_000_000,
+            "default_price": 50_000,
+        }
+    )
+    await broker.place_order("005930", "buy", 10)
+    await broker.get_order_history()
+    positions = await broker.get_positions()
+    assert positions[0]["quantity"] == 10
+    balance = await broker.get_account_balance()
+    orders = dict(broker._orders)
+    polls = dict(broker._polls_left)
+
+    with pytest.raises(BrokerError):
+        await broker.place_order("005930", side, 3)  # type: ignore[arg-type]
+
+    assert await broker.get_positions() == positions
+    assert await broker.get_account_balance() == balance
+    assert broker._orders == orders
+    assert broker._polls_left == polls

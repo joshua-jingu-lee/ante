@@ -11,7 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, NoReturn
 
-from ante.broker.base import BrokerAdapter
+from ante.broker.base import BrokerAdapter, ensure_order_side
 from ante.broker.exceptions import BrokerError, OrderNotFoundError
 from ante.broker.models import CommissionInfo
 from ante.core import clock
@@ -235,6 +235,7 @@ class MockBrokerAdapter(BrokerAdapter):
         stop_price: float | None = None,
     ) -> str:
         """주문 접수 및 시뮬레이션 체결."""
+        ensure_order_side(side)
         if self._fill_mode == FillMode.REJECT:
             msg = f"Mock 주문 거부: {symbol} {side} {quantity}"
             raise BrokerError(msg)
