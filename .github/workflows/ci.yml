@@ -74,6 +74,13 @@ jobs:
       - name: Entry ratchet check
         run: python scripts/check_entry_ratchet.py
 
+      # 매치 없는 glob은 node --test가 0건으로 통과시키므로 셸에서 실패로 만든다.
+      - name: Workflow script tests
+        shell: bash
+        run: |
+          shopt -s failglob
+          node --test .github/scripts/*.test.js
+
   # 단위 테스트를 파일 경로의 crc32로 나눠 동시에 돌린다 (#2786).
   # 샤드 수는 아래 matrix 목록 한 곳에서 정해지고, 샤드는 strategy.job-total로,
   # test 잡은 이 잡의 출력 shards로 읽는다.
