@@ -8,13 +8,14 @@
   새 행은 ``open``으로 생긴다. 행은 사라지지 않는다. ``filled``에서는 나가지 않는다
 - R(규칙별 변화): 걸음마다 규칙이 만들 수 있는 변화만 일어난다. 대상이 아닌 행은
   한 열도 바뀌지 않는다. 중복 등록·재시작은 어떤 행도 바꾸지 않는다. 체결은 대상
-  행을 누적이 늘 때만 ``partially_filled``·``filled``로, ``mark_terminal``은 대상
-  행을 요청한 상태로만, ``expire_stale``은 그 계좌의 기한 지난 ``open`` 행만
-  ``expired``로 바꾼다. ``mark_terminal``은 열린 행만 바꾼다. 알려진 결함 하나는
-  그 규칙의 허용에 명시적으로 넣었다 — 체결이 종결된 행을 되살리는 것(#2705)
+  행을 누적이 늘 때만 바꾼다. 열린 행은 ``partially_filled``·``filled``로 바꾸고,
+  종결된 행은 상태와 ``terminal_at``을 그대로 둔 채 누적·평단·``last_polled_at``만
+  바꾼다(#2705). ``mark_terminal``은 대상 행을 요청한 상태로만, ``expire_stale``은
+  그 계좌의 기한 지난 ``open`` 행만 ``expired``로 바꾼다. ``mark_terminal``은 열린
+  행만 바꾼다
 - O2: ``recorded_filled_qty``는 줄지 않고 ``ordered_qty``를 넘지 않는다
 - O3: ``terminal_at IS NULL`` ⟺ 상태가 열린 상태(``open``·``partially_filled``)
-- O4: 열린 캐시의 주문 집합 == DB의 열린 행 집합 − 되살아난 행(#2705), 재시작 뒤에도.
+- O4: 열린 캐시의 주문 집합 == DB의 열린 행 집합, 재시작 뒤에도.
   캐시 레코드의 상태·누적 수량은 DB와 같다
 - S: 상태 값은 모든 경로(캐시, ``get``, ``get_open_orders``, ``record_fill``의
   결과)에서 평문 ``str``이다(#2707)
@@ -68,11 +69,8 @@ ALLOWED = {
 Row = dict[str, Any]
 # 규칙이 대상 행에서 바꿀 수 있는 열.
 STATUS_COLUMNS = {"status", "terminal_at"}
-FILL_COLUMNS = STATUS_COLUMNS | {
-    "recorded_filled_qty",
-    "avg_fill_price",
-    "last_polled_at",
-}
+LATE_FILL_COLUMNS = {"recorded_filled_qty", "avg_fill_price", "last_polled_at"}
+FILL_COLUMNS = STATUS_COLUMNS | LATE_FILL_COLUMNS
 
 
 class OrderTrackerMachine(RuleBasedStateMachine):
@@ -86,8 +84,6 @@ class OrderTrackerMachine(RuleBasedStateMachine):
         self._run(self._db.connect())
         self._seq = itertools.count()
         self.ordered: dict[str, int] = {}
-        # 종결된 뒤 체결 반영으로 열린 상태가 된 행(#2705). 캐시에 다시 들지 않는다.
-        self.revived: set[str] = set()
         self.rows: dict[str, Row] = {}
         self.touched: set[str] = set()
         self.steps = 0
@@ -142,7 +138,6 @@ class OrderTrackerMachine(RuleBasedStateMachine):
             self._check_rule_change(via, target, oid, prev, row, expect)
         self.touched = {o for o, r in after.items() if self.rows.get(o) != r}
         self.rows = after
-        self.revived &= {o for o, r in after.items() if r["status"] in OPEN}
         self.steps += 1
 
     @staticmethod
@@ -155,9 +150,11 @@ class OrderTrackerMachine(RuleBasedStateMachine):
         if via == "fill":
             assert oid == target, where
             assert row["recorded_filled_qty"] > prev["recorded_filled_qty"], where
-            # 종결된 행도 되살아난다(#2705).
-            assert row["status"] in {"partially_filled", "filled"}, where
-            assert changed <= FILL_COLUMNS, where
+            if prev["status"] in OPEN:
+                assert row["status"] in {"partially_filled", "filled"}, where
+                assert changed <= FILL_COLUMNS, where
+            else:
+                assert changed <= LATE_FILL_COLUMNS, where
         elif via == "mark_terminal":
             assert oid == target and expect["status"] in TERMINAL, where
             assert prev["status"] in OPEN, where
@@ -224,7 +221,6 @@ class OrderTrackerMachine(RuleBasedStateMachine):
         """
         order_id = data.draw(st.sampled_from(sorted(self.ordered)), "order")
         cumulative = data.draw(st.integers(0, self.ordered[order_id]), "cumulative")
-        before = self.rows[order_id]["status"]
 
         async def apply() -> Any:
             async with self._db.transaction():
@@ -239,9 +235,6 @@ class OrderTrackerMachine(RuleBasedStateMachine):
                 order_id, result.confirmed_cumulative, result.new_status
             )
         self._observe("fill", order_id)
-        after = self.rows[order_id]["status"]
-        if before in TERMINAL and after in OPEN:
-            self.revived.add(order_id)
 
     @precondition(lambda self: bool(self.ordered))
     @rule(data=st.data(), status=st.sampled_from(MARK_STATUSES))
@@ -287,7 +280,6 @@ class OrderTrackerMachine(RuleBasedStateMachine):
     def restart(self) -> None:
         """같은 DB로 새 OrderTracker를 올린다. 캐시는 DB에서 다시 적재된다."""
         self.tracker = self._boot()
-        self.revived.clear()
         self.last_restart = self.steps
         self._observe("restart")
 
@@ -317,10 +309,8 @@ class OrderTrackerMachine(RuleBasedStateMachine):
     def o4_open_cache(self) -> None:
         cache = self._cache_view()
         db_open = {o: r for o, r in self.rows.items() if r["status"] in OPEN}
-        assert self.revived <= db_open.keys()
-        assert cache.keys() == db_open.keys() - self.revived, (
-            f"O4: 캐시 {sorted(cache)} DB {sorted(db_open)} 되살아남 "
-            f"{sorted(self.revived)}"
+        assert cache.keys() == db_open.keys(), (
+            f"O4: 캐시 {sorted(cache)} DB {sorted(db_open)}"
         )
         for oid, (status, qty) in cache.items():
             row = db_open[oid]
@@ -377,15 +367,11 @@ async def _status(tracker: OrderTracker) -> str:
     return record.status
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="#2705")
 async def test_fill_after_cancel_keeps_open_cache_in_sync(tmp_path: Path) -> None:
     """취소된 주문에 체결이 와도 열린 캐시와 DB의 열린 상태가 일치한다(O4).
 
-    최소 순서: 등록(수량 2) → 취소 → 누적 1의 체결(FillApplier의 순서). 지금은 체결
-    반영이 종결된 행을 ``partially_filled``로 되살리지만 ``mirror_fill_to_cache``는
-    캐시에 있는 항목만 고치므로 그 주문이 캐시에 다시 들지 않는다. 되살릴지(캐시에도
-    넣는다) 되살리지 않을지(reconcile에서 드러낸다)는 스펙이 정한다 — 단언은 어느
-    쪽으로 고쳐도 통과하도록 「캐시에 있다 ⟺ DB에서 열린 상태다」만 본다.
+    최소 순서: 등록(수량 2) → 취소 → 누적 1의 체결(FillApplier의 순서). 체결 반영은
+    종결된 행을 되살리지 않으므로(#2705) 그 주문은 DB에서도 캐시에서도 열려 있지 않다.
     """
     db, tracker = await _tracker_with_order(tmp_path, 2.0)
     try:
@@ -396,10 +382,13 @@ async def test_fill_after_cancel_keeps_open_cache_in_sync(tmp_path: Path) -> Non
             "ord-0", result.confirmed_cumulative, result.new_status
         )
         status = await _status(tracker)
+        if result.delta != 1.0:
+            pytest.fail(f"준비: 체결이 반영되지 않았다 {result!r}")
 
         cached = tracker.get_open_orders_for_bot_sync(ACCOUNT_ID, "bot-a")
         in_cache = "ord-0" in {r.order_id for r in cached}
         assert in_cache == (status in OPEN), f"캐시 {in_cache}, DB {status}"
+        assert (status, in_cache) == ("cancelled", False)
     finally:
         await db.close()
 

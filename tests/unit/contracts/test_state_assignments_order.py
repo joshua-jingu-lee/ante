@@ -381,9 +381,9 @@ def test_control_missing_status_member_is_caught():
 def test_control_extra_quoted_literal_is_caught():
     sources = _with(
         _TRACKER,
-        "                   SET status = ?, terminal_at = datetime('now')\n"
+        "                   SET status = ?, terminal_at = ?\n"
         "                 WHERE account_id = ?",
-        "                   SET status = 'expired', terminal_at = datetime('now')\n"
+        "                   SET status = 'expired', terminal_at = ?\n"
         "                 WHERE account_id = ?",
     )
     assert quoted_literals(sources) == [
@@ -421,10 +421,9 @@ def test_control_extra_status_update_in_another_file_is_caught():
 def test_control_missing_status_update_is_caught():
     sources = _with(
         _TRACKER,
-        "                  SET status = ?, terminal_at = datetime('now')\n"
+        "                  SET status = ?, terminal_at = ?\n"
         "                WHERE order_id = ?",
-        "                  SET terminal_at = datetime('now')\n"
-        "                WHERE order_id = ?",
+        "                  SET terminal_at = ?\n                WHERE order_id = ?",
     )
     assert status_updates(sources) == [
         (_TRACKER, "OrderTracker.expire_stale"),
