@@ -6,6 +6,7 @@ record_fill 단조·멱등·동시, composite lookup 격리(account/date), EOD �
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 import pytest
 
@@ -156,15 +157,52 @@ async def test_lookup_isolates_by_date(tracker):
         tracker, order_id="ord-new", broker_order_id="0001", submitted_date="20260529"
     )
     assert await tracker.lookup_order_id("acct-A", "0001", "20260529") == "ord-new"
-    # 종료된 전날 주문은 매핑 대상에서 제외 (terminal scope).
-    assert await tracker.lookup_order_id("acct-A", "0001", "20260528") is None
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260530") == "ord-new"
+    # 종료된 전날 주문은 그날의 관측만 이어 받는다 (#2705 — 같은 영업일 scope).
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260528") == "ord-old"
 
 
-async def test_lookup_excludes_terminal(tracker):
+@pytest.mark.parametrize("status", ["cancelled", "rejected", "failed", "filled"])
+async def test_lookup_includes_terminal_on_same_day(tracker, status):
+    """종결된 행도 같은 영업일의 관측에는 잇는다 (#2705)."""
     await _seed(tracker, order_id="ord-1", broker_order_id="0001")
     assert await tracker.lookup_order_id("acct-A", "0001", "20260529") == "ord-1"
-    await tracker.mark_terminal("ord-1", "cancelled")
-    assert await tracker.lookup_order_id("acct-A", "0001", "20260529") is None
+    await tracker.mark_terminal("ord-1", status)
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260529") == "ord-1"
+
+
+async def test_lookup_includes_expired_on_same_day(tracker):
+    await _seed(tracker, order_id="ord-1", broker_order_id="0001")
+    assert await tracker.expire_stale("acct-A", "20260530") == 1
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260529") == "ord-1"
+
+
+@pytest.mark.parametrize("status", ["cancelled", "expired"])
+async def test_lookup_excludes_terminal_on_other_day(tracker, status):
+    """종결된 행은 다른 영업일의 관측(odno 재사용)에 잇지 않는다 (#2705)."""
+    await _seed(tracker, order_id="ord-1", broker_order_id="0001")
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260530") == "ord-1"
+    if status == "expired":
+        await tracker.expire_stale("acct-A", "20260530")
+    else:
+        await tracker.mark_terminal("ord-1", status)
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260530") is None
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260531") is None
+
+
+async def test_lookup_prefers_same_day_terminal_over_prior_day_open(tracker):
+    """D의 열린 행과 D+1의 종결 행이 같은 odno면 D+1 관측은 종결 행에 붙는다."""
+    await _seed(
+        tracker, order_id="ord-d", broker_order_id="0001", submitted_date="20260528"
+    )
+    await _seed(
+        tracker, order_id="ord-d1", broker_order_id="0001", submitted_date="20260529"
+    )
+    await tracker.record_fill("ord-d", 10.0, 1000.0)
+    await tracker.mark_terminal("ord-d1", "cancelled")
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260529") == "ord-d1"
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260528") == "ord-d"
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260530") == "ord-d"
 
 
 async def test_lookup_matches_prior_day_open_with_later_observation(tracker):
@@ -524,3 +562,115 @@ async def test_warm_open_cache_from_db(db):
     await t2.initialize()
     ids = sorted(_open_ids(t2))
     assert ids == ["ord-open", "ord-part"]
+
+
+# ── 종결 유지·시계·늦은 체결 감시 (#2705) ─────────────
+
+
+async def _terminal_row(db, order_id="ord-1"):
+    row = await db.fetch_one(
+        """SELECT status, recorded_filled_qty, avg_fill_price, terminal_at,
+                  last_polled_at
+             FROM order_tracker WHERE order_id = ?""",
+        (order_id,),
+    )
+    return dict(row)
+
+
+@pytest.mark.parametrize("status", ["cancelled", "rejected", "failed", "expired"])
+async def test_record_fill_keeps_terminal_status_and_time(db, tracker, status, caplog):
+    await _seed(tracker, ordered_qty=10.0)
+    if status == "expired":
+        await tracker.expire_stale("acct-A", "20260530")
+    else:
+        await tracker.mark_terminal("ord-1", status)
+    await db.execute(
+        "UPDATE order_tracker SET terminal_at = ? WHERE order_id = ?",
+        ("2000-01-01 00:00:00", "ord-1"),
+    )
+    caplog.set_level("WARNING", logger="ante.trade.order_tracker")
+    result = await tracker.record_fill("ord-1", 10.0, 1234.0)
+    assert (result.delta, result.confirmed_cumulative, result.new_status) == (
+        10.0,
+        10.0,
+        status,
+    )
+    row = await _terminal_row(db)
+    assert row["status"] == status
+    assert row["terminal_at"] == "2000-01-01 00:00:00"
+    assert (row["recorded_filled_qty"], row["avg_fill_price"]) == (10.0, 1234.0)
+    assert row["last_polled_at"] is not None
+    assert [r.levelname for r in caplog.records] == ["WARNING"]
+
+
+async def test_record_fill_on_filled_row_keeps_terminal_at(db, tracker):
+    await _seed(tracker, ordered_qty=10.0)
+    await tracker.record_fill("ord-1", 3.0, 1000.0)
+    await tracker.mark_terminal("ord-1", "filled")
+    await db.execute(
+        "UPDATE order_tracker SET terminal_at = ? WHERE order_id = ?",
+        ("2000-01-01 00:00:00", "ord-1"),
+    )
+    result = await tracker.record_fill("ord-1", 5.0, 1000.0)
+    assert (result.delta, result.new_status) == (2.0, "filled")
+    row = await _terminal_row(db)
+    assert (row["status"], row["terminal_at"]) == ("filled", "2000-01-01 00:00:00")
+
+
+_FIXED = datetime(2026, 5, 29, 15, 30, 5, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("manual_clock", [_FIXED], indirect=True)
+async def test_tracker_times_come_from_clock(db, tracker, manual_clock):
+    """``terminal_at``·``last_polled_at`` 은 시계의 UTC 값이다(형식 불변)."""
+    await _seed(tracker, order_id="ord-1", broker_order_id="0001")
+    await _seed(tracker, order_id="ord-2", broker_order_id="0002")
+    await _seed(tracker, order_id="ord-3", broker_order_id="0003", ordered_qty=5.0)
+    await tracker.mark_terminal("ord-1", "cancelled")
+    await tracker.expire_stale("acct-A", "20260530")
+    await tracker.record_fill("ord-3", 5.0, 1000.0)
+    rows = {oid: await _terminal_row(db, oid) for oid in ("ord-1", "ord-2", "ord-3")}
+    assert {oid: r["terminal_at"] for oid, r in rows.items()} == {
+        "ord-1": "2026-05-29 15:30:05",
+        "ord-2": "2026-05-29 15:30:05",
+        "ord-3": "2026-05-29 15:30:05",
+    }
+    assert rows["ord-3"]["last_polled_at"] == "2026-05-29 15:30:05"
+
+
+async def test_late_fill_watch_selects_cancelled_and_expired_with_capacity(db, tracker):
+    await _seed(tracker, order_id="c", broker_order_id="0001", ordered_qty=10.0)
+    await _seed(tracker, order_id="c-full", broker_order_id="0002", ordered_qty=10.0)
+    await _seed(tracker, order_id="r", broker_order_id="0003")
+    await _seed(tracker, order_id="f", broker_order_id="0004")
+    await _seed(
+        tracker, order_id="o", broker_order_id="0005", submitted_date="20260530"
+    )
+    await _seed(tracker, order_id="p", broker_order_id="0006", ordered_qty=10.0)
+    await _seed(
+        tracker, order_id="e", broker_order_id="0007", submitted_date="20260528"
+    )
+    await _seed(tracker, order_id="old", broker_order_id="0008")
+    await tracker.record_fill("c-full", 4.0, 1000.0)
+    await tracker.mark_terminal("c-full", "cancelled")
+    await tracker.record_fill("c-full", 10.0, 1000.0)
+    for oid in ("c", "old"):
+        await tracker.mark_terminal(oid, "cancelled")
+    await tracker.mark_terminal("r", "rejected")
+    await tracker.mark_terminal("f", "failed")
+    await tracker.record_fill("p", 4.0, 1000.0)
+    await tracker.expire_stale("acct-A", "20260529")
+    await db.execute(
+        "UPDATE order_tracker SET terminal_at = ? WHERE order_id = ?",
+        ("2026-05-28 14:59:59", "old"),
+    )
+    await db.execute(
+        "UPDATE order_tracker SET terminal_at = ? WHERE terminal_at IS NOT NULL "
+        "AND order_id <> ?",
+        ("2026-05-28 15:00:00", "old"),
+    )
+    watch = await tracker.get_late_fill_watch("acct-A", "2026-05-28 15:00:00")
+    assert sorted(r.order_id for r in watch) == ["c", "e"]
+    assert await tracker.get_late_fill_watch("acct-B", "2026-05-28 15:00:00") == []
+    later = await tracker.get_late_fill_watch("acct-A", "2026-05-28 15:00:01")
+    assert later == []

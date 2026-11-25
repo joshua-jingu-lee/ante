@@ -69,7 +69,7 @@ OrderApproved → submit_order → place_order(broker_order_id)
   → OrderSubmittedEvent → OrderTracker.open(order_id, broker_order_id, …)
 
 빠른경로 : H0STCNI0 → StreamIntegration._on_execution ─┐
-백스톱   : FillReconcileScheduler (open 있을 때만,        ├→ FillApplier.apply_cumulative(
+백스톱   : FillReconcileScheduler (open·감시 대상 있을 때만, ├→ FillApplier.apply_cumulative(
            get_order_history 1콜/사이클)              ─┘     account_id, broker_order_id,
                                                               observed_cumulative, avg_price,
                                                               submitted_date)
@@ -98,7 +98,7 @@ FillApplier (단일 인스턴스 · asyncio.Lock):
 |---|---|---|
 | `OrderTracker` | `trade/order_tracker.py` | 추적 주문 영속(DB `order_tracker`), 누적 체결 단조 advance(CAS), 매핑 조회, EOD 만료 |
 | `FillApplier` | `trade/fill_applier.py` | 단일 멱등 choke point. 관측 누적 → delta 산출 → 단일 트랜잭션 적용 → 이벤트 발행 |
-| `FillReconcileScheduler` | `broker/fill_scheduler.py` | 계좌별 event-gated 백스톱 폴러. open 있을 때만 `get_order_history` 1콜/사이클 → `FillApplier` |
+| `FillReconcileScheduler` | `broker/fill_scheduler.py` | 계좌별 event-gated 백스톱 폴러. open 또는 늦은 체결 감시 대상(§6.3)이 있을 때만 `get_order_history` 1콜/사이클 → `FillApplier` |
 
 `OrderTracker`와 `FillApplier`는 `trade/` 모듈에 둔다. 체결의 durable 적용
 (recorded + trade + position)은 FillApplier가 단일 권위자로 수행하므로,
@@ -114,8 +114,11 @@ paper·live 간 / 영업일 재사용으로 충돌할 수 있다. 따라서:
 - **PK = 내부 `order_id`** (`OrderSubmittedEvent`의 ante `uuid4` 주문 ID — 생성상
   전역 유일). CAS는 `WHERE order_id=:oid` 단일 행이라 모호성이 없다.
 - `(account_id, broker_order_id, submitted_date)` = **UNIQUE 인덱스 + 조회 키**
-  (poll/stream 관측 → 내부 `order_id` 매핑용). 조회는 non-terminal(또는 동일
-  영업일) scope로 한정해 영업일 재사용 충돌을 닫는다.
+  (poll/stream 관측 → 내부 `order_id` 매핑용). 조회는 「열린 행이면서
+  `submitted_date <= 관측일`」 또는 「상태와 무관하게 `submitted_date == 관측일`」인
+  행으로 한정하고, 그 가운데 `submitted_date`가 가장 늦은 1건을 고른다. 종결된 행은
+  같은 영업일의 체결만 이어 받으므로 영업일 재사용 충돌이 닫힌다. 영업일은
+  KST 달력 날짜다(`business_date_kst`).
 
 이 구조로 cross-account / paper·live / 일자 재사용 충돌이 **구조적으로 불가**하다.
 
@@ -143,7 +146,10 @@ paper·live 간 / 영업일 재사용으로 충돌할 수 있다. 따라서:
 - `record_fill(order_id, new_cumulative, avg_price) → RecordFillResult(delta, confirmed_cumulative)`:
   원자 CAS advance. `delta = new_cumulative - 이전 recorded`. `delta<=0`이면
   `delta=0` no-op(`confirmed_cumulative`=직전 recorded), `delta>0`이면
-  `recorded=new_cumulative`로 갱신하고 status를 부분/완료로 전이한 뒤
+  `recorded=new_cumulative`로 갱신하고, 트랜잭션 안에서 읽은 상태가 열린 상태면
+  status를 부분/완료로 전이한다. 읽은 상태가 종결이면 status와 `terminal_at`을
+  그대로 두고 누적·평단·`last_polled_at`만 올리며(`new_status`는 그 종결 상태),
+  `WARNING` 로그 한 줄을 남긴다. 갱신은 읽은 상태가 그대로일 때만 일어난다. 그 뒤
   **CAS `RETURNING recorded_filled_qty`로 확정된 누적값**을 `confirmed_cumulative`로
   반환한다. **FillApplier의 트랜잭션 안에서만 호출**. `confirmed_cumulative`는
   체결 이벤트 outbox의 결정적 `fill_dedup_key` 산출 기준이다(§10, #1949) —
@@ -151,7 +157,7 @@ paper·live 간 / 영업일 재사용으로 충돌할 수 있다. 따라서:
 - `mark_terminal(order_id, status)`: 취소·거부·실패·만료 종료 표기. 열린 상태(`open`·`partially_filled`)의 행만 갱신하고, 이미 종결된 행(`filled` 포함)은 바꾸지 않는다(첫 종결이 이긴다).
 - `get_open_orders(account_id)`: 계좌의 non-terminal(open/partially_filled) 주문.
 - `lookup_order_id(account_id, broker_order_id, submitted_date) → order_id | None`:
-  관측 → 내부 주문 매핑(non-terminal/same-day scope).
+  관측 → 내부 주문 매핑(§4.1의 조회 규칙. 같은 영업일이면 종결된 행도 고른다).
 - `expire_stale(...)`: EOD 경과한 open 주문을 `expired`로 표기.
 
 ### 4.4 멱등 불변식
@@ -159,6 +165,10 @@ paper·live 간 / 영업일 재사용으로 충돌할 수 있다. 따라서:
 - `recorded_filled_qty`는 order별 **단조 비감소**.
 - 각 증가(delta>0)는 **정확히 1개 `OrderFilledEvent(delta)`** 와 1쌍.
 - 포지션 = Σdelta = 최종 누적 체결량.
+- 종결된 행은 체결을 반영해도 종결 상태와 `terminal_at`을 유지한다(첫 종결이
+  이긴다). 체결 반영은 종결된 행을 열린 상태로 되돌리지 않는다.
+- `terminal_at`·`last_polled_at`은 `ante.core.clock`의 UTC 시각을
+  `YYYY-MM-DD HH:MM:SS`로 쓴다.
 
 ## 5. FillApplier — 단일 멱등 choke point
 
@@ -167,8 +177,9 @@ publish 전체**를 감싼다.
 
 `apply_cumulative(account_id, broker_order_id, observed_cumulative, avg_price, submitted_date)`:
 
-1. `lookup_order_id`로 추적 주문 확인. 없으면 **무시**(self/external 경계 —
-   진짜 외부 포지션은 reconciler 영역).
+1. `lookup_order_id`로 추적 주문 확인(같은 영업일이면 취소·만료 등으로 종결된
+   행도 찾는다 — §4.1). 없으면 **무시**(self/external 경계 — 진짜 외부 포지션은
+   reconciler 영역).
 2. `Database.transaction()` 단일 트랜잭션 안에서:
    - (a) CAS advance `recorded_filled_qty` (`WHERE order_id=:oid AND
      recorded_filled_qty<:c`) → `applied_delta` 산출.
@@ -230,15 +241,17 @@ commit 성공 = 이벤트 영속 보장이므로, commit-후-crash에서도 재�
 ## 6. FillReconcileScheduler — 백스톱 폴러
 
 - 계좌별 인스턴스. running 동안 동작.
-- **event-gated**: `OrderTracker.get_open_orders(account_id)`가 비면 폴하지 않고
-  idle(0콜). open이 있을 때만 `get_order_history`를 **사이클당 1콜** 호출.
+- **event-gated**: `OrderTracker.get_open_orders(account_id)`가 비고 늦은 체결
+  감시 대상(§6.3)과 fallback 검증 항목(§11.4)도 없으면 폴하지 않고 idle(0콜).
+  그 밖에는 `get_order_history`를 **사이클당 1콜** 호출.
 - cadence **≥60s**. KIS rate budget(paper 5/min·live 20/min, 주문제출·가격
   fallback·잔고 reconcile·fill poll이 동일 큐 공유)을 보호한다. 주문 제출이
   starve되지 않도록 가격 fallback 루프와 우선순위/상호배타를 둔다.
 - `get_order_history` window는 **EOD 만료 전** 추적 open 주문의 가장 이른
   `submitted_date` 이후를 덮도록 잡고 pagination·당일 필터를 처리한다
   (stream-before-seed race도 폴이 멱등 흡수). 만료가 이 open을 먼저 제거해
-  window를 좁히지 않는다 (§6.1 poll-first, §8 참조).
+  window를 좁히지 않는다 (§6.1 poll-first, §8 참조). 감시 대상이 있으면 그
+  `submitted_date`도 window에 넣는다.
 
 ### 6.1 기동 카치업 (catch_up_once)
 
@@ -253,9 +266,10 @@ pagination)를 **1회** 폴해 다운타임 중 발생한 체결을 `FillApplier
 다음 순서를 지킨다:
 
 1. `get_open_orders`로 추적 open(non-terminal)을 **EOD 만료 전에** 읽고,
-   `from_date`를 그 중 가장 이른 `submitted_date`로 잡는다(전일 open이 있으면
-   window가 그 영업일까지 거슬러 올라간다 — §8 window invariant).
-2. open이 있으면 `get_order_history` 1콜로 다운타임 체결을 `FillApplier`로 멱등
+   늦은 체결 감시 대상(§6.3)도 읽는다. `from_date`를 그 중 가장 이른
+   `submitted_date`로 잡는다(전일 open이 있으면 window가 그 영업일까지 거슬러
+   올라간다 — §8 window invariant).
+2. open 또는 감시 대상이 있으면 `get_order_history` 1콜로 다운타임 체결을 `FillApplier`로 멱등
    **복구**한다. 복구된 주문은 `filled`/`partially_filled`로 전이된다.
 3. **2의 복구가 끝난 뒤**, 남아 있는 open buy capacity(`Σ(ordered_qty -
    recorded_filled_qty) > 0`)에 대해서만 §11 **잔고-역도출 fallback**을 적용한다
@@ -328,6 +342,61 @@ broker-wide 로 차단된다(cross-concern 결합). 이를 끊기 위해 두 nor
 - **적용 범위**: cooldown 은 `_loop` steady-state 한정이다. 기동 카치업
   `catch_up_once`의 bounded backoff(§6.1, `CATCH_UP_MAX_ATTEMPTS`)는 **무변경·
   비간섭**이며, 기동 barrier(§7) 결정에 영향을 주지 않는다.
+
+### 6.3 늦은 체결 감시 (#2705)
+
+취소·만료로 종결된 뒤에도 그 주문의 체결이 관측될 수 있다(취소 요청이 접수되기
+전의 체결, 만료 전에 관측되지 않은 체결). 이 체결도 반영한다(§4.1·§4.4). 다른 열린
+주문이 없어도 이 체결을 관측하려고 감시 대상을 폴 게이트에 넣는다.
+
+- **감시 대상**: `cancelled`·`expired`이면서 `recorded_filled_qty < ordered_qty`인
+  행. 다음 둘 중 하나면 감시한다.
+  - 종결 날짜가 오늘이다.
+  - 종결 날짜가 어제이고, 이 프로세스가 오늘 성공한 폴을 아직 한 번도 하지 않았다.
+- 종결 날짜는 `terminal_at`(UTC)을 KST로 바꾼 달력 날짜다. 스케줄러는 마지막으로
+  성공한 폴의 날짜를 메모리에만 둔다(저장 스키마·설정 키 없음). 재시작하면 어제
+  종결된 행을 한 번 더 폴한다(멱등이라 무해하다).
+- 감시가 체결을 잇는 대상은 같은 영업일의 행뿐이다(§4.1). `rejected`·`failed`는
+  일부러 감시하지 않지만, 같은 영업일에 다른 이유로 폴된 이력에 체결이 있으면
+  이어 받는다.
+- **호출 비용**: 감시 중에는 사이클(≥60s)마다 `get_order_history` 1콜(페이지
+  수만큼)을 쓴다. 취소된 주문은 그날 하루와 다음 날의 첫 성공 폴까지 감시된다.
+  만료는 제출일 뒤의 첫 성공 폴(보통 다음 날, 다운타임 뒤에는 재시작한 날)에서
+  일어나므로, 만료된 주문은 만료된 날 하루와 그다음 날의 첫 성공 폴까지 감시된다.
+  그동안 조회 구간(`from_date`)은 제출일까지 거슬러 올라가므로, 다운타임 뒤에는
+  여러 날에 걸친다. 감시 대상의 조회는
+  `idx_order_tracker_open(account_id, status)` 인덱스를 탄다.
+- **Treasury 귀결**: 늦은 체결은 기존 `OrderFilledEvent` 정산식을 그대로 탄다
+  ([treasury/03-treasury-model.md](../treasury/03-treasury-model.md)). 취소된 매수는
+  예약이 이미 회수돼 `covered=0`이므로 체결액 전부가 `available`에서 빠지고
+  `spent`에 더해진다(가용이 모자라면 음수가 되고 shortfall 경고가 난다). 만료된
+  매수는 남은 예약이 있으면 그만큼 예약에서 차감된다. 매도는 예약이 없어
+  `returned`·`available`에 더해진다.
+- **이벤트**: `OrderFilledEvent`는 outbox로 한 번 나가고, 종결 이벤트는 다시 나가지
+  않는다. 전략의 `on_fill`은 취소·만료를 통보받은 주문에 대해서도 불릴 수 있다.
+
+알려진 한계:
+
+- 「다음 날의 첫 폴」은 체결 폴이 밤에도 돌아 사실상 자정 직후다(주말 포함).
+  데몬이 다음 날 내내 꺼져 있었다면 감시하지 않는다. 그 체결은 재조정이
+  드러낸다.
+- 모의 계좌의 당일 지연 반영(§2.1)은 당일의 감시가 덮는다. 실전 `TTTC0081R`의
+  당일 반영과, 실전 이력이 취소된 원주문의 체결 누적을 돌려주는지는 확인하지
+  못했다(§11.6). 돌려주지 않으면 그 경로에서는 효과가 없을 뿐이다.
+- 실시간 체결 통보(§2 빠른 경로)도 같은 조회를 지나므로 종결된 행에 닿는다.
+  이 처리기는 체결 여부를 거르지 않고 필드 위치를 가정한다. 이 스펙 시점의
+  구독은 HTS ID 없이 이뤄지고(§9) 통보 본문을 복호화하지 않아, 통보가 체결로
+  반영되는 경로가 확인되지 않았다. 그래서 「스트림에서 복구된다」를 근거로
+  삼지 않는다.
+- 재조정과의 이중 가산: 브로커 잔고에 늦은 체결이 보이는데 ante가 아직 반영하기
+  전(≤ 폴 주기)에 재조정이 돌면, 단일 봇 계좌에서 「외부 매수」로 포지션을 맞춘 뒤
+  늦은 체결이 한 번 더 더해질 수 있다. 다음 재조정이 「외부 매도」로 되맞춘다.
+  여러 봇의 계좌는 미귀속 보유를 감지만 한다. 감시 대상은 재조정 self-check의
+  용량에 들어가지 않는다.
+- 모의 fallback의 이중 귀속: 같은 종목에 열린 매수 한 건과 늦게 체결된 취소 주문이
+  함께 있고 잔고 초과분이 열린 주문의 수량과 같으면, fallback(§11)이 그 체결을
+  열린 주문에 붙이고 뒤이은 이력 조회가 취소 주문에도 반영해 두 번 더해질 수 있다.
+  모의 계좌에 한정되고 late-ccld 경보(§11.4)가 드러낸다.
 
 ## 7. barrier ordering (재기동 무오분류)
 

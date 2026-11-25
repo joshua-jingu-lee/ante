@@ -726,3 +726,94 @@ async def test_rolled_back_sell_keeps_cached_holding(
     assert pos["quantity"] == 100.0
     cached = position_history.get_positions_sync("bot-1", account_id=ACCT)
     assert [(p.symbol, p.quantity) for p in cached] == [("005930", 100.0)]
+
+
+# ── 종결된 주문의 늦은 체결 (#2705) ───────────────────
+
+
+async def _terminate(tracker, status):
+    if status == "expired":
+        assert await tracker.expire_stale(ACCT, "20260530") == 1
+    else:
+        await tracker.mark_terminal("ord-1", status)
+
+
+async def _tracker_row(db):
+    row = await db.fetch_one(
+        "SELECT status, terminal_at, recorded_filled_qty FROM order_tracker"
+        " WHERE order_id = ?",
+        ("ord-1",),
+    )
+    return dict(row)
+
+
+@pytest.mark.parametrize("status", ["cancelled", "expired", "rejected"])
+@pytest.mark.parametrize("path", ["cumulative", "stream"])
+async def test_late_fill_on_same_day_terminal_order_is_applied(
+    db, tracker, position_history, eventbus, status, path
+):
+    """같은 날짜의 종결 행에 관측된 체결은 반영되고, 상태·종결 시각은 그대로다."""
+    applier, _outbox = await _applier_with_outbox(
+        db, tracker, position_history, eventbus
+    )
+    await _seed(tracker, qty=10.0)
+    await _terminate(tracker, status)
+    before = await _tracker_row(db)
+    if path == "cumulative":
+        delta = await applier.apply_cumulative(
+            account_id=ACCT,
+            broker_order_id="0001",
+            observed_cumulative=4.0,
+            avg_price=10_000.0,
+            submitted_date=DATE,
+        )
+    else:
+        delta = await applier.apply_stream_increment(
+            account_id=ACCT,
+            broker_order_id="0001",
+            increment=4.0,
+            avg_price=10_000.0,
+            submitted_date=DATE,
+        )
+    assert delta == 4.0
+    after = await _tracker_row(db)
+    assert (after["status"], after["terminal_at"]) == (
+        status,
+        before["terminal_at"],
+    )
+    assert after["recorded_filled_qty"] == 4.0
+    trades = await db.fetch_all(
+        "SELECT status, quantity FROM trades WHERE order_id = ?", ("ord-1",)
+    )
+    assert [(r["status"], r["quantity"]) for r in trades] == [("filled", 4.0)]
+    outbox_rows = await db.fetch_all("SELECT fill_dedup_key FROM fill_outbox", ())
+    assert len(outbox_rows) == 1
+    pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
+    assert pos["quantity"] == 4.0
+    assert tracker.get_open_orders_for_bot_sync(ACCT, "bot-1") == []
+
+
+@pytest.mark.parametrize("status", ["cancelled", "expired"])
+async def test_late_fill_on_other_day_terminal_order_is_ignored(
+    db, tracker, applier, position_history, status
+):
+    """날짜가 다른 종결 행(odno 재사용)에는 체결을 잇지 않는다."""
+    await _seed(tracker, qty=10.0)
+    await _terminate(tracker, status)
+    delta = await applier.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=4.0,
+        avg_price=10_000.0,
+        submitted_date="20260530",
+    )
+    increment = await applier.apply_stream_increment(
+        account_id=ACCT,
+        broker_order_id="0001",
+        increment=4.0,
+        avg_price=10_000.0,
+        submitted_date="20260530",
+    )
+    assert (delta, increment) == (0.0, 0.0)
+    assert (await _tracker_row(db))["recorded_filled_qty"] == 0.0
+    assert await db.fetch_all("SELECT * FROM trades", ()) == []

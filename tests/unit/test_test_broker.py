@@ -542,3 +542,34 @@ class TestBrokerAdapterInterface:
         # ABC를 모두 구현하지 않으면 인스턴스 생성 시 TypeError
         broker = TestBrokerAdapter({"seed": 1})
         assert broker is not None
+
+
+# ── side 거부 (#3056) ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("order_type", ["market", "limit"])
+@pytest.mark.parametrize("side", ["BUY", "hold", "", None, ["buy"]])
+async def test_invalid_side_rejected_without_side_effects(
+    connected_broker: TestBrokerAdapter, order_type: str, side: object
+) -> None:
+    """buy·sell이 아닌 side는 체결 시뮬레이션 전에 BrokerError로 거부된다."""
+    await connected_broker.place_order("000001", "buy", 10)
+    price = connected_broker._simulator.get_price("000001")
+    positions = await connected_broker.get_positions()
+    assert positions
+    balance = await connected_broker.get_account_balance()
+    orders = dict(connected_broker._orders)
+
+    with pytest.raises(BrokerError):
+        await connected_broker.place_order(
+            "000001",
+            side,  # type: ignore[arg-type]
+            3,
+            order_type,
+            price if order_type == "limit" else None,
+        )
+
+    assert await connected_broker.get_positions() == positions
+    assert await connected_broker.get_account_balance() == balance
+    assert connected_broker._orders == orders

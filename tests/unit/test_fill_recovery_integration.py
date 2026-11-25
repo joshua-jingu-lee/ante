@@ -601,7 +601,9 @@ async def test_eod_expiry_terminal(stack):
     assert await tracker.get_open_orders(ACCT) == []
 
 
-async def test_scheduler_poll_first_then_expires_stale_no_more_poll(stack):
+async def test_scheduler_poll_first_then_expires_stale_no_more_poll(
+    stack, manual_clock
+):
     """poll-first: 폴 사이클이 EOD 지난 open 을 **폴(복구 시도) 후** expire 해,
     그 다음 사이클부턴 get_order_history 를 호출하지 않는다 (무한 폴 방지하되
     복구 우선). 메타리뷰: expire 를 폴 앞에 두면 다운타임 체결분 복구 실패 회귀.
@@ -635,9 +637,15 @@ async def test_scheduler_poll_first_then_expires_stale_no_more_poll(stack):
     assert broker.history_calls == 1  # poll-first — 복구 시도가 먼저.
     assert (await tracker.get("ord-stale")).status == "expired"
 
-    # 다음 사이클은 open 이 비어 더는 폴 안 됨 (무한 폴 없음).
+    # 다음 사이클: open 은 비었지만 오늘 만료된 행은 늦은 체결 감시 대상이다(#2705).
     await sched.catch_up_once()
-    assert broker.history_calls == 1
+    assert broker.history_calls == 2
+
+    # 감시 창(종결 날짜가 오늘·어제)이 지나면 더는 폴 안 됨 (무한 폴 없음).
+    manual_clock.advance(2 * 86400)
+    await sched.catch_up_once()
+    await sched.catch_up_once()
+    assert broker.history_calls == 2
 
 
 async def test_prior_day_downtime_fill_recovered_before_expire_no_misclass(

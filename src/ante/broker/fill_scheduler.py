@@ -132,6 +132,7 @@ class FillReconcileScheduler:
         self._task: asyncio.Task[None] | None = None
         self._running = False
         self._fallback_verify: dict[str, _FallbackVerifyEntry] = {}
+        self._last_success_poll_date: str | None = None
 
     @property
     def account_id(self) -> str:
@@ -140,7 +141,7 @@ class FillReconcileScheduler:
     async def catch_up_once(self) -> CatchUpResult:
         """기동 카치업: open 주문이 있으면 1회 폴 → FillApplier.
 
-        다운타임 중 발생한 체결을 멱등 따라잡는다. open 이 없으면 0콜·0건이며
+        다운타임 체결을 멱등 따라잡는다. open·감시 대상이 없으면 0콜·0건이며
         명시적 **성공**(``succeeded=True``)으로 본다.
 
         폴 자체가 CB/rate/network 로 실패하면 **bounded backoff 로 재시도**하고,
@@ -247,14 +248,18 @@ class FillReconcileScheduler:
                 consecutive_transient_failures = 0
 
     async def _poll_and_apply(self) -> int:
-        """**poll-first**: open(만료 전) → history 1콜 → fallback → 그 후 EOD 만료."""
+        """**poll-first**: open·감시(만료 전) → history 1콜 → fallback → EOD 만료."""
         today = business_date_kst()
 
         open_orders = await self._tracker.get_open_orders(self._account_id)
-        if not open_orders and not self._fallback_verify:
+        watch = await self._tracker.get_late_fill_watch(
+            self._account_id, self._late_fill_watch_since(today)
+        )
+        if not open_orders and not self._fallback_verify and not watch:
             return 0
 
         candidate_dates = [o.submitted_date for o in open_orders]
+        candidate_dates.extend(o.submitted_date for o in watch)
         candidate_dates.extend(e.submitted_date for e in self._fallback_verify.values())
         from_date = min(candidate_dates)
         to_date = today
@@ -294,7 +299,15 @@ class FillReconcileScheduler:
 
         await self._tracker.expire_stale(self._account_id, before_date=today)
         self._expire_stale_fallback_verify(before_date=today)
+        self._last_success_poll_date = today
         return applied
+
+    def _late_fill_watch_since(self, today: str) -> str:
+        """감시 창의 시작(오늘 첫 성공 폴 전이면 어제의 KST 자정)을 UTC 문자열로."""
+        start = datetime.strptime(today, "%Y%m%d").replace(tzinfo=_KST)
+        if self._last_success_poll_date != today:
+            start -= timedelta(days=1)
+        return start.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
     def _expire_stale_fallback_verify(self, *, before_date: str) -> None:
         """``_fallback_verify`` 의 D-1 이전 항목을 정리한다 (§11.5)."""

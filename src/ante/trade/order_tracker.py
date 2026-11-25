@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from ante.account.scoping import require_account_id
+from ante.core import clock
 
 if TYPE_CHECKING:
     from ante.core.database import Database
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now_text() -> str:
+    """시계의 현재 UTC 시각을 ``YYYY-MM-DD HH:MM:SS`` 로."""
+    return clock.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 class OrderStatus(StrEnum):
@@ -42,17 +49,20 @@ ORDER_STATUS_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
         OrderStatus.FAILED,
         OrderStatus.EXPIRED,
     },
-    OrderStatus.FILLED: {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED},
-    OrderStatus.CANCELLED: {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED},
-    OrderStatus.REJECTED: {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED},
-    OrderStatus.FAILED: {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED},
-    OrderStatus.EXPIRED: {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED},
+    OrderStatus.FILLED: {OrderStatus.FILLED},
+    OrderStatus.CANCELLED: {OrderStatus.CANCELLED},
+    OrderStatus.REJECTED: {OrderStatus.REJECTED},
+    OrderStatus.FAILED: {OrderStatus.FAILED},
+    OrderStatus.EXPIRED: {OrderStatus.EXPIRED},
 }
 
 OPEN_STATUSES: frozenset[OrderStatus] = frozenset(
     {OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED}
 )
 TERMINAL_STATUSES: frozenset[OrderStatus] = frozenset(OrderStatus) - OPEN_STATUSES
+LATE_FILL_WATCH_STATUSES: frozenset[OrderStatus] = frozenset(
+    {OrderStatus.CANCELLED, OrderStatus.EXPIRED}
+)
 
 ORDER_TRACKER_SCHEMA = """
 CREATE TABLE IF NOT EXISTS order_tracker (
@@ -91,8 +101,8 @@ class RecordFillResult:
         confirmed_cumulative: **CAS ``RETURNING recorded_filled_qty`` 로 확정된**
             누적 체결량. ``delta>0`` 일 때 advance 된 확정값(= new_cumulative)을
             담고, no-op(``delta<=0``)이면 직전 recorded 값을 그대로 반영한다.
-        new_status: advance 후 확정된 주문 상태(``filled`` 또는
-            ``partially_filled``). no-op(``delta<=0``)이면 직전 status 를 반영한다.
+        new_status: advance 후 확정된 주문 상태(``filled``·``partially_filled``,
+            종결된 행이면 유지한 그 상태). no-op 이면 직전 status 다.
     """
 
     delta: float
@@ -309,13 +319,14 @@ class OrderTracker:
 
         ``delta = new_cumulative - 이전 recorded_filled_qty``.
         ``delta <= 0`` 이면 ``delta=0`` no-op(직전 recorded 를 confirmed 로 반영).
+        읽은 상태가 종결이면 상태와 ``terminal_at`` 을 유지한다.
 
         **반드시 FillApplier 의 ``Database.transaction()`` + Lock 안에서 호출.**
 
         invariant: 이 메서드는 **인메모리 open 캐시를 절대 건드리지 않는다.**
         """
         row = await self._db.execute_fetch_one(
-            """SELECT recorded_filled_qty, ordered_qty, status
+            """SELECT recorded_filled_qty, ordered_qty, status, terminal_at
                  FROM order_tracker WHERE order_id = ?""",
             (order_id,),
         )
@@ -332,38 +343,55 @@ class OrderTracker:
                 new_status=str(row["status"]),
             )
 
-        new_status = (
-            OrderStatus.FILLED
-            if ordered > 0 and new_cumulative >= ordered
-            else OrderStatus.PARTIALLY_FILLED
-        )
+        prev_status = str(row["status"])
+        now = _utc_now_text()
+        keep_terminal = prev_status in TERMINAL_STATUSES
+        terminal_at: str | None
+        if keep_terminal:
+            new_status = prev_status
+            terminal_at = row["terminal_at"]
+        elif ordered > 0 and new_cumulative >= ordered:
+            new_status = OrderStatus.FILLED.value
+            terminal_at = now
+        else:
+            new_status = OrderStatus.PARTIALLY_FILLED.value
+            terminal_at = None
         updated = await self._db.execute_fetch_one(
             """UPDATE order_tracker
                   SET recorded_filled_qty = ?,
                       avg_fill_price = ?,
                       status = ?,
-                      last_polled_at = datetime('now'),
-                      terminal_at = CASE WHEN ? = ?
-                                         THEN datetime('now') ELSE NULL END
-                WHERE order_id = ? AND recorded_filled_qty < ?
+                      last_polled_at = ?,
+                      terminal_at = ?
+                WHERE order_id = ? AND recorded_filled_qty < ? AND status = ?
             RETURNING recorded_filled_qty""",
             (
                 new_cumulative,
                 avg_price,
                 new_status,
-                new_status,
-                OrderStatus.FILLED,
+                now,
+                terminal_at,
                 order_id,
                 new_cumulative,
+                prev_status,
             ),
         )
         if updated is None:
             return RecordFillResult(
-                delta=0.0, confirmed_cumulative=prev, new_status=str(row["status"])
+                delta=0.0, confirmed_cumulative=prev, new_status=prev_status
+            )
+        if keep_terminal:
+            logger.warning(
+                "종결된 주문에 늦은 체결 반영(상태 유지): order=%s status=%s "
+                "delta=%s cumulative=%s",
+                order_id,
+                prev_status,
+                delta,
+                new_cumulative,
             )
         confirmed = float(updated["recorded_filled_qty"] or 0.0)
         return RecordFillResult(
-            delta=delta, confirmed_cumulative=confirmed, new_status=new_status.value
+            delta=delta, confirmed_cumulative=confirmed, new_status=new_status
         )
 
     def mirror_fill_to_cache(
@@ -420,9 +448,15 @@ class OrderTracker:
             raise ValueError(f"비-terminal status: {status!r}")
         await self._db.execute(
             """UPDATE order_tracker
-                  SET status = ?, terminal_at = datetime('now')
+                  SET status = ?, terminal_at = ?
                 WHERE order_id = ? AND status IN (?, ?)""",
-            (status, order_id, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED),
+            (
+                status,
+                _utc_now_text(),
+                order_id,
+                OrderStatus.OPEN,
+                OrderStatus.PARTIALLY_FILLED,
+            ),
         )
         self._evict_open_cache(order_id)
 
@@ -499,12 +533,10 @@ class OrderTracker:
     ) -> str | None:
         """관측(account/broker_order_id/observed_date) → 내부 order_id 매핑.
 
-        spec §4.1 scope: **non-terminal** 이면서 추적 ``submitted_date`` 가 관측
-        영업일 **이하**(``submitted_date <= observed_date``)인 주문을 매핑한다.
-
-        - 같은 odno 의 non-terminal 이 여러 영업일에 동시 존재하는 경합에서는
-          ``submitted_date`` 최신(MAX) 1건을 골라 "가장 최근 주문 우선" 으로
-          결정론적이게 한다.
+        spec §4.1: 「열린 행이면서 ``submitted_date <= observed_date``」 또는
+        「상태와 무관하게 ``submitted_date == observed_date``」인 행 가운데
+        ``submitted_date`` 최신(MAX) 1건을 고른다. 종결된 행은 같은 영업일의
+        체결만 이어 받는다(odno 일자 재사용 격리).
         """
         validated = require_account_id(
             account_id, context="order_tracker.lookup_order_id"
@@ -513,12 +545,40 @@ class OrderTracker:
         row = await self._db.fetch_one(
             f"""SELECT order_id FROM order_tracker
                  WHERE account_id = ? AND broker_order_id = ?
-                   AND submitted_date <= ? AND status IN ({placeholders})
+                   AND ((submitted_date <= ? AND status IN ({placeholders}))
+                        OR submitted_date = ?)
                  ORDER BY submitted_date DESC
                  LIMIT 1""",
-            (validated, broker_order_id, submitted_date, *sorted(OPEN_STATUSES)),
+            (
+                validated,
+                broker_order_id,
+                submitted_date,
+                *sorted(OPEN_STATUSES),
+                submitted_date,
+            ),
         )
         return row["order_id"] if row else None
+
+    async def get_late_fill_watch(
+        self, account_id: str, terminal_since: str
+    ) -> list[OrderTrackerRecord]:
+        """늦은 체결 감시 대상(spec 18 §6.3).
+
+        ``cancelled``·``expired`` 이면서 ``recorded_filled_qty < ordered_qty`` 이고
+        ``terminal_at >= terminal_since`` (UTC ``YYYY-MM-DD HH:MM:SS``)인 행이다.
+        """
+        validated = require_account_id(
+            account_id, context="order_tracker.get_late_fill_watch"
+        )
+        rows = await self._db.fetch_all(
+            """SELECT * FROM order_tracker
+                 WHERE account_id = ? AND status IN (?, ?)
+                   AND recorded_filled_qty < ordered_qty
+                   AND terminal_at >= ?
+                 ORDER BY submitted_date""",
+            (validated, *sorted(LATE_FILL_WATCH_STATUSES), terminal_since),
+        )
+        return [OrderTrackerRecord.from_row(r) for r in rows]
 
     async def get(self, order_id: str) -> OrderTrackerRecord | None:
         """order_id 로 추적 주문 단건 조회 (이벤트 정체성 복원용)."""
@@ -538,8 +598,8 @@ class OrderTracker:
 
         ``lookup_order_id`` 와 달리 **status 무관**(terminal 포함)으로 매핑한다.
 
-        scope/정렬은 ``lookup_order_id`` 와 동일하게 ``submitted_date <=
-        observed_date`` 의 최신(MAX) 1건이다(일자 재사용 격리·결정성 유지).
+        scope/정렬은 ``submitted_date <= observed_date`` 의 최신(MAX) 1건이다
+        (일자 재사용 격리·결정성 유지).
         """
         validated = require_account_id(
             account_id, context="order_tracker.find_by_broker_order"
@@ -565,11 +625,17 @@ class OrderTracker:
         validated = require_account_id(account_id, context="order_tracker.expire_stale")
         expired = await self._db.execute_fetch_all(
             """UPDATE order_tracker
-                   SET status = ?, terminal_at = datetime('now')
+                   SET status = ?, terminal_at = ?
                  WHERE account_id = ? AND submitted_date < ?
                    AND status = ?
             RETURNING order_id""",
-            (OrderStatus.EXPIRED, validated, before_date, OrderStatus.OPEN),
+            (
+                OrderStatus.EXPIRED,
+                _utc_now_text(),
+                validated,
+                before_date,
+                OrderStatus.OPEN,
+            ),
         )
         count = len(expired)
         if count:
