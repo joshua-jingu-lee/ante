@@ -11,7 +11,7 @@ from collections import OrderedDict, deque
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
-from ante.broker.base import BrokerAdapter
+from ante.broker.base import BrokerAdapter, ensure_order_side
 from ante.broker.circuit_breaker import CircuitBreaker
 from ante.broker.error_codes import (
     PERMANENT_MSG_CODES,
@@ -1034,6 +1034,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         stop_price: float | None = None,
     ) -> str:
         """주문 접수. KIS는 stop order 미지원."""
+        ensure_order_side(side)
         if order_type in ("stop", "stop_limit"):
             raise ValueError(
                 f"KIS does not support {order_type} orders natively. "
