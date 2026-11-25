@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Coroutine, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -47,6 +48,8 @@ from ante.strategy.registry import StrategyStatus
 if TYPE_CHECKING:
     from ante.core.database import Database
     from ante.strategy.registry import StrategyRegistry
+
+logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -415,18 +418,24 @@ def _info_rationale_lines(rationale: str | None) -> Iterator[str]:
     yield f"  {'투자 근거':15s}: {rationale}"
 
 
-def _info_risks_lines(risks: list[str] | None) -> Iterator[str]:
+def _info_risks_lines(risks: object) -> Iterator[str]:
     """리스크 섹션 줄을 만든다."""
     if not risks:
+        return
+    if not isinstance(risks, list | tuple):
+        yield f"  {'리스크':15s}: {risks!r}"
         return
     yield f"  {'리스크':15s}:"
     for r in risks:
         yield f"    - {r}"
 
 
-def _info_params_lines(params: dict[str, Any] | None, schema: object) -> Iterator[str]:
+def _info_params_lines(params: object, schema: object) -> Iterator[str]:
     """파라미터 섹션 줄을 만든다."""
     if not params:
+        return
+    if not isinstance(params, dict):
+        yield f"  {'파라미터':15s}: {params!r}"
         return
     yield f"  {'파라미터':15s}:"
     for key, value in params.items():
@@ -462,7 +471,8 @@ def _load_strategy_params(filepath: str) -> dict[str, Any] | None:
             "rationale": instance.get_rationale(),
             "risks": instance.get_risks(),
         }
-    except Exception:
+    except Exception as e:
+        logger.warning("전략 파라미터 로드 실패: %s: %r", filepath, e)
         return None
 
 
