@@ -479,6 +479,8 @@ ante rule update <rule_type> --account <account_id> [--enabled|--disabled] [--pa
 `rule update`의 `--param`·`--params-json`에 `type`·`id`·`enabled`나 규칙이 읽지 않는 key가
 있거나 `priority`가 정수가 아니면 저장하지 않고 거부한다(파라미터 검증 실패와 같은 오류 출구). 상세:
 [rule-engine/09-rule-management.md](../rule-engine/09-rule-management.md#stored-rules-vs-effective-rules).
+`rule update`의 응답에는 저장 전에 버린 저장 항목을 알리는 `dropped_items`(위치와 유형 이름, 없으면 `[]`)가
+늘 실린다. 모양: [rule-engine/09-rule-management.md — Static TOML seed](../rule-engine/09-rule-management.md#static-toml-seed).
 
 `rule list`/`rule info` 는 `_create_rule_engine` → `RuleEngine.__init__`
 의 `require_account_id` 를 경유하므로 `--account` 가 필수다. invalid
