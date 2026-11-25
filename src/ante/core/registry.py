@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from ante.audit.logger import AuditLogger
     from ante.bot.manager import BotManager
     from ante.bot.signal_channel_registry import SignalChannelRegistry
+    from ante.config.config import Config
     from ante.config.dynamic import DynamicConfigService
     from ante.eventbus import EventBus
     from ante.member.service import MemberService
@@ -42,3 +43,4 @@ class ServiceRegistry:
     trade_service: TradeService | Any = field(default=None)
     member_service: MemberService | Any = field(default=None)
     signal_channel_registry: SignalChannelRegistry | Any = field(default=None)
+    config: Config | Any = field(default=None)

@@ -162,7 +162,8 @@ async def _report_dropped(
                 f"계좌 {account_id} 의 거래 규칙을 저장하면서 규칙으로 만들 수 없고 "
                 f"rule update로도 고칠 수 없는 항목 {len(dropped)}건을 버렸습니다. "
                 "경고 로그에서 위치를 확인하고, 원문은 "
-                f"ante config history {key} 의 이전 값에서 확인하세요."
+                f"ante config history {key} 의 이전 값"
+                "(seed에서 읽었으면 설정 파일)에서 확인하세요."
             ),
             category="system",
         )
