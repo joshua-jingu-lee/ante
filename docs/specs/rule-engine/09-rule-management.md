@@ -105,9 +105,12 @@ rules = [
 있으면 재기동 없이). 깨지기 전의 다른 룰은 복원되지 않는다 —
 `ante config history accounts.<account_id>.rules`로 이전 값을 확인해 다시 저장한다.
 리스트 안의 항목으로 룰을 만들거나 정렬하다 예외가 나도(사전이 아닌 항목, 비교할 수 없는
-`priority` 등) 그 계좌만 같은 방식으로 막히고 다른 계좌와 데몬은 뜬다. 이때 다른 항목은 저장값에
-그대로 남는다. 비교할 수 없는 `priority`는 그 항목의 type으로 `ante rule update`를 하면 풀리고,
-사전이 아닌 항목은 `rule update`로 풀리지 않는다([07-rule-engine-core.md](07-rule-engine-core.md)).
+`priority`, 규칙이 읽지 않는 key, 범위 밖·NaN·Inf 값, 문자열이 아닌 `id` 등 — `enabled`와 무관)
+그 계좌만 같은 방식으로 막히고 다른 계좌와 데몬은 뜬다. 이때 다른 항목은 저장값에 그대로 남는다.
+사전이 아닌 항목 밖의 원인은 그 항목의 type으로 `ante rule update`를 한 번 하면 풀리고(그런 type이
+여럿이면 type마다 한 번), 사전이 아닌 항목은 `rule update`로 풀리지 않는다. 같은 type의 항목이 둘
+이상이면 `rule update`는 첫 항목만 바꾸므로 둘째 이후의 깨진 항목은 풀리지 않는다(알려진 한계,
+[07-rule-engine-core.md](07-rule-engine-core.md)).
 런타임 수정은 항상 dynamic_config에 기록한다.
 
 ### 전략별 룰
