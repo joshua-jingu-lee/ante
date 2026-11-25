@@ -122,11 +122,12 @@ error-taxonomy.md 자체를 갱신한다.
 핵심 lock:
 
 - factory 책임: DB lifecycle (`Database(get_db_path(ctx))` + `connect()`/`close()`),
-  EventBus 생성, service lifecycle, `initialize()` 호출 정책, cleanup
-  (`except BaseException` + close 보장; #1722/#1755), config-dir/path resolution.
-- factory 비책임: IPC 호출, IPC fallback, runtime vs offline 분기, active
-  runtime guard 호출, audit logging, auth/scope 검증, envelope 직렬화, error
-  code 매핑.
+  cleanup (`except BaseException` + close 보장; #1722/#1755), config-dir/path
+  resolution.
+- factory 비책임: EventBus 생성, service lifecycle, `initialize()` 호출 정책
+  (이 셋은 caller(명령 본문)의 책임), IPC 호출, IPC fallback, runtime vs offline
+  분기, active runtime guard 호출, audit logging, auth/scope 검증, envelope
+  직렬화, error code 매핑.
 - `read_only` 정책 (#1974 R2 amend): factory 인자 `read_only=True`는 옵션 A
   (`Database` SQLite read-only 연결 모드)를 연다. 옵션 B(read-only 명령의 caller가
   `service.initialize()`를 부르지 않는다)는 같은 명령의 caller가 함께 지키는
