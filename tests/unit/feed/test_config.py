@@ -101,8 +101,9 @@ class TestSetApiKeyNewlineRejection:
 
     def test_newline_value_raises_value_error(self, cfg: FeedConfig) -> None:
         # 개행 뒤에 KEY=VALUE를 끼워 다른 키 주입을 시도하는 페이로드.
-        with pytest.raises(ValueError, match="개행"):
+        with pytest.raises(ValueError, match="개행") as exc_info:
             cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "a\nANTE_DART_API_KEY=evil")
+        assert not isinstance(exc_info.value, OSError)
 
     def test_newline_value_does_not_inject_other_key(self, cfg: FeedConfig) -> None:
         # 거부 시 .env 자체가 생성되지 않아야 한다(쓰기 전 검증, 파일 미변경).
@@ -418,22 +419,23 @@ class TestNonUtf8EnvFile:
         return _NON_UTF8_ENV
 
     @pytest.mark.parametrize("method", ["list_api_keys", "load_api_keys"])
-    def test_read_raises_value_error_without_bytes(
+    def test_read_raises_os_error_without_bytes(
         self, cfg: FeedConfig, method: str
     ) -> None:
         self._write(cfg)
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(OSError) as exc_info:
             getattr(cfg, method)()
         message = str(exc_info.value)
         assert message == "feed .env 파일을 UTF-8로 읽을 수 없습니다."
         assert not isinstance(exc_info.value, UnicodeDecodeError)
+        assert not isinstance(exc_info.value, ValueError)
         for trace in (*_DECODE_TRACES, str(cfg.env_path)):
             assert trace not in message
         assert exc_info.value.__suppress_context__ is True
 
     def test_set_api_key_leaves_file_untouched(self, cfg: FeedConfig) -> None:
         before = self._write(cfg)
-        with pytest.raises(ValueError, match="UTF-8로 읽을 수 없습니다"):
+        with pytest.raises(OSError, match="UTF-8로 읽을 수 없습니다"):
             cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "abc123def456")
         assert cfg.env_path.read_bytes() == before
 

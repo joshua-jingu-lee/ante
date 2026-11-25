@@ -199,7 +199,7 @@ class TestFeedConfigSetNewlineRejection:
 
 
 class TestFeedConfigSetNonUtf8EnvFile:
-    """#2918: UTF-8이 아닌 .env는 CONFIG_INVALID_VALUE로 멈추고 바이트를 싣지 않는다."""
+    """#3066: UTF-8이 아닌 .env는 EXECUTION_ERROR로 멈추고 바이트를 싣지 않는다."""
 
     def test_json_format_code_and_no_bytes(
         self, runner: CliRunner, data_path: str
@@ -226,7 +226,7 @@ class TestFeedConfigSetNonUtf8EnvFile:
             f"stdout={result.stdout!r} stderr={result.stderr!r}"
         )
         payload = json.loads(result.stdout.strip())
-        assert payload["code"] == "CONFIG_INVALID_VALUE"
+        assert payload["code"] == "EXECUTION_ERROR"
         assert payload["message"] == "feed .env 파일을 UTF-8로 읽을 수 없습니다."
         for trace in ("0xff", "0xfe", "codec", "position", "fake-sec", data_path):
             assert trace not in result.stdout + result.stderr
