@@ -2,10 +2,10 @@
 
 ``tests/conftest.py``가 ``--shard``의 해석과 분할에 이 모듈의 함수를 쓴다.
 CI의 ``test`` 잡은 이 파일을 스크립트로 실행해 샤드들이 실행한 테스트의
-목록을 ``pytest --collect-only -q``의 전체 목록과 견준다. 하나라도 어긋나면
-exit 1이다.
+목록을 ``pytest --collect-only -q``의 전체 목록과 견주고, 커버리지 자료 파일이
+샤드마다 하나씩 있는지 센다. 하나라도 어긋나면 exit 1이다.
 
-    python scripts/check_test_shards.py --shards 4 \\
+    python scripts/check_test_shards.py --shards 5 \\
         --collected collect-unit.txt --manifest-dir shard-artifacts
 """
 
@@ -18,6 +18,7 @@ import zlib
 from pathlib import Path
 
 MANIFEST_GLOB = "test-shard-*.txt"
+COVERAGE_GLOB = "coverage-shard-*.data"
 NODEID_LINE = re.compile(r"^tests/unit/.*::")
 DIFF_LIMIT = 20
 
@@ -38,13 +39,22 @@ def shard_of(path: str, total: int) -> int:
     return zlib.crc32(path.encode("utf-8")) % total + 1
 
 
+def resolve_manifest(value: str, base: str | Path) -> Path:
+    """``--shard-manifest`` 값을 ``base``(pytest를 부른 디렉터리) 기준 절대 경로로."""
+    path = Path(value)
+    return path if path.is_absolute() else Path(base) / path
+
+
 def collected_nodeids(text: str) -> list[str]:
     """``--collect-only -q`` 출력에서 단위 테스트 nodeid 줄만 정렬해 돌려준다."""
     return sorted(line for line in text.splitlines() if NODEID_LINE.match(line))
 
 
 def check(
-    collected: list[str], manifests: dict[str, list[str]], shards: int
+    collected: list[str],
+    manifests: dict[str, list[str]],
+    shards: int,
+    coverage_files: int,
 ) -> list[str]:
     """어긋남을 사람이 읽을 줄로 돌려준다. 빈 목록이면 통과다."""
     if shards < 1:
@@ -56,6 +66,11 @@ def check(
         errors.append(
             f"expected {shards} shard lists, found {len(manifests)}: "
             f"{sorted(manifests)}"
+        )
+    if coverage_files != shards:
+        errors.append(
+            f"expected {shards} coverage files, found {coverage_files} "
+            f"({COVERAGE_GLOB})"
         )
     seen: dict[str, int] = {}
     for ids in manifests.values():
@@ -91,11 +106,10 @@ def main(argv: list[str] | None = None) -> int:
         "--manifest-dir", required=True, type=Path, help=f"dir with {MANIFEST_GLOB}"
     )
     args = parser.parse_args(argv)
-    try:
-        shards = int(args.shards)
-    except ValueError:
+    if re.fullmatch(r"[0-9]+", args.shards) is None:
         print(f"FAIL: shard count is not an integer: {args.shards!r}")
         return 1
+    shards = int(args.shards)
     if not args.collected.is_file():
         print(f"FAIL: collected list not found: {args.collected}")
         return 1
@@ -104,7 +118,8 @@ def main(argv: list[str] | None = None) -> int:
         path.name: _read_lines(path)
         for path in sorted(args.manifest_dir.glob(MANIFEST_GLOB))
     }
-    errors = check(collected, manifests, shards)
+    coverage_files = len(list(args.manifest_dir.glob(COVERAGE_GLOB)))
+    errors = check(collected, manifests, shards, coverage_files)
     if errors:
         print("FAIL: shard lists do not partition the unit tests")
         print("\n".join(errors))
@@ -112,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     total = sum(len(ids) for ids in manifests.values())
     print(
         f"OK: {shards} shards ran {total} tests == {len(collected)} collected, "
-        "no duplicates"
+        f"no duplicates, {coverage_files} coverage files"
     )
     return 0
 

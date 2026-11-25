@@ -626,6 +626,53 @@ async def test_failing_self_stop_moves_to_stopped(eventbus, ctx, loop_events, ca
     assert all(m != "봇 오류: bot-2699" for _, m in logged)
 
 
+async def test_restart_after_timeout_error_counts_failures_from_zero(
+    eventbus, ctx, loop_events
+):
+    bot = _bot(eventbus, ctx, _NeverReturns)
+    bot.config.step_timeout_seconds = 0
+    await bot.start()
+    await _wait_loop(bot)
+    assert bot.status.value == "error"
+
+    await bot.start()
+    await _wait_loop(bot)
+
+    second_run = loop_events[
+        len(loop_events) - loop_events[::-1].index("BotStartedEvent") :
+    ]
+    assert bot.status.value == "error"
+    assert bot.error_message == "연속 타임아웃 한도 초과 (3/3)"
+    assert second_run == [
+        "BotStepCompletedEvent",
+        "BotStepCompletedEvent",
+        "BotStepCompletedEvent",
+        "BotErrorEvent",
+    ]
+
+
+async def test_restart_after_signal_overflow_stop_counts_failures_from_zero(
+    eventbus, ctx, loop_events
+):
+    bot = _bot(eventbus, ctx, _Overflow, max_signals_per_step=1)
+    await bot.start()
+    await _wait_loop(bot)
+    assert bot.status.value == "stopped"
+
+    await bot.start()
+    await _wait_loop(bot)
+
+    second_run = loop_events[
+        len(loop_events) - loop_events[::-1].index("BotStartedEvent") :
+    ]
+    assert loop_events.count("BotStartedEvent") == 2
+    assert bot.status.value == "stopped"
+    assert second_run == [
+        *["BotStepCompletedEvent", "BotErrorEvent"] * 3,
+        "BotStoppedEvent",
+    ]
+
+
 # ── 정지의 on_stop 실패 (#2697) ─────────────────────────────────
 
 
