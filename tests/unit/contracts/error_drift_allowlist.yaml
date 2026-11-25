@@ -116,3 +116,8 @@ pending_migration:
   - module: ante.treasury.exceptions
     class_anchor: DuplicateReservationError
     reason: "internal invariant, never crosses IPC/CLI (#2775); not registered by design"
+  # #3068: 가상 체결 기록의 내부 신호다. VirtualExecutor가 잡아
+  # OrderFailedEvent(virtual_insufficient_holdings)로 끝내므로 IPC·CLI 경계를 넘지 않는다.
+  - module: ante.trade.fill_applier
+    class_anchor: InsufficientHoldingsError
+    reason: "internal signal, never crosses IPC/CLI (#3068); not registered by design"
