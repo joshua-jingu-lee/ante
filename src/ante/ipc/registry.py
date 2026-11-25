@@ -701,6 +701,7 @@ async def _handle_rule_update(
         params=request.params,
         changed_by=actor,
         audit_logger=None,
+        eventbus=svc.eventbus,
     )
     result["_audit_detail"] = {
         "resource": f"account:{account_id}:rule:{rule_type}",

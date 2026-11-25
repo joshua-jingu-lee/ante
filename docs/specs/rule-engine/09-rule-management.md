@@ -107,10 +107,13 @@ rules = [
 리스트 안의 항목으로 룰을 만들거나 정렬하다 예외가 나도(사전이 아닌 항목, 비교할 수 없는
 `priority`, 규칙이 읽지 않는 key, 범위 밖·NaN·Inf 값, 문자열이 아닌 `id` 등 — `enabled`와 무관)
 그 계좌만 같은 방식으로 막히고 다른 계좌와 데몬은 뜬다. 이때 다른 항목은 저장값에 그대로 남는다.
-사전이 아닌 항목 밖의 원인은 그 항목의 type으로 `ante rule update`를 한 번 하면 풀리고(그런 type이
-여럿이면 type마다 한 번), 사전이 아닌 항목은 `rule update`로 풀리지 않는다. 같은 type의 항목이 둘
-이상이면 `rule update`는 첫 항목만 바꾸므로 둘째 이후의 깨진 항목은 풀리지 않는다(알려진 한계,
-[07-rule-engine-core.md](07-rule-engine-core.md)).
+type마다 첫 항목의 원인(규칙이 읽지 않는 key, 범위 밖 값, 비교할 수 없는 `priority`, 문자열이 아닌
+`id`)은 그 type으로 `ante rule update`를 한 번 하면 풀린다(그런 type이 여럿이면 type마다 한 번).
+`rule update`는 저장하기 전에 사전이 아닌 항목, 해시할 수 없는 `type`의 항목, 같은 type의 둘째 이후
+항목 가운데 룰로 만들 수 없는 것을 저장값에서 버리므로, 이 셋으로 막힌 계좌는 어느 type으로든 한 번
+하면 풀린다. 같은 type의 멀쩡한 둘째 이후 항목과 type이 없거나 등록되지 않은 항목은 남는다. 버린 항목은
+경고 로그(데몬 경로에서는 운영자 알림도)로 드러나고, 원문은 `ante config history`의 이전 값(seed에서
+읽었으면 설정 파일)에 남는다(판정의 세부는 [07-rule-engine-core.md](07-rule-engine-core.md)).
 런타임 수정은 항상 dynamic_config에 기록한다.
 
 ### 전략별 룰
