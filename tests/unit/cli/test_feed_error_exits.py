@@ -488,6 +488,40 @@ def test_config_set_invalid_value(mode: str) -> None:
     assert not (Path(_DATA) / ".feed" / ".env").exists()
 
 
+_NON_UTF8_ENV = b"ANTE_DART_API_KEY=fake-sec\xff\xfe-tail\n"
+
+
+@_MODES
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["feed", "config", "set", "ANTE_DART_API_KEY", "v"], id="set"),
+        pytest.param(["feed", "config", "list"], id="list"),
+        pytest.param(["feed", "config", "check"], id="check"),
+        pytest.param(["feed", "status"], id="status"),
+        pytest.param(["feed", "run", "backfill"], id="backfill"),
+        pytest.param(["feed", "run", "daily"], id="daily"),
+        pytest.param(["feed", "start"], id="start"),
+    ],
+)
+def test_non_utf8_env_is_execution_error(mode: str, args: list[str]) -> None:
+    _init()
+    env_path = Path(_DATA) / ".feed" / ".env"
+    env_path.write_bytes(_NON_UTF8_ENV)
+    result = _invoke(
+        mode,
+        [*args, "--data-path", _DATA],
+        _no_nice(),
+        _scheduler(AssertionError("스케줄 루프에 닿으면 안 된다")),
+    )
+    _check(
+        mode, result, "EXECUTION_ERROR", "feed .env 파일을 UTF-8로 읽을 수 없습니다."
+    )
+    assert env_path.read_bytes() == _NON_UTF8_ENV
+    for trace in ("0xff", "0xfe", "codec", "position", "fake-sec", _DATA + "/"):
+        assert trace not in result.stdout + result.stderr
+
+
 def _csv() -> str:
     path = Path("prices.csv")
     path.write_text("date,open,high,low,close,volume\n", encoding="utf-8")
