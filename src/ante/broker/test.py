@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ante.broker.base import BrokerAdapter
+from ante.broker.base import BrokerAdapter, ensure_order_side
 from ante.broker.exceptions import BrokerError, OrderNotFoundError
 from ante.broker.models import CommissionInfo
 from ante.core import clock
@@ -303,6 +303,7 @@ class TestBrokerAdapter(BrokerAdapter):
         지정가: 지정가와 현재가를 비교하여 체결 가능 시 체결.
         대량 주문 시 부분 체결 확률 적용.
         """
+        ensure_order_side(side)
         if symbol not in self._simulator.symbols:
             msg = f"등록되지 않은 종목: {symbol}"
             raise BrokerError(msg)
