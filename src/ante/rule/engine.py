@@ -431,8 +431,11 @@ class RuleEngine:
 
         return overall, reason, actions
 
-    async def _query_treasury_data(self, bot_id: str = "") -> dict[str, float]:
-        """Treasury에서 자산/손익 데이터를 조회한다."""
+    async def _query_treasury_data(
+        self, bot_id: str = ""
+    ) -> tuple[dict[str, float], str | None]:
+        """Treasury 값과, 미주입·조회 예외면 ``treasury_unavailable``을 돌려준다."""
+        failure: str | None = None
         result = {
             "daily_pnl": 0.0,
             "total_pnl": 0.0,
@@ -442,7 +445,7 @@ class RuleEngine:
             "bot_allocated_budget": 0.0,
         }
         if self._treasury is None:
-            return result
+            return result, "treasury_unavailable"
 
         try:
             summary = self._treasury.get_summary()
@@ -450,6 +453,7 @@ class RuleEngine:
             result["total_asset"] = summary.get("total_evaluation", 0.0)
             result["total_exposure"] = summary.get("ante_eval_amount", 0.0)
         except Exception:
+            failure = "treasury_unavailable"
             logger.warning("Treasury summary 조회 실패: %s", self._account_id)
 
         if bot_id:
@@ -458,6 +462,7 @@ class RuleEngine:
                 if budget is not None:
                     result["bot_allocated_budget"] = budget.allocated
             except Exception:
+                failure = "treasury_unavailable"
                 logger.warning("Treasury 봇 예산 조회 실패: bot=%s", bot_id)
 
         try:
@@ -468,6 +473,7 @@ class RuleEngine:
             if snapshot is not None:
                 result["prev_day_total_asset"] = snapshot.get("total_asset", 0.0)
         except Exception:
+            failure = "treasury_unavailable"
             logger.warning("Treasury 전일 스냅샷 조회 실패: %s", self._account_id)
 
         try:
@@ -475,14 +481,15 @@ class RuleEngine:
             if latest is not None:
                 result["daily_pnl"] = latest.get("daily_pnl", 0.0)
         except Exception:
+            failure = "treasury_unavailable"
             logger.warning("Treasury 최신 스냅샷 조회 실패: %s", self._account_id)
 
-        return result
+        return result, failure
 
     async def _calculate_bot_unrealized_pnl(
         self, bot_id: str, current_price: float, order_symbol: str
-    ) -> float:
-        """미실현 손익 합계를 계산한다."""
+    ) -> float | None:
+        """미실현 손익 합계를, 포지션 조회 예외면 ``None``을 돌려준다."""
         if self._trade_service is None:
             return 0.0
 
@@ -497,7 +504,7 @@ class RuleEngine:
             return total
         except Exception:
             logger.warning("미실현 손익 계산 실패: bot=%s", bot_id)
-            return 0.0
+            return None
 
     @staticmethod
     def _unrecovered_buy_age_seconds(submitted_at: str | None) -> float | None:
@@ -936,7 +943,9 @@ class RuleEngine:
                         "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
                     )
 
-            treasury_data = await self._query_treasury_data(bot_id=event.bot_id)
+            treasury_data, input_failure = await self._query_treasury_data(
+                bot_id=event.bot_id
+            )
 
             current_price = event.price or 0.0
             unrealized_pnl = await self._calculate_bot_unrealized_pnl(
@@ -944,6 +953,27 @@ class RuleEngine:
                 current_price=current_price,
                 order_symbol=event.symbol,
             )
+            if unrealized_pnl is None:
+                unrealized_pnl = 0.0
+                input_failure = input_failure or "positions_unavailable"
+            if input_failure is not None and event.side == "buy":
+                input_reason = f"{ACCOUNT_NOT_READY_REASON}: {input_failure}"
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=input_reason,
+                    )
+                )
+                await self._eventbus.publish(
+                    build_not_ready_notification(
+                        account_id=self._account_id,
+                        reason=input_reason,
+                        side=event.side,
+                        is_liquidation=is_liquidation,
+                    )
+                )
+                return
 
             context = RuleContext(
                 bot_id=event.bot_id,
@@ -1157,13 +1187,16 @@ class RuleEngine:
                     "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
                 )
 
-        treasury_data = await self._query_treasury_data(bot_id=event.bot_id)
+        treasury_data, _ = await self._query_treasury_data(bot_id=event.bot_id)
 
         modify_price = float(event.price)
-        unrealized_pnl = await self._calculate_bot_unrealized_pnl(
-            bot_id=event.bot_id,
-            current_price=modify_price,
-            order_symbol=event.symbol,
+        unrealized_pnl = (
+            await self._calculate_bot_unrealized_pnl(
+                bot_id=event.bot_id,
+                current_price=modify_price,
+                order_symbol=event.symbol,
+            )
+            or 0.0
         )
 
         context = RuleContext(
