@@ -16,7 +16,7 @@
 | `OrderRequestEvent` | `bot_id, account_id, strategy_id, symbol, side, quantity, order_type, price, stop_price, reason, exchange` | 전략 Signal → 신규 주문 요청. `exchange`는 Account에서 주입 |
 | `OrderCancelEvent` | `bot_id, account_id, order_id, reason` | 전략 `ctx.cancel_order()` → 주문 취소 요청 |
 | `OrderModifyEvent` | `bot_id, account_id, order_id, quantity, price, reason` | 전략 `ctx.modify_order()` → 주문 정정 요청. **v1=price-only 지원(#2391)**: 룰/Gateway fail-closed 통과 시 broker 위임 → `OrderModifyExecutedEvent`. 고급 케이스(수량변경 등)는 사유별 `OrderModifyRejectedEvent`로 거부(#2393) |
-| `NotificationEvent` | `level, title, message, category="bot"` | 봇 시작/중지/에러/재시작 한도 소진 시 |
+| `NotificationEvent` | `level, title, message, category="bot"` | 봇 시작/중지/에러/재시작 한도 소진/자동 재시작 중단 시 |
 
 ### BotStepCompletedEvent
 

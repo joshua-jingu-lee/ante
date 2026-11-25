@@ -16,7 +16,7 @@ from ante.bot import BotConfig, BotManager, BotStatus
 from ante.bot import manager as bot_manager_module
 from ante.core import Database
 from ante.eventbus import EventBus
-from ante.eventbus.events import BotErrorEvent, BotStartedEvent
+from ante.eventbus.events import BotErrorEvent, BotStartedEvent, NotificationEvent
 from ante.strategy import (
     DataProvider,
     OrderView,
@@ -259,6 +259,12 @@ class TestSuspendedAccountNoAutoRestart:
         return seen
 
     @staticmethod
+    def _notifications(eventbus) -> list[NotificationEvent]:
+        seen: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, seen.append)
+        return seen
+
+    @staticmethod
     async def _error(eventbus, bot_id: str, account_id: str) -> None:
         await eventbus.publish(
             BotErrorEvent(bot_id=bot_id, error_message="test", account_id=account_id)
@@ -296,6 +302,7 @@ class TestSuspendedAccountNoAutoRestart:
         started = self._started(eventbus)
 
         await account_service.suspend("acc-a", reason="test", suspended_by="test")
+        notifications = self._notifications(eventbus)
         await self._error(eventbus, "b1", "acc-a")
         task = manager._restart_tasks["b1"]
         await asyncio.wait([task], timeout=5.0)
@@ -304,6 +311,7 @@ class TestSuspendedAccountNoAutoRestart:
         assert task.exception() is None
         assert started == []
         assert bot.status == BotStatus.ERROR
+        assert [n for n in notifications if n.title == "봇 자동 재시작 중단"] == []
 
     async def test_account_lookup_failure_does_not_restart(
         self, manager, account_service, eventbus, monkeypatch
@@ -311,6 +319,7 @@ class TestSuspendedAccountNoAutoRestart:
         bot = await self._error_bot(manager, account_service, "b1", "acc-a")
         wake, entered = self._gate_cooldown(monkeypatch)
         started = self._started(eventbus)
+        notifications = self._notifications(eventbus)
         await self._error(eventbus, "b1", "acc-a")
         task = manager._restart_tasks["b1"]
         await entered.acquire()
@@ -326,6 +335,44 @@ class TestSuspendedAccountNoAutoRestart:
         assert task.exception() is None
         assert started == []
         assert bot.status == BotStatus.ERROR
+        given_up = [n for n in notifications if n.title == "봇 자동 재시작 중단"]
+        assert len(given_up) == 1
+        assert given_up[0].level == "error"
+        assert given_up[0].category == "bot"
+        assert "b1" in given_up[0].message
+        assert "acc-a" in given_up[0].message
+        assert "lookup failed" not in given_up[0].message
+        assert "RuntimeError" not in given_up[0].message
+
+    @pytest.mark.parametrize("manual", ["start", "stop"])
+    async def test_lookup_failure_after_manual_action_does_not_notify(
+        self, manager, account_service, eventbus, monkeypatch, manual
+    ):
+        bot = await self._error_bot(manager, account_service, "b1", "acc-a")
+        wake, entered = self._gate_cooldown(monkeypatch)
+        notifications = self._notifications(eventbus)
+        await self._error(eventbus, "b1", "acc-a")
+        task = manager._restart_tasks["b1"]
+        await entered.acquire()
+
+        if manual == "start":
+            await manager.start_bot("b1")
+            expected = BotStatus.RUNNING
+        else:
+            await manager.stop_bot("b1")
+            expected = BotStatus.STOPPED
+        assert bot.status == expected
+
+        async def _fail_get(account_id):  # noqa: ARG001
+            raise RuntimeError("lookup failed")
+
+        monkeypatch.setattr(account_service, "get", _fail_get)
+        wake.set()
+        await asyncio.wait([task], timeout=5.0)
+
+        assert task.done() and task.exception() is None
+        assert bot.status == expected
+        assert [n for n in notifications if n.title == "봇 자동 재시작 중단"] == []
 
     async def test_active_account_restarts_and_other_account_kept(
         self, manager, account_service, eventbus, monkeypatch
