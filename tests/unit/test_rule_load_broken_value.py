@@ -564,31 +564,144 @@ async def test_rule_update_of_that_type_releases_str_priority(db) -> None:
     assert sorted(_rule_types(engine)) == ["daily_loss_limit", "total_exposure_limit"]
 
 
-async def test_rule_update_does_not_release_non_dict_item_after_target(db) -> None:
-    world = await _item_broken_world(db, [{"type": "daily_loss_limit"}, 5], "dynamic")
+STORED_LIMIT = {"type": "daily_loss_limit", "enabled": True, **RULE_PARAMS}
+DROP_LOGGER = "ante.rule.config_update"
+
+
+async def _update_with_bus(world: _World) -> dict[str, Any]:
+    return await update_account_rule_config(
+        account_service=world.account_service,
+        dynamic_config=world.dyn,
+        account_id="acc1",
+        rule_type="daily_loss_limit",
+        params=dict(RULE_PARAMS),
+        changed_by="test",
+        eventbus=world.bus,
+    )
+
+
+def _drop_warnings(caplog: Any) -> list[logging.LogRecord]:
+    return [
+        r
+        for r in caplog.records
+        if r.name == DROP_LOGGER and r.levelno == logging.WARNING
+    ]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(
+            [{"type": "daily_loss_limit"}, 5], [STORED_LIMIT], id="non_dict_after"
+        ),
+        pytest.param(
+            [5, {"type": "daily_loss_limit"}], [STORED_LIMIT], id="non_dict_before"
+        ),
+        pytest.param(
+            [{"type": "total_exposure_limit"}, "x", {"type": "daily_loss_limit"}],
+            [{"type": "total_exposure_limit"}, STORED_LIMIT],
+            id="non_dict_between",
+        ),
+        pytest.param(
+            [{"type": ["daily_loss_limit"]}, {"type": "daily_loss_limit"}],
+            [STORED_LIMIT],
+            id="list_type",
+        ),
+        pytest.param(
+            [{"type": {"a": 1}}, {"type": "total_exposure_limit"}],
+            [{"type": "total_exposure_limit"}, STORED_LIMIT],
+            id="dict_type",
+        ),
+    ],
+)
+async def test_rule_update_drops_unwritable_item_and_releases(
+    db, value: list[Any], expected: list[Any]
+) -> None:
+    world = await _item_broken_world(db, value, "dynamic")
     manager = world.manager
     assert manager is not None
+    assert manager.get("acc1").rules_unavailable_cause == "invalid_item"
     cap = _Captured(world.bus)
 
     await world.update("acc1")
 
-    assert await world.dyn.get(KEY1) == [
-        {"type": "daily_loss_limit", "enabled": True, **RULE_PARAMS},
-        5,
+    assert await world.dyn.get(KEY1) == expected
+    engine = manager.get("acc1")
+    assert engine.rules_unavailable is False
+    assert sorted(_rule_types(engine)) == sorted(item["type"] for item in expected)
+    assert [n.title for n in cap.notifications] == []
+    await world.bus.publish(_request("acc1"))
+    assert cap.rules_rejections("acc1") == []
+
+    fresh = await world.start()
+    assert fresh.rules_unavailable_accounts() == {}
+
+
+async def test_dropped_item_is_logged_once_without_values(db, caplog) -> None:
+    value: list[Any] = [
+        {"type": "daily_loss_limit", "max_daily_loss_percent": 0.0371},
+        9876543,
+        {"type": ["x", "7.0371"]},
     ]
-    assert manager.get("acc1").rules_unavailable_cause == "invalid_item"
-    assert [n.title for n in cap.notifications] == [RELOAD_FAILED_TITLE]
+    world = await _item_broken_world(db, value, "dynamic")
+    cap = _Captured(world.bus)
+    caplog.set_level(logging.INFO)
+
+    await _update_with_bus(world)
+
+    warnings = _drop_warnings(caplog)
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "acc1" in message
+    assert "index=1" in message
+    assert "index=2" in message
+    assert "item=int" in message
+    assert "item=dict" in message
+    assert "type=list" in message
+    for marker in ("9876543", "7.0371", "0.0371"):
+        assert marker not in caplog.text
+    dropped = [n for n in cap.notifications if n.category == "system"]
+    assert len(dropped) == 1
+    note = dropped[0]
+    assert note.level == "warning"
+    assert "acc1" in note.message
+    assert "2건" in note.message
+    assert "ante config history accounts.acc1.rules" in note.message
+    for marker in ("9876543", "7.0371", "0.0371"):
+        assert marker not in note.message
+        assert marker not in note.title
 
 
-async def test_rule_update_fails_on_non_dict_item_before_target(db) -> None:
-    world = await _item_broken_world(db, [5, {"type": "daily_loss_limit"}], "dynamic")
-    manager = world.manager
-    assert manager is not None
+async def test_nothing_dropped_has_no_warning_or_notice(db, caplog) -> None:
+    world = await _item_broken_world(
+        db, [{"type": "daily_loss_limit", "priority": "1"}], "dynamic"
+    )
+    cap = _Captured(world.bus)
+    caplog.set_level(logging.INFO)
 
-    with pytest.raises(AttributeError):
-        await world.update("acc1")
+    await _update_with_bus(world)
 
-    assert manager.get("acc1").rules_unavailable_cause == "invalid_item"
+    assert _drop_warnings(caplog) == []
+    assert cap.notifications == []
+    assert world.manager is not None
+    assert world.manager.get("acc1").rules_unavailable is False
+
+
+async def test_failed_write_drops_nothing_and_says_nothing(db, caplog) -> None:
+    value: list[Any] = [{"type": "daily_loss_limit"}, 5]
+    world = await _item_broken_world(db, value, "dynamic")
+    cap = _Captured(world.bus)
+    caplog.set_level(logging.INFO)
+    world.dyn.set = AsyncMock(side_effect=RuntimeError("disk"))  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError):
+        await _update_with_bus(world)
+
+    assert _drop_warnings(caplog) == []
+    assert cap.notifications == []
+    assert await world.dyn.get(KEY1) == value
+    assert world.manager is not None
+    assert world.manager.get("acc1").rules_unavailable_cause == "invalid_item"
 
 
 def _services(manager: Any, bus: EventBus | None) -> Any:

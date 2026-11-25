@@ -461,7 +461,7 @@ async def _dispatch(world: _World, args: dict[str, Any]) -> dict[str, Any]:
         dynamic_config=world.dyn,
         approval=MagicMock(),
         reconciler=MagicMock(),
-        eventbus=MagicMock(),
+        eventbus=world.bus,
         audit_logger=MagicMock(log=AsyncMock()),
     )
     socket_dir = tempfile.mkdtemp(prefix="ipc2583", dir="/tmp")
@@ -751,6 +751,12 @@ def test_startup_notice_names_the_new_causes_without_keys() -> None:
     assert "문자열이 아닌 id" in message
     assert "ante rule update <rule_type> --account {id}" in message
     assert "max_daily_loss" not in message
+    assert (
+        "규칙 객체가 아닌 항목·해시할 수 없는 type의 항목·같은 유형의 둘째 이후 "
+        "깨진 항목은 어느 유형으로든 rule update를 한 번 하면 저장값에서 버려져 "
+        "풀립니다" in message
+    )
+    assert "rule update로 풀리지 않습니다" not in message
 
 
 # ── 재로드 ───────────────────────────────────────────────────────────────────
@@ -830,17 +836,151 @@ async def test_broken_item_of_another_type_keeps_the_block(db) -> None:
     assert world.engine().rules_unavailable is False
 
 
-async def test_second_item_of_the_same_type_keeps_the_block(db) -> None:
+STORED = {"type": "daily_loss_limit", "enabled": True, **LIMIT}
+DROPPED_LOGGER = "ante.rule.config_update"
+
+
+def _dropped_notices(cap: _Captured) -> list[NotificationEvent]:
+    return [n for n in cap.notifications if n.level == "warning"]
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        pytest.param({"max_daily_loss_rate": MARK}, id="unknown-key"),
+        pytest.param({"max_daily_loss_percent": 9.5}, id="out-of-range"),
+        pytest.param({"priority": "1", **LIMIT}, id="str-priority"),
+        pytest.param({"id": 987654, **LIMIT}, id="non-str-id"),
+        pytest.param({"enabled": False, "max_loss_pct": MARK}, id="disabled"),
+    ],
+)
+async def test_second_broken_item_of_the_same_type_is_dropped(
+    db, broken: dict[str, Any]
+) -> None:
     world = await _startup_world(
         db,
         "dynamic",
-        [
-            {"type": "daily_loss_limit", **LIMIT},
-            {"type": "daily_loss_limit", "max_daily_loss_rate": MARK},
-        ],
+        [{"type": "daily_loss_limit", **LIMIT}, {"type": "daily_loss_limit", **broken}],
     )
+    assert world.engine().rules_unavailable_cause == "invalid_item"
+    cap = _Captured(world.bus)
 
     response = await _ipc_update(world, "daily_loss_limit", dict(LIMIT))
 
     assert response["status"] == "ok", response
+    assert json.loads(await world.raw() or "null") == [STORED]
+    assert world.engine().rules_unavailable is False
+    assert world.result(0.02) == RuleResult.REJECT
+    assert len(_dropped_notices(cap)) == 1
+    assert str(MARK) not in _dropped_notices(cap)[0].message
+
+
+async def test_broken_first_then_healthy_second_keeps_the_second(db) -> None:
+    healthy = {
+        "type": "daily_loss_limit",
+        "id": "second",
+        "max_daily_loss_percent": 0.5,
+    }
+    world = await _startup_world(
+        db,
+        "dynamic",
+        [{"type": "daily_loss_limit", "max_daily_loss_rate": MARK}, healthy],
+    )
+    cap = _Captured(world.bus)
+
+    response = await _ipc_update(world, "daily_loss_limit", dict(LIMIT))
+
+    assert response["status"] == "ok", response
+    assert json.loads(await world.raw() or "null") == [STORED, healthy]
+    assert world.engine().rules_unavailable is False
+    assert world.result(0.02) == RuleResult.REJECT
+    assert _dropped_notices(cap) == []
+
+
+@pytest.mark.parametrize(
+    "kept",
+    [
+        pytest.param(
+            [{"type": "daily_loss_limit", "id": "b", "max_daily_loss_percent": 0.5}],
+            id="healthy-duplicate",
+        ),
+        pytest.param(
+            [{"type": "daily_loss_limit", "id": "b", "enabled": False, **LIMIT}],
+            id="disabled-healthy-duplicate",
+        ),
+        pytest.param([{"type": "no_such_rule", "x": 1}], id="unregistered"),
+        pytest.param([{"max_daily_loss_rate": MARK}], id="no-type"),
+        pytest.param([{"type": 7}], id="non-str-type"),
+        pytest.param(
+            [{"type": "no_such_rule"}, {"type": "no_such_rule", "priority": "1"}],
+            id="unregistered-duplicate-str-priority",
+        ),
+        pytest.param(
+            [{"priority": 1}, {"priority": "1"}], id="no-type-duplicate-str-priority"
+        ),
+    ],
+)
+async def test_items_that_do_not_block_are_kept(db, kept: list[Any]) -> None:
+    world = await _startup_world(db, "dynamic", [{"type": "daily_loss_limit", **LIMIT}])
+    await world.store_raw("acc1", [{"type": "daily_loss_limit", **LIMIT}, *kept])
+    assert world.engine().rules_unavailable is False
+    cap = _Captured(world.bus)
+
+    response = await _ipc_update(world, "daily_loss_limit", dict(LIMIT))
+
+    assert response["status"] == "ok", response
+    assert json.loads(await world.raw() or "null") == [STORED, *kept]
+    assert world.engine().rules_unavailable is False
+    assert world.result(0.02) == RuleResult.REJECT
+    assert _dropped_notices(cap) == []
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        pytest.param({"max_exposure_rate": 0.8}, id="unknown-key"),
+        pytest.param({"max_exposure_percent": 9.5}, id="out-of-range"),
+    ],
+)
+async def test_fixable_item_of_another_type_is_kept(db, other: dict[str, Any]) -> None:
+    other_item = {"type": "total_exposure_limit", **other}
+    world = await _startup_world(
+        db, "dynamic", [{"type": "daily_loss_limit", **LIMIT}, other_item]
+    )
+    cap = _Captured(world.bus)
+
+    response = await _ipc_update(world, "daily_loss_limit", dict(LIMIT))
+
+    assert response["status"] == "ok", response
+    assert json.loads(await world.raw() or "null") == [STORED, other_item]
     assert world.engine().rules_unavailable_cause == "invalid_item"
+    assert _dropped_notices(cap) == []
+
+
+async def test_running_account_drops_and_reloads(db, caplog) -> None:
+    world = await _startup_world(db, "dynamic", [{"type": "daily_loss_limit", **LIMIT}])
+    engine = world.engine()
+    assert engine.rules_unavailable is False
+    await world.db.execute(
+        "UPDATE dynamic_config SET value=? WHERE key=?",
+        (json.dumps([{"type": "daily_loss_limit", **LIMIT}, 5]), KEY1),
+    )
+    cap = _Captured(world.bus)
+    caplog.set_level(logging.INFO)
+
+    response = await _ipc_update(
+        world, "daily_loss_limit", {"max_daily_loss_percent": 0.5}
+    )
+
+    assert response["status"] == "ok", response
+    assert json.loads(await world.raw() or "null") == [
+        {"type": "daily_loss_limit", "enabled": True, "max_daily_loss_percent": 0.5}
+    ]
+    assert engine.rules_unavailable is False
+    assert world.result(0.02) == RuleResult.PASS
+    assert world.result(0.6) == RuleResult.REJECT
+    assert [n.level for n in cap.notifications] == ["warning"]
+    assert any(
+        r.name == DROPPED_LOGGER and r.levelno == logging.WARNING
+        for r in caplog.records
+    )
