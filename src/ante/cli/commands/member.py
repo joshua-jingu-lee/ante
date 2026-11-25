@@ -38,6 +38,19 @@ from ante.member.models import MemberRole
 logger = logging.getLogger(__name__)
 
 _MASTER_REQUIRED_MESSAGE = "권한이 없습니다: master만 수행할 수 있습니다."
+_REGISTER_UNKNOWN_OUTCOME = (
+    "멤버 등록이 서버에서 이미 처리됐을 수 있습니다. "
+    "'ante member info {member_id}'로 확인하고, 등록돼 있으면 "
+    "'ante member rotate-token {member_id}'로 토큰을 다시 발급하세요."
+)
+_ROTATE_TOKEN_UNKNOWN_OUTCOME = (
+    "토큰 재발급이 서버에서 이미 처리됐을 수 있습니다. 기존 토큰은 무효일 수 "
+    "있으니 'ante member rotate-token {member_id}'로 다시 재발급하세요."
+)
+_RECOVERY_KEY_UNKNOWN_OUTCOME = (
+    "복구 키 재발급이 서버에서 이미 처리됐을 수 있습니다. 기존 복구 키는 무효일 "
+    "수 있으니 다시 재발급하세요."
+)
 
 
 @click.group()
@@ -411,6 +424,7 @@ def member_register(
                 },
                 actor=actor,
                 required=("token",),
+                unknown_outcome=_REGISTER_UNKNOWN_OUTCOME.format(member_id=member_id),
             )
             token = payload["token"]
             return {
@@ -674,6 +688,9 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> CommandResult:
                 {"member_id": member_id},
                 actor=actor,
                 required=("token",),
+                unknown_outcome=_ROTATE_TOKEN_UNKNOWN_OUTCOME.format(
+                    member_id=member_id
+                ),
             )
             return {"member_id": payload.get("member_id", member_id)}, payload["token"]
 
@@ -805,6 +822,7 @@ def member_regenerate_recovery_key(
                 "member.regenerate_recovery_key",
                 {"password": password},
                 required=("recovery_key",),
+                unknown_outcome=_RECOVERY_KEY_UNKNOWN_OUTCOME,
             )
             return cast("str", payload["recovery_key"])
 

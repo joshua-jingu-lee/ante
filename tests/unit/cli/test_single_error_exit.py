@@ -1038,6 +1038,104 @@ class TestIpcSendTypedExceptions:
         _assert_json_exit(result, code, message)
 
 
+class TestIpcSendUnknownOutcome:
+    """``unknown_outcome``은 결과를 모르는 두 출구에만 붙는다 (#2880)."""
+
+    def _raise(self, monkeypatch: pytest.MonkeyPatch, **send: Any) -> Any:
+        from ante.cli.commands import ipc_helpers
+
+        monkeypatch.setattr(
+            ipc_helpers, "get_socket_path", lambda config_dir=None: "/x.sock"
+        )
+        monkeypatch.setattr(ipc_helpers.IPCClient, "send", AsyncMock(**send))
+        with pytest.raises(
+            (IPCServerNotRunningError, IPCClientTimeoutError, IPCRemoteError)
+        ) as info:
+            asyncio.run(
+                ipc_helpers.ipc_send(
+                    "bot.list", {}, required=("k",), unknown_outcome="안내"
+                )
+            )
+        exc = info.value
+        return (type(exc), exc.code, str(exc))
+
+    def test_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from ante.ipc.exceptions import IPCTimeoutError
+
+        assert self._raise(monkeypatch, side_effect=IPCTimeoutError("slow")) == (
+            IPCClientTimeoutError,
+            "IPC_TIMEOUT",
+            "서버 응답 시간 초과 — 안내",
+        )
+
+    @pytest.mark.parametrize(
+        "response",
+        [
+            pytest.param(None, id="null"),
+            pytest.param([], id="list"),
+            pytest.param({"status": "weird", "result": {"k": 1}}, id="unknown-status"),
+            pytest.param({"status": "ok", "result": [1]}, id="result-list"),
+            pytest.param({"status": "ok", "result": {"other": 1}}, id="missing"),
+        ],
+    )
+    def test_malformed(self, monkeypatch: pytest.MonkeyPatch, response: Any) -> None:
+        assert self._raise(monkeypatch, return_value=response) == (
+            IPCRemoteError,
+            "UNKNOWN",
+            "IPC 응답이 계약과 다릅니다 — 안내",
+        )
+
+    @pytest.mark.parametrize(
+        ("error", "code", "message"),
+        [
+            pytest.param(
+                {"code": "BOT_NOT_FOUND", "message": "봇 없음"},
+                "BOT_NOT_FOUND",
+                "봇 없음",
+                id="server-code",
+            ),
+            pytest.param("x", "UNKNOWN", "알 수 없는 오류", id="error-not-object"),
+        ],
+    )
+    def test_server_error_has_no_hint(
+        self, monkeypatch: pytest.MonkeyPatch, error: Any, code: str, message: str
+    ) -> None:
+        response = {"status": "error", "error": error}
+        assert self._raise(monkeypatch, return_value=response) == (
+            IPCRemoteError,
+            code,
+            message,
+        )
+
+    def test_server_not_running_has_no_hint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from ante.ipc.exceptions import ServerNotRunningError
+
+        assert self._raise(monkeypatch, side_effect=ServerNotRunningError("x")) == (
+            IPCServerNotRunningError,
+            "IPC_SERVER_NOT_RUNNING",
+            "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요.",
+        )
+
+    def test_success_is_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from ante.cli.commands import ipc_helpers
+
+        monkeypatch.setattr(
+            ipc_helpers, "get_socket_path", lambda config_dir=None: "/x.sock"
+        )
+        monkeypatch.setattr(
+            ipc_helpers.IPCClient,
+            "send",
+            AsyncMock(return_value={"status": "ok", "result": {"k": 1}}),
+        )
+        assert asyncio.run(
+            ipc_helpers.ipc_send(
+                "bot.list", {}, required=("k",), unknown_outcome="안내"
+            )
+        ) == {"k": 1}
+
+
 # ── IPC _dispatch의 매핑 ──────────────────────────────────────────────────
 
 

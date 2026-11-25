@@ -308,6 +308,12 @@ class TestColdPathFallback:
         assert suspend.await_args.kwargs["suspended_by"] == "master"
 
 
+_REGISTER_HINT = (
+    "멤버 등록이 서버에서 이미 처리됐을 수 있습니다. 'ante member info dup'로 "
+    "확인하고, 등록돼 있으면 'ante member rotate-token dup'로 토큰을 다시 발급하세요."
+)
+
+
 def _register_ipc_failures():  # noqa: ANN202
     from ante.ipc.exceptions import IPCTimeoutError, ServerNotRunningError
 
@@ -331,7 +337,7 @@ def _register_ipc_failures():  # noqa: ANN202
         pytest.param(
             {"side_effect": IPCTimeoutError("slow")},
             "IPC_TIMEOUT",
-            "서버 응답 시간 초과",
+            f"서버 응답 시간 초과 — {_REGISTER_HINT}",
             id="timeout",
         ),
     ]
@@ -374,39 +380,86 @@ class TestRegisterIpcErrorCode:
         assert payload["message"] == message
 
 
+_MALFORMED = "IPC 응답이 계약과 다릅니다"
+_TIMEOUT = "서버 응답 시간 초과"
+
 _SECRET_MISSING = [
     pytest.param(
         ["member", "register", "--id", "new-agent", "--type", "agent"],
         {"member_id": "new-agent", "type": "agent", "role": "default"},
         ("토큰:",),
+        "멤버 등록이 서버에서 이미 처리됐을 수 있습니다. "
+        "'ante member info new-agent'로 확인하고, 등록돼 있으면 "
+        "'ante member rotate-token new-agent'로 토큰을 다시 발급하세요.",
         id="register-token",
     ),
     pytest.param(
         ["member", "rotate-token", "target"],
         {"member_id": "target"},
         ("새 토큰:",),
+        "토큰 재발급이 서버에서 이미 처리됐을 수 있습니다. 기존 토큰은 무효일 수 "
+        "있으니 'ante member rotate-token target'로 다시 재발급하세요.",
         id="rotate-token",
     ),
     pytest.param(
         ["member", "regenerate-recovery-key", "--password-env", "ANTE_REGEN_PW"],
         {},
         ("새 복구 키", "복구 키가 폐기"),
+        "복구 키 재발급이 서버에서 이미 처리됐을 수 있습니다. 기존 복구 키는 무효일 "
+        "수 있으니 다시 재발급하세요.",
         id="regenerate-recovery-key",
     ),
     pytest.param(
         ["bot", "signal-key", "b1", "--rotate"],
         {"bot_id": "b1"},
         ("재발급 완료",),
+        "시그널 키 재발급이 서버에서 이미 처리됐을 수 있습니다. 기존 키는 무효일 수 "
+        "있으니 'ante bot signal-key b1'로 지금 키를 확인하세요.",
         id="bot-signal-key-rotate",
     ),
 ]
+
+
+def _invoke_secret_command(tmp_path, mode: str, cli_args: list[str], send: AsyncMock):  # noqa: ANN202
+    from unittest.mock import MagicMock
+
+    client = AsyncMock()
+    client.send = send
+    fmt = ["--format", "json"] if mode == "json" else []
+    with (
+        patch("ante.cli.cold_path.is_active_runtime", return_value=True),
+        patch(
+            "ante.cli.commands.ipc_helpers.IPCClient",
+            MagicMock(return_value=client),
+        ),
+        patch(
+            "ante.cli.commands.ipc_helpers.get_socket_path",
+            return_value="/x.sock",
+        ),
+        patch.dict("os.environ", {"ANTE_REGEN_PW": "current-pw-value"}),
+    ):
+        result = _invoke(["--config-dir", str(tmp_path), *fmt, *cli_args])
+    client.send.assert_awaited_once()
+    return result
+
+
+def _assert_error_exit(result, mode: str, code: str, message: str) -> None:  # noqa: ANN001
+    assert result.exit_code == 1, result.output
+    if mode == "json":
+        assert json.loads(result.output) == {
+            "status": "error",
+            "code": code,
+            "message": message,
+        }
+    else:
+        assert result.output == f"Error: {code}: {message}\n"
 
 
 class TestSecretMissingFromResultFails:
     """비밀을 내는 명령은 응답 result 에 그 키가 없으면 UNKNOWN 으로 끝난다."""
 
     @pytest.mark.parametrize("mode", ["json", "text"])
-    @pytest.mark.parametrize("cli_args,result_body,absent", _SECRET_MISSING)
+    @pytest.mark.parametrize("cli_args,result_body,absent,hint", _SECRET_MISSING)
     def test_missing_secret_key_is_unknown_error(
         self,
         tmp_path,
@@ -414,37 +467,54 @@ class TestSecretMissingFromResultFails:
         cli_args: list[str],
         result_body: dict,
         absent: tuple[str, ...],
+        hint: str,
     ) -> None:
-        from unittest.mock import MagicMock
-
-        client = AsyncMock()
-        client.send = AsyncMock(
+        send = AsyncMock(
             return_value={"id": "x", "status": "ok", "result": result_body}
         )
-        fmt = ["--format", "json"] if mode == "json" else []
-        with (
-            patch("ante.cli.cold_path.is_active_runtime", return_value=True),
-            patch(
-                "ante.cli.commands.ipc_helpers.IPCClient",
-                MagicMock(return_value=client),
-            ),
-            patch(
-                "ante.cli.commands.ipc_helpers.get_socket_path",
-                return_value="/x.sock",
-            ),
-            patch.dict("os.environ", {"ANTE_REGEN_PW": "current-pw-value"}),
-        ):
-            result = _invoke(["--config-dir", str(tmp_path), *fmt, *cli_args])
-        client.send.assert_awaited_once()
-        assert result.exit_code == 1, result.output
+        result = _invoke_secret_command(tmp_path, mode, cli_args, send)
         for text in absent:
             assert text not in result.output
-        if mode == "json":
-            payload = json.loads(result.output)
-            assert payload == {
+        _assert_error_exit(result, mode, "UNKNOWN", f"{_MALFORMED} — {hint}")
+
+
+class TestSecretCommandUnknownOutcomeHint:
+    """결과를 모르는 실패에만 명령별 안내가 붙는다 (#2880)."""
+
+    @pytest.mark.parametrize("mode", ["json", "text"])
+    @pytest.mark.parametrize("cli_args,result_body,absent,hint", _SECRET_MISSING)
+    def test_timeout_adds_hint(
+        self,
+        tmp_path,
+        mode: str,
+        cli_args: list[str],
+        result_body: dict,
+        absent: tuple[str, ...],
+        hint: str,
+    ) -> None:
+        from ante.ipc.exceptions import IPCTimeoutError
+
+        send = AsyncMock(side_effect=IPCTimeoutError("slow"))
+        result = _invoke_secret_command(tmp_path, mode, cli_args, send)
+        _assert_error_exit(result, mode, "IPC_TIMEOUT", f"{_TIMEOUT} — {hint}")
+
+    @pytest.mark.parametrize("mode", ["json", "text"])
+    @pytest.mark.parametrize("cli_args,result_body,absent,hint", _SECRET_MISSING)
+    def test_server_rejection_has_no_hint(
+        self,
+        tmp_path,
+        mode: str,
+        cli_args: list[str],
+        result_body: dict,
+        absent: tuple[str, ...],
+        hint: str,
+    ) -> None:
+        send = AsyncMock(
+            return_value={
+                "id": "x",
                 "status": "error",
-                "code": "UNKNOWN",
-                "message": "IPC 응답이 계약과 다릅니다",
+                "error": {"code": "MEMBER_NOT_FOUND", "message": "거부됨"},
             }
-        else:
-            assert result.output == "Error: UNKNOWN: IPC 응답이 계약과 다릅니다\n"
+        )
+        result = _invoke_secret_command(tmp_path, mode, cli_args, send)
+        _assert_error_exit(result, mode, "MEMBER_NOT_FOUND", "거부됨")

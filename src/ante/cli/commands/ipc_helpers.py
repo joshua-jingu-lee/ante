@@ -35,6 +35,12 @@ def get_socket_path(config_dir: Path | None = None) -> str:
 _get_socket_path = get_socket_path
 
 _MALFORMED_RESPONSE_MESSAGE = "IPC 응답이 계약과 다릅니다"
+_TIMEOUT_MESSAGE = "서버 응답 시간 초과"
+
+
+def _with_outcome_hint(message: str, unknown_outcome: str) -> str:
+    """결과 미상 안내가 있으면 ``<기본 문구> — <안내>``로 잇는다."""
+    return f"{message} — {unknown_outcome}" if unknown_outcome else message
 
 
 async def ipc_send(
@@ -44,11 +50,13 @@ async def ipc_send(
     config_dir: Path | None = None,
     *,
     required: tuple[str, ...] = (),
+    unknown_outcome: str = "",
 ) -> dict[str, Any]:
     """IPC 커맨드를 보내고 성공 응답의 ``result``를 돌려준다.
 
     응답 모양이 계약과 다르거나 ``required`` 키가 ``result``에 없으면
-    ``UNKNOWN``인 ``IPCRemoteError``로 실패한다.
+    ``UNKNOWN``인 ``IPCRemoteError``로 실패한다. ``unknown_outcome``은
+    이 실패와 시간 초과의 메시지 뒤에만 덧붙인다.
 
     Raises:
         IPCServerNotRunningError | IPCClientTimeoutError | IPCRemoteError
@@ -61,10 +69,13 @@ async def ipc_send(
             "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."
         )
     except IPCTimeoutError:
-        raise IPCClientTimeoutError("서버 응답 시간 초과")
+        raise IPCClientTimeoutError(
+            _with_outcome_hint(_TIMEOUT_MESSAGE, unknown_outcome)
+        )
 
+    malformed = _with_outcome_hint(_MALFORMED_RESPONSE_MESSAGE, unknown_outcome)
     if not isinstance(response, dict):
-        raise IPCRemoteError("UNKNOWN", _MALFORMED_RESPONSE_MESSAGE)
+        raise IPCRemoteError("UNKNOWN", malformed)
 
     if response.get("status") == "error":
         error = response.get("error")
@@ -80,5 +91,5 @@ async def ipc_send(
         or not isinstance(result, dict)
         or any(key not in result for key in required)
     ):
-        raise IPCRemoteError("UNKNOWN", _MALFORMED_RESPONSE_MESSAGE)
+        raise IPCRemoteError("UNKNOWN", malformed)
     return result
