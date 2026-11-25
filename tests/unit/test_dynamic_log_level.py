@@ -31,6 +31,16 @@ async def service(db, eventbus):
     return svc
 
 
+@pytest.fixture(autouse=True)
+def _restore_root_level():
+    root = logging.getLogger()
+    saved = root.level
+    try:
+        yield
+    finally:
+        root.setLevel(saved)
+
+
 # ── register_default 테스트 ────────────────────────
 
 
@@ -52,8 +62,6 @@ async def test_register_default_skips_when_existing(service):
 
 def test_log_level_changed_updates_root_logger():
     """system.log_level 변경 시 루트 로거 레벨이 갱신된다."""
-    original = logging.getLogger().level
-
     event = ConfigChangedEvent(
         category="system",
         key="system.log_level",
@@ -63,9 +71,6 @@ def test_log_level_changed_updates_root_logger():
     _on_log_level_changed(event)
 
     assert logging.getLogger().level == logging.DEBUG
-
-    # 원복
-    logging.getLogger().setLevel(original)
 
 
 def test_log_level_changed_ignores_other_keys():
@@ -103,12 +108,8 @@ def test_log_level_changed_ignores_invalid_level():
 
 async def test_eventbus_integration(service, eventbus):
     """DynamicConfigService.set()으로 log_level 변경 시 루트 로거가 갱신된다."""
-    original = logging.getLogger().level
     eventbus.subscribe(ConfigChangedEvent, _on_log_level_changed)
 
     await service.set("system.log_level", "WARNING", category="system")
 
     assert logging.getLogger().level == logging.WARNING
-
-    # 원복
-    logging.getLogger().setLevel(original)
