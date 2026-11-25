@@ -344,6 +344,36 @@ class TestSuspendedAccountNoAutoRestart:
         assert "lookup failed" not in given_up[0].message
         assert "RuntimeError" not in given_up[0].message
 
+    @pytest.mark.parametrize("manual", ["start", "stop"])
+    async def test_lookup_failure_after_manual_action_does_not_notify(
+        self, manager, account_service, eventbus, monkeypatch, manual
+    ):
+        bot = await self._error_bot(manager, account_service, "b1", "acc-a")
+        wake, entered = self._gate_cooldown(monkeypatch)
+        notifications = self._notifications(eventbus)
+        await self._error(eventbus, "b1", "acc-a")
+        task = manager._restart_tasks["b1"]
+        await entered.acquire()
+
+        if manual == "start":
+            await manager.start_bot("b1")
+            expected = BotStatus.RUNNING
+        else:
+            await manager.stop_bot("b1")
+            expected = BotStatus.STOPPED
+        assert bot.status == expected
+
+        async def _fail_get(account_id):  # noqa: ARG001
+            raise RuntimeError("lookup failed")
+
+        monkeypatch.setattr(account_service, "get", _fail_get)
+        wake.set()
+        await asyncio.wait([task], timeout=5.0)
+
+        assert task.done() and task.exception() is None
+        assert bot.status == expected
+        assert [n for n in notifications if n.title == "봇 자동 재시작 중단"] == []
+
     async def test_active_account_restarts_and_other_account_kept(
         self, manager, account_service, eventbus, monkeypatch
     ):

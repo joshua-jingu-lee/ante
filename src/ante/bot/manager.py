@@ -1222,19 +1222,20 @@ class BotManager:
                 account_id,
                 exc_info=True,
             )
-            await self._eventbus.publish(
-                NotificationEvent(
-                    level="error",
-                    title="봇 자동 재시작 중단",
-                    message=(
-                        f"봇 `{bot.bot_id}` · 계좌 `{account_id}`\n"
-                        "계좌를 확인하지 못해 자동 재시작을 하지 않았습니다. "
-                        "봇은 에러 상태로 남습니다. "
-                        "원인 확인 후 수동으로 다시 시작하세요."
-                    ),
-                    category="bot",
+            if bot.status == BotStatus.ERROR and self._is_registered(bot):
+                await self._eventbus.publish(
+                    NotificationEvent(
+                        level="error",
+                        title="봇 자동 재시작 중단",
+                        message=(
+                            f"봇 `{bot.bot_id}` · 계좌 `{account_id}`\n"
+                            "계좌를 확인하지 못해 자동 재시작을 하지 않았습니다. "
+                            "봇은 에러 상태로 남습니다. "
+                            "원인 확인 후 수동으로 다시 시작하세요."
+                        ),
+                        category="bot",
+                    )
                 )
-            )
             return False
         if account.status != AccountStatus.ACTIVE:
             logger.warning(
