@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import weakref
 from collections.abc import Callable
 from typing import Any
 
@@ -13,6 +15,15 @@ logger = logging.getLogger(__name__)
 _ACCOUNT_RULES_KEY_PREFIX = "accounts."
 _ACCOUNT_RULES_KEY_SUFFIX = ".rules"
 RULE_ITEM_KEYS: frozenset[str] = frozenset({"type", "id", "enabled"})
+_ACCOUNT_LOCKS: weakref.WeakKeyDictionary[Any, dict[str, asyncio.Lock]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _account_lock(dynamic_config: Any, account_id: str) -> asyncio.Lock:
+    """Return the per-account update lock owned by ``dynamic_config``."""
+    locks = _ACCOUNT_LOCKS.setdefault(dynamic_config, {})
+    return locks.setdefault(account_id, asyncio.Lock())
 
 
 def account_rules_config_key(account_id: str) -> str:
@@ -226,28 +237,29 @@ async def update_account_rule_config(
     if validation_errors:
         raise ValueError(f"룰 config 검증 실패: {'; '.join(validation_errors)}")
 
-    key = account_rules_config_key(account_id)
-    raw_rules: list[dict[str, Any]] = []
+    async with _account_lock(dynamic_config, account_id):
+        key = account_rules_config_key(account_id)
+        raw_rules: list[dict[str, Any]] = []
 
-    try:
-        value = await dynamic_config.get(key)
-        if isinstance(value, list):
-            raw_rules = value
-    except Exception:
-        raw_rules = []
+        try:
+            value = await dynamic_config.get(key)
+            if isinstance(value, list):
+                raw_rules = value
+        except Exception:
+            raw_rules = []
 
-    if not raw_rules and config is not None and hasattr(config, "get"):
-        value = config.get(key)
-        if isinstance(value, list):
-            raw_rules = list(value)
+        if not raw_rules and config is not None and hasattr(config, "get"):
+            value = config.get(key)
+            if isinstance(value, list):
+                raw_rules = list(value)
 
-    raw_rules, dropped = _drop_unwritable_items(
-        raw_rules, RuleEngine._create_rule, RULE_REGISTRY
-    )
-    new_config = _put_rule_config(raw_rules, rule_type, enabled, params)
-    enabled = new_config["enabled"]
+        raw_rules, dropped = _drop_unwritable_items(
+            raw_rules, RuleEngine._create_rule, RULE_REGISTRY
+        )
+        new_config = _put_rule_config(raw_rules, rule_type, enabled, params)
+        enabled = new_config["enabled"]
 
-    await dynamic_config.set(key, raw_rules, category="rule", changed_by=changed_by)
+        await dynamic_config.set(key, raw_rules, category="rule", changed_by=changed_by)
     if dropped:
         await _report_dropped(account_id, key, dropped, eventbus)
 

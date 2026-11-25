@@ -31,7 +31,7 @@
 - `trading_hours_start`: "09:00" (현지 시간, HH:MM)
 - `trading_hours_end`: "15:30" (현지 시간, HH:MM)
 - `trading_mode`: VIRTUAL / LIVE
-- `broker_type`: "kis-domestic", "test" (kis-overseas는 1.1)
+- `broker_type`: "kis-domestic", "test", "mock" (kis-overseas는 1.1)
 - `credentials`: 인증 정보 (암호화 저장)
 - `broker_config`: 브로커 동작 설정
 - `buy_commission_rate`: 매수 수수료율
