@@ -5,7 +5,7 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { markDoneCriteriaChecked } = require("./mark-done-criteria.js");
+const { markDoneCriteriaChecked, checklistLine } = require("./mark-done-criteria.js");
 
 const warnings = [];
 
@@ -268,6 +268,24 @@ test("FENCEINDENT4", () => {
 test("HEADINGINDENT4", () => {
   const out = lines(["## 완료 조건", "    ## 코드 블록 안의 글", "- [ ] a"].join("\n"));
   assert.equal(out[2], "- [x] a");
+});
+
+// post-merge 코멘트의 `issue checklist` 줄이다. 경고가 없으면 #2524 전과 바이트로 같다.
+test("CHECKLIST-PLAIN", () => {
+  assert.equal(checklistLine(true, []), "- issue checklist: updated");
+  assert.equal(checklistLine(false, []), "- issue checklist: unchanged");
+});
+
+test("CHECKLIST-TAGS", () => {
+  const warnings = [{ tag: "unterminated-fence", detail: "d1" }, { tag: "item-not-matched", detail: "d2" }];
+  assert.equal(checklistLine(true, warnings), "- issue checklist: updated (unterminated-fence, item-not-matched)");
+});
+
+test("CHECKLIST-DISTINGUISH", () => {
+  const failed = markDoneCriteriaChecked("## 배경\n- [ ] a");
+  const nothing = markDoneCriteriaChecked("## 배경\n본문");
+  assert.equal(checklistLine(false, failed.warnings), "- issue checklist: unchanged (heading-not-found)");
+  assert.equal(checklistLine(false, nothing.warnings), "- issue checklist: unchanged");
 });
 
 // 아래 넷은 #2509가 실측 노출 0으로 선언한 파서 공백이다. 이 파일은 동작을

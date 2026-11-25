@@ -114,13 +114,13 @@ jobs:
                 body:
                   `🤖 **Post-merge 정리 완료**\n` +
                   `${prLine}\n` +
-                  `- issue checklist: ${summary.checkboxUpdated ? "updated" : "unchanged"}\n` +
+                  `${checklistLine(summary.checkboxUpdated, summary.warnings)}\n` +
                   `- issue state: ${summary.issueClosed ? "closed" : "already-closed"}\n` +
                   "- source: post-merge.yml",
               });
             }
 
-            const { markDoneCriteriaChecked } = require(
+            const { markDoneCriteriaChecked, checklistLine } = require(
               `${process.env.GITHUB_WORKSPACE}/.github/scripts/mark-done-criteria.js`,
             );
 
@@ -160,6 +160,7 @@ jobs:
               await addPostMergeComment(issueNumber, {
                 prNumber: pr?.number,
                 checkboxUpdated,
+                warnings: doneCriteria.warnings,
                 issueClosed,
               });
             }

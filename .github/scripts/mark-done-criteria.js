@@ -122,4 +122,16 @@ function markDoneCriteriaChecked(body) {
   return { body: lines.join("\n"), warnings };
 }
 
-module.exports = { markDoneCriteriaChecked };
+// post-merge 코멘트의 `issue checklist` 줄이다. 첫 값은 본문을 고쳤는지만 말하고,
+// 경고 태그는 괄호로 덧붙인다 — 경고는 갱신과 함께 날 수 있어 첫 값을 바꾸지 않는다.
+// 경고가 없으면 태그를 싣기 전의 줄과 바이트로 같다.
+function checklistLine(checkboxUpdated, warnings) {
+  const base = `- issue checklist: ${checkboxUpdated ? "updated" : "unchanged"}`;
+  if (warnings.length === 0) {
+    return base;
+  }
+  const tags = warnings.map((warning) => warning.tag);
+  return `${base} (${tags.join(", ")})`;
+}
+
+module.exports = { markDoneCriteriaChecked, checklistLine };
