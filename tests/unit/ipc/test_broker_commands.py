@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import json
 import logging
-from contextlib import ExitStack
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,6 +24,7 @@ from click.testing import CliRunner
 from pydantic import ValidationError
 
 from ante.cli.main import cli
+from ante.core import clock
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
 from ante.ipc.requests import AccountId, BrokerOrderHistoryRequest, IPCRequest
@@ -45,6 +48,26 @@ BROKER_COMMANDS = (
     "broker.order_history",
     "broker.reconcile",
 )
+
+
+_KST = timezone(timedelta(hours=9))
+
+
+class _FixedClock:
+    def __init__(self, at: datetime) -> None:
+        self._at = at
+
+    def now(self, tz: tzinfo | None) -> datetime:
+        return self._at.astimezone(tz or UTC)
+
+    def monotonic(self) -> float:
+        return 1000.0
+
+
+@contextmanager
+def _kst_noon(year: int, month: int, day: int) -> Iterator[None]:
+    with clock.use_clock(_FixedClock(datetime(year, month, day, 12, tzinfo=_KST))):
+        yield
 
 
 class _Harness:
@@ -666,9 +689,10 @@ async def test_a_valid_iso_date_next_to_a_rejected_one_reaches_the_broker(
     value: str, passed: str
 ) -> None:
     harness = _Harness()
-    response = await harness.send(
-        "broker.order_history", {"account_id": ACCOUNT, "to_date": value}
-    )
+    with _kst_noon(2026, 6, 11):
+        response = await harness.send(
+            "broker.order_history", {"account_id": ACCOUNT, "to_date": value}
+        )
     assert response == _ok({"orders": ORDERS})
     call = harness.broker.get_order_history.await_args
     assert _typed(call.args) == [("NoneType", None), ("str", passed)]
@@ -691,35 +715,99 @@ async def test_an_inverted_date_range_is_rejected_before_the_broker() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("args", "passed"),
+    ("args", "passed", "today"),
     [
         pytest.param(
             {"from_date": "2026-01-01", "to_date": "2026-01-01"},
             [("str", "20260101"), ("str", "20260101")],
+            (2026, 6, 11),
             id="same-day",
         ),
         pytest.param(
             {"from_date": "2026-02-01"},
             [("str", "20260201"), ("NoneType", None)],
+            (2026, 6, 11),
             id="from-only",
         ),
         pytest.param(
             {"to_date": "2026-01-01"},
             [("NoneType", None), ("str", "20260101")],
+            (2026, 1, 5),
             id="to-only",
         ),
     ],
 )
 async def test_a_range_that_is_not_inverted_reaches_the_broker(
-    args: dict[str, str], passed: list[tuple[str, Any]]
+    args: dict[str, str],
+    passed: list[tuple[str, Any]],
+    today: tuple[int, int, int],
 ) -> None:
     harness = _Harness()
-    response = await harness.send(
-        "broker.order_history", {"account_id": ACCOUNT, **args}
-    )
+    with _kst_noon(*today):
+        response = await harness.send(
+            "broker.order_history", {"account_id": ACCOUNT, **args}
+        )
     assert response == _ok({"orders": ORDERS})
     call = harness.broker.get_order_history.await_args
     assert _typed(call.args) == passed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        pytest.param(
+            {"from_date": "2026-06-12"},
+            "조회 시작일(2026-06-12)이(가) 기본 조회 종료일(2026-06-11) 이후입니다.",
+            id="from-only-future",
+        ),
+        pytest.param(
+            {"to_date": "2026-06-03"},
+            "기본 조회 시작일(2026-06-04)이(가) 조회 종료일(2026-06-03) 이후입니다.",
+            id="to-only-before-default-start",
+        ),
+    ],
+)
+async def test_a_one_sided_range_inverted_by_its_default_is_rejected_before_the_broker(
+    args: dict[str, str], message: str
+) -> None:
+    harness = _Harness()
+    with _kst_noon(2026, 6, 11):
+        response = await harness.send(
+            "broker.order_history", {"account_id": ACCOUNT, **args}
+        )
+    assert response == _error("INVALID_DATE_RANGE", message)
+    harness.account.get_broker.assert_not_awaited()
+    harness.broker.get_order_history.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("args", "passed"),
+    [
+        pytest.param(
+            {"from_date": "2026-06-11"},
+            [("str", "20260611"), ("NoneType", None)],
+            id="from-only-today",
+        ),
+        pytest.param(
+            {"to_date": "2026-06-04"},
+            [("NoneType", None), ("str", "20260604")],
+            id="to-only-default-start",
+        ),
+    ],
+)
+async def test_a_one_sided_range_on_its_default_boundary_reaches_the_broker(
+    args: dict[str, str], passed: list[tuple[str, Any]]
+) -> None:
+    harness = _Harness()
+    with _kst_noon(2026, 6, 11):
+        response = await harness.send(
+            "broker.order_history", {"account_id": ACCOUNT, **args}
+        )
+    assert response == _ok({"orders": ORDERS})
+    call = harness.broker.get_order_history.await_args
+    assert (call.kwargs, _typed(call.args)) == ({}, passed)
 
 
 @pytest.mark.asyncio
