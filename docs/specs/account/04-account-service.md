@@ -30,7 +30,7 @@
 
 `activate`·`delete`는 상태 UPDATE가 실패하면(작업 취소 포함) 캐시에 든 그 계좌 객체의 `status`·`updated_at`을 호출 전 값으로 제자리에서 되돌리고 같은 예외를 다시 올린다. 이벤트는 UPDATE가 성공한 뒤에만 발행한다: `activate`의 `AccountActivatedEvent`·알림, 그리고 활성 계좌를 지울 때 `delete`가 내는 `AccountSuspendedEvent`(캐시에서 계좌를 뺀 뒤 발행). UPDATE가 커밋된 뒤에 취소가 닿으면 DB는 바뀐 채 캐시만 되돌아갈 수 있다 — `activate`라면 캐시가 정지로 남아 주문이 막히고, 재시작하면 DB 값을 따른다.
 
-`suspend`는 상태 UPDATE가 실패해도 캐시를 되돌리지 않는다(주문이 막힌 채로 남는다). 미기록 표시는 `AccountService`의 메모리에만 있어, 재시작하면 그 계좌는 DB 값(활성)을 따른다. 작업 취소로 끝나면 표시만 남기고 이벤트를 내지 않는다 — 봇의 주문은 캐시의 정지 상태로 막히고, 봇 중지는 다음에 다시 보낸 정지가 이룬다. `activate`·`delete`는 상태 쓰기가 성공한 뒤에만 그 계좌의 표시를 지운다.
+`suspend`는 상태 UPDATE가 실패해도 캐시를 되돌리지 않는다(주문이 막힌 채로 남는다). 미기록 표시는 `AccountService`의 메모리에만 있어, 재시작하면 그 계좌는 DB 값(활성)을 따른다. 작업 취소로 끝나면 표시만 남기고 이벤트를 내지 않는다 — 봇의 주문은 캐시의 정지 상태로 막히고, 봇 중지는 다음에 다시 보낸 정지가 이룬다. `activate`·`delete`는 상태 쓰기가 성공한 뒤에만 그 계좌의 표시를 지운다. CLI의 `account list`·`account info`·`system status`는 CLI 프로세스에서 DB를 읽으므로, 다시 보낸 정지의 쓰기가 성공하기 전까지 `account list`·`account info`는 그 계좌를 활성으로 보이고 `system status`는 그 계좌를 정지로 세지 않는다(텔레그램 `/status`는 데몬의 메모리를 읽어 정지로 센다). `AccountSuspendNotPersistedError`·`ACCOUNT_SUSPEND_ALL_FAILED`나 실패 알림을 받으면 정지를 다시 보낸다.
 
 소스: `src/ante/account/service.py`
 
