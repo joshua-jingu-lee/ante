@@ -188,8 +188,8 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `AccountSuspendedEvent` | AccountService | RuleEngine, Bot, Notification | `account_id`, `reason`, `suspended_by` |
-| `AccountActivatedEvent` | AccountService | RuleEngine, Bot, Notification | `account_id`, `activated_by` |
+| `AccountSuspendedEvent` | AccountService | Bot | `account_id`, `reason`, `suspended_by` |
+| `AccountActivatedEvent` | AccountService | Bot | `account_id`, `activated_by` |
 
 `AccountCreatedEvent`와 `AccountDeletedEvent`는 1.0 런타임 EventBus 계약에 포함하지 않는다.
 계좌 생성/삭제는 cold-path structural operation이며, 서버 실행 중 consumer topology를 hot wiring하지 않는다.
