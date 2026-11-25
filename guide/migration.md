@@ -12,7 +12,7 @@
 다음은 바뀌지 않았습니다.
 
 - text 출력. 예외는 [실패 출력](#실패-출력의-변경)에 적은 것뿐입니다.
-- 종료 코드.
+- 종료 코드. 예외는 [text 출력의 예외 하나](#text-출력의-예외-하나)뿐입니다.
 
 ```text
 # 전
@@ -336,14 +336,14 @@ JSON 모드의 실패는 다음 모양의 에러 봉투로 stdout에 한 줄로 
 
 ### text 출력의 예외 하나
 
-`strategy info`는 전략의 파라미터 모양이 기대와 다르면 실패합니다. 전에는 표의 앞부분을 stdout에 낸 뒤 `Error: EXECUTION_ERROR: …`를 냈습니다. 이제는 stdout에 아무것도 내지 않고 같은 오류 한 줄만 냅니다. 종료 코드(1)는 그대로입니다.
+`strategy info`는 전략의 파라미터가 사전이 아닐 때 전에는 표의 앞부분을 stdout에 낸 뒤 `Error: EXECUTION_ERROR: …`를 내고 종료 코드 1로 끝났습니다. 이제는 성공하고(종료 코드 0) 그 값을 `파라미터` 줄 한 줄로 냅니다.
 
 ---
 
 ## ✅ 바뀌지 않은 것
 
 - **text 출력** — 위 실패 출력의 접두와 예외 하나를 빼고 그대로입니다.
-- **종료 코드** — 이 문서의 명령 모두 그대로입니다.
+- **종료 코드** — 위 text 출력의 예외 하나를 빼고 이 문서의 명령 모두 그대로입니다.
 - **전부터 봉투였던 명령의 JSON** — 다음 명령은 전부터 `{"status": "ok", "message", "data"}`를 냈고 그대로입니다.
   - `account activate`·`create`·`delete`·`repair-timezone`·`suspend`
   - `approval approve`·`cancel`·`cancel-invalid`·`reject`·`reopen`·`request`·`review`
