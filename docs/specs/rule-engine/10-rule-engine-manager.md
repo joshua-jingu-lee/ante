@@ -25,7 +25,7 @@
 각 계좌에 대해 RuleEngine을 생성하고, 계좌별 룰 설정을 로드한다.
 `dynamic_config`에 `accounts.{account_id}.rules` 행이 있으면 그 값이 우선하며,
 행이 없을 때만 정적 Config seed를 fallback으로 사용한다. 행의 값이 리스트가 아니거나
-조회가 예외를 내면, 또는 기본 룰과 합치거나 항목으로 룰을 만들 수 없을 때(룰 생성·정렬의 예외)
+조회가 예외를 내면, 또는 기본 룰과 합치거나 항목으로 룰을 만들 수 없을 때(룰 생성·정렬의 예외, 없거나 등록되지 않은 `type` 포함)
 그 계좌만 `rules_unavailable`로 둔다([09-rule-management.md](09-rule-management.md)
 Static TOML seed 참조). `TradingHoursRule`의 시간대와 거래
 시간은 Account 모델에서 자동 주입한다. 런타임 변경은 `ConfigChangedEvent`를 통해 대상

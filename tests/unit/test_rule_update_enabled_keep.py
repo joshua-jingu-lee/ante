@@ -15,7 +15,7 @@ from ante.rule.config_update import update_account_rule_config
 KEY = "accounts.domestic.rules"
 RULE_TYPE = "daily_loss_limit"
 PARAMS = {"max_daily_loss_percent": 0.03}
-OTHER = {"type": "max_position_count", "enabled": False, "max_count": 3}
+OTHER = {"type": "total_exposure_limit", "enabled": False, "max_exposure_percent": 0.8}
 
 
 def _stored(enabled: bool) -> dict[str, Any]:

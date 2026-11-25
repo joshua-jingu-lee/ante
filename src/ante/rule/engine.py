@@ -329,8 +329,7 @@ class RuleEngine:
                     type(exc).__name__,
                 )
                 raise
-            if rule is not None:
-                rules.append(rule)
+            rules.append(rule)
         return self._sorted_rules(rules)
 
     def _sorted_rules(self, rules: list[Rule]) -> list[Rule]:
@@ -347,16 +346,16 @@ class RuleEngine:
             raise
 
     @staticmethod
-    def _create_rule(config: dict[str, Any]) -> Rule | None:
+    def _create_rule(config: dict[str, Any]) -> Rule:
         """룰 설정에서 룰 인스턴스 생성. 쓸 수 없는 config면 ``RuleConfigError``."""
         rule_type = config.get("type")
         if not isinstance(rule_type, str):
-            logger.warning("알 수 없는 룰 타입: %s", rule_type)
-            return None
+            raise RuleConfigError(
+                f"룰 type이 문자열이 아님: {type(rule_type).__name__}"
+            )
         rule_class = RULE_REGISTRY.get(rule_type)
         if rule_class is None:
-            logger.warning("알 수 없는 룰 타입: %s", rule_type)
-            return None
+            raise RuleConfigError(f"알 수 없는 룰 타입: {rule_type!r}")
         errors = rule_class.config_errors(config)
         if errors:
             raise RuleConfigError(f"룰 config 검증 실패: {'; '.join(errors)}")

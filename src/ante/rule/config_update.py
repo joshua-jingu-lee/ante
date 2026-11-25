@@ -77,7 +77,7 @@ def _is_unwritable(
     if is_first:
         return False
     try:
-        rule = create_rule(item)
+        create_rule(item)
     except Exception:
         rule_type = item.get("type")
         logger.debug(
@@ -88,13 +88,13 @@ def _is_unwritable(
             exc_info=True,
         )
         return True
-    if rule is None or "priority" not in item:
+    if "priority" not in item:
         return False
     return not isinstance(item["priority"], (int, float))
 
 
 def _drop_unwritable_items(
-    raw_rules: list[Any], create_rule: Callable[..., Any]
+    raw_rules: list[Any], create_rule: Callable[..., Any], registered: dict[str, Any]
 ) -> tuple[list[Any], list[tuple[int, Any]]]:
     """Split stored items into kept items and dropped ``(index, item)`` pairs."""
     kept: list[Any] = []
@@ -111,6 +111,7 @@ def _drop_unwritable_items(
             dropped.append((index, item))
             continue
         seen_types.add(rule_type)
+        is_first = is_first and rule_type in registered
         if _is_unwritable(index, item, is_first, create_rule):
             dropped.append((index, item))
             continue
@@ -229,7 +230,9 @@ async def update_account_rule_config(
         if isinstance(value, list):
             raw_rules = list(value)
 
-    raw_rules, dropped = _drop_unwritable_items(raw_rules, RuleEngine._create_rule)
+    raw_rules, dropped = _drop_unwritable_items(
+        raw_rules, RuleEngine._create_rule, RULE_REGISTRY
+    )
     new_config = _put_rule_config(raw_rules, rule_type, enabled, params)
     enabled = new_config["enabled"]
 
