@@ -245,6 +245,7 @@ async def test_rule_update_passes_every_field_and_audits() -> None:
         params={"max_loss_pct": 3.5, "nested": {"k": [1, "v"]}},
         changed_by=ACTOR,
         audit_logger=None,
+        eventbus=harness.services.eventbus,
     )
     harness.audit_logger.log.assert_awaited_once_with(
         member_id=ACTOR,
