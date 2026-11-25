@@ -25,7 +25,7 @@
 | `BOT_CREATE` | 봇 신규 생성 | `params.config`를 `BotConfig`로 변환하고 `StrategyRegistry`에서 ADOPTED 전략을 조회한 뒤 `StrategyLoader.load(record.filepath)`와 `BotManager.create_bot(config=..., strategy_cls=..., source_path=...)`를 호출한다. 예산 배정은 별도 `budget_change` 요청으로 처리한다. 전결은 Account 조회 결과 `trading_mode == "virtual"`일 때만 가능하다 |
 | `BOT_ASSIGN_STRATEGY` | 봇에 전략 배정 | `BotManager.assign_strategy(bot_id, strategy_id)` → 봇에 채택된 전략을 배정한다. 봇이 running 상태이면 즉시 새 전략으로 전환된다 |
 | `BOT_CHANGE_STRATEGY` | 봇 전략 변경 | `BotManager.change_strategy(bot_id, strategy_id)` → 중지 상태의 봇에 다른 전략을 교체 배정한다. 봇이 running 상태이면 거부된다 |
-| `BOT_STOP` | 봇 중지 | `BotManager.stop_bot(bot_id)` → 봇의 전략 루프가 중지되고, 미체결 주문이 취소된다. 보유 포지션은 유지된다 |
+| `BOT_STOP` | 봇 중지 | `BotManager.stop_bot(bot_id)` → 봇의 전략 루프가 중지되고, 미체결 주문이 취소되고 스탑 주문이 만료된다. 보유 포지션은 유지된다 |
 | `BOT_RESUME` | 봇 재개 | `BotManager.resume_bot(bot_id)` → 중지 또는 에러 상태의 봇을 재시작한다. Agent가 재개 사유(에러 해소, 시장 안정화 등)를 판단하여 요청한다 |
 | `BOT_DELETE` | 봇 삭제 | `BotManager.delete_bot(bot_id)` → 중지 상태의 봇을 완전히 제거한다. 보유 포지션이 있으면 거부된다. 할당 예산은 Treasury 미할당으로 반환된다 |
 | `BUDGET_CHANGE` | 봇 예산 변경 | `Treasury.update_budget(bot_id, amount)` → 해당 봇의 할당 예산이 변경되고, 미할당 잔액이 재계산된다 |
