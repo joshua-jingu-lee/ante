@@ -166,7 +166,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 - **메타 리뷰 단계**: `@code-reviewer`는 상시 게이트가 아니라, 고위험 변경과 반복 failure에서만 호출한다.
 - **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/code-review` PASS 또는 SKIP(04 §2 적용 범위) 기록을 PR 생성 조건으로 삼고, merge gate는 **required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + 충돌 없음 + 대화 해결**을 기준으로 삼는다.
 - **머지 담당**: GitHub auto-merge
-- **이슈 close**: PR 본문의 `Closes #N`으로 GitHub 기본 auto-close를 우선 사용하고, `post-merge`가 체크박스(연결 이슈 본문의 `완료 조건` 절 한정)/에픽 동기화와 수동 복구를 맡는다.
+- **이슈 close**: PR 본문의 `Closes #N`으로 GitHub 기본 auto-close를 우선 사용하고, `post-merge`가 체크박스(연결 이슈 본문의 `완료 조건` 절 한정) 갱신과 수동 복구를 맡는다.
 - **원격 브랜치 삭제**: GitHub의 "Automatically delete head branches" 기능 사용
 - **로컬 worktree 정리**: Claude 측에서 후속 작업 시 `git worktree prune` 또는 명시적 remove
 
