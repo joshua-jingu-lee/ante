@@ -1325,6 +1325,37 @@ class TestBotOrders:
         assert len(bot1_orders) == 1
         assert bot1_orders[0].symbol == "005930"
 
+    async def test_expire_for_bot(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#3049: 그 봇의 활성 주문만 bot_stopped 로 한 번씩 만료하고 돌려준다."""
+        manager.start()
+        ids = {}
+        for order_id, bot_id in (("ord-1", "bot-001"), ("ord-2", "bot-002")):
+            ids[bot_id] = await manager.register(
+                order_id=order_id,
+                bot_id=bot_id,
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+        eventbus.publish.reset_mock()
+
+        expired = await manager.expire_for_bot("bot-001", "bot_stopped")
+        again = await manager.expire_for_bot("bot-001", "bot_stopped")
+
+        assert [o.stop_order_id for o in expired] == [ids["bot-001"]]
+        assert again == []
+        events = [c.args[0] for c in eventbus.publish.call_args_list]
+        assert [(type(e), e.stop_order_id, e.reason) for e in events] == [
+            (StopOrderExpiredEvent, ids["bot-001"], "bot_stopped")
+        ]
+        assert [o.stop_order_id for o in manager.active_orders] == [ids["bot-002"]]
+
 
 class TestAccountOrders:
     """계좌별 주문 조회 테스트 (#2124, get_orders_for_bot 동형)."""

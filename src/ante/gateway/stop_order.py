@@ -221,6 +221,15 @@ class StopOrderManager:
         logger.info("스탑 주문 취소: %s", stop_order_id)
         return True
 
+    async def expire_for_bot(self, bot_id: str, reason: str) -> list[StopOrder]:
+        """봇의 활성 스탑 주문을 ``reason`` 으로 만료시키고 만료한 주문을 돌려준다."""
+        expired: list[StopOrder] = []
+        for order in self.get_orders_for_bot(bot_id):
+            await self._expire_order(order, reason)
+            if order.expired:
+                expired.append(order)
+        return expired
+
     def get_order(self, stop_order_id: str) -> StopOrder | None:
         """스탑 주문 조회."""
         return self._orders.get(stop_order_id)

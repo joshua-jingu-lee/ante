@@ -694,13 +694,12 @@ class StopOrderTriggeredEvent(Event):
 class StopOrderExpiredEvent(Event):
     """StopOrderManager → EventBus: 스탑 주문 만료.
 
-    등록된 stop 주문이 트리거되지 않은 채 자동 해제될 때
-    발행된다. ``reason`` 허용 값 (현재 코드 기준):
+    등록된 stop 주문이 트리거되지 않은 채 자동 해제될 때 발행된다.
+    ``reason`` 허용 값 (현재 코드 기준):
 
-    - ``"session_ended"``: ``check_session_expiry()`` 가 거래 세션 종료를
-      감지하고 미트리거 주문을 만료시킬 때.
-    - ``"manager_stopped"``: ``StopOrderManager.stop()`` 이 매니저를
-      중지시키며 활성 주문을 일괄 만료시킬 때.
+    - ``"session_ended"``: ``check_session_expiry()`` 의 세션 종료 만료.
+    - ``"manager_stopped"``: ``StopOrderManager.stop()`` 의 일괄 만료.
+    - ``"bot_stopped"``: 봇 정지의 ``expire_for_bot()`` 만료.
     """
 
     _requires_account_id: ClassVar[bool] = True

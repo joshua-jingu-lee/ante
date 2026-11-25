@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from ante.bot.manager import StopCleanup
 from ante.core import clock
 from ante.notification.telegram_receiver import (
     _UPDATE_FAILURE_REPLY,
@@ -55,7 +56,7 @@ def bot_manager():
         {"bot_id": "bot-2", "status": "stopped", "strategy_id": "s2"},
     ]
     mock.get_bot.return_value = _make_running_bot()
-    mock.stop_bot = AsyncMock()
+    mock.stop_bot = AsyncMock(return_value=None)
     return mock
 
 
@@ -392,15 +393,30 @@ class TestCommands:
         assert not hasattr(receiver, "_cmd_activate")
 
     async def test_stop_bot_no_positions(self, receiver, bot_manager):
-        """보유 종목 없이 봇 중지 — 메시지 A."""
+        """보유 종목 없이 봇 중지 — 정리 결과를 적고 옛 안내 문장이 없다 (#3049)."""
+        bot_manager.stop_bot.return_value = StopCleanup(cancelled=2, failed=1)
         result = await receiver._cmd_stop(["bot-1"])
         assert "봇 중지" in result
         assert "테스트봇 (bot-1)" in result
         assert "실행 중 → 중지됨" in result
-        assert "미체결 주문은 자동 취소되지 않습니다" in result
+        assert "미체결 주문 취소: 2건 (실패 1건)" in result
+        assert "스탑 주문 만료: 0건" in result
+        assert "자동 취소되지 않습니다" not in result
         bot_manager.stop_bot.assert_called_once_with(
             "bot-1", suppress_notification=True
         )
+
+    async def test_stop_bot_lists_expired_stop_orders(self, receiver, bot_manager):
+        """#3049: 만료한 스탑 주문의 종목·방향·스탑 가격을 적는다."""
+        stop = SimpleNamespace(symbol="005930", side="sell", stop_price=68000.0)
+        bot_manager.stop_bot.return_value = StopCleanup(
+            cancelled=0,
+            failed=0,
+            stop_orders=(stop,),  # type: ignore[arg-type]
+        )
+        result = await receiver._cmd_stop(["bot-1"])
+        assert "스탑 주문 만료: 1건" in result
+        assert "- 005930 sell stop 68,000" in result
 
     async def test_stop_bot_with_positions(self, receiver, bot_manager):
         """보유 종목 있으면 메시지 B — 종목명 및 미체결 주문 건수 표시.
@@ -449,7 +465,7 @@ class TestCommands:
         # #2385: format_label SSOT 로 종목명 병기 (plain transport).
         assert "005930 (삼성전자)" in result
         assert "035720 (카카오)" in result
-        assert "체결대기 주문: 2건" in result
+        assert "체결대기 주문" not in result
 
     async def test_stop_bot_label_uses_account_exchange(
         self, receiver, bot_manager, account_service, instrument_service
