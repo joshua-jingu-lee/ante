@@ -93,6 +93,7 @@ def account_service():
     # 기본: ACTIVE 계좌 1개
     active_account = SimpleNamespace(account_id="test", status=AccountStatus.ACTIVE)
     mock.list.return_value = [active_account]
+    mock.has_unpersisted_suspensions = MagicMock(return_value=False)
     # Refs #1213: list[dict] 반환 타입.
     mock.suspend_all = AsyncMock(
         return_value=[
@@ -604,6 +605,41 @@ class TestConfirmation:
         assert "이미 거래가 활성 상태입니다" in result
         assert 12345 not in receiver._pending_confirm
         account_service.activate_all.assert_not_called()
+
+    async def test_halt_with_unpersisted_suspension_requires_confirm(
+        self, receiver, account_service
+    ):
+        """모두 정지여도 DB에 기록되지 않은 정지가 있으면 확인으로 간다 (#2858)."""
+        from ante.account.models import AccountStatus
+
+        account_service.list.return_value = [
+            SimpleNamespace(account_id="test", status=AccountStatus.SUSPENDED)
+        ]
+        account_service.has_unpersisted_suspensions.return_value = True
+
+        result = await receiver._execute("halt", ["재시도"], 12345, 100)
+
+        assert "/confirm" in result
+        assert 12345 in receiver._pending_confirm
+        account_service.suspend_all.assert_not_called()
+
+    async def test_cmd_halt_with_unpersisted_suspension_calls_suspend_all(
+        self, receiver, account_service
+    ):
+        """미기록 정지가 있으면 ``_cmd_halt``가 ``suspend_all``을 부른다 (#2858)."""
+        from ante.account.models import AccountStatus
+
+        account_service.list.return_value = [
+            SimpleNamespace(account_id="test", status=AccountStatus.SUSPENDED)
+        ]
+        account_service.has_unpersisted_suspensions.return_value = True
+
+        result = await receiver._cmd_halt(["재시도"])
+
+        assert "중지되었습니다" in result
+        account_service.suspend_all.assert_called_once_with(
+            reason="재시도", suspended_by="telegram"
+        )
 
     async def test_stop_requires_confirm(self, receiver):
         """stop 명령은 확인을 요구한다."""

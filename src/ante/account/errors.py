@@ -200,6 +200,17 @@ class AccountSuspendAllFailedError(AccountError):
         )
 
 
+class AccountSuspendNotPersistedError(AccountError):
+    """계좌 정지는 메모리에 적용됐지만 DB 쓰기가 실패함.
+
+    재시작하면 계좌가 활성으로 돌아온다. 같은 계좌에 정지를 다시 보내면 DB
+    쓰기를 다시 시도한다. 코드는 날 DB 예외와 같은 ``EXECUTION_ERROR`` 이고,
+    원인 예외는 ``__cause__``로 잇고 메시지에 싣지 않는다.
+    """
+
+    code: str = "EXECUTION_ERROR"
+
+
 class AccountActivateAllFailedError(AccountError):
     """일괄 활성화가 한 계좌의 실패에서 멈춤.
 

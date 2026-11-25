@@ -20,6 +20,7 @@ from ante.account.errors import (
     AccountReconcileNotApplicableError,
     AccountStructuralChangeRequiresStoppedServerError,
     AccountSuspendAllFailedError,
+    AccountSuspendNotPersistedError,
     BrokerReconnectFailedError,
     InvalidAccountIdError,
     InvalidBrokerConfigError,
@@ -216,6 +217,7 @@ class AccountService:
         self._brokers: dict[str, BrokerAdapter] = {}
         self._broker_locks: dict[str, asyncio.Lock] = {}
         self._runtime_started: bool = False
+        self._unpersisted_suspensions: set[str] = set()
 
     def mark_runtime_started(self) -> None:
         """서버 부팅 mutation을 모두 마쳤음을 표시한다 (invariant S1/S3).
@@ -227,6 +229,10 @@ class AccountService:
         멱등: 이미 True 상태에서 호출하면 no-op.
         """
         self._runtime_started = True
+
+    def has_unpersisted_suspensions(self) -> bool:
+        """이 실행에서 DB에 기록되지 않은 계좌 정지가 남아 있는지 돌려준다."""
+        return bool(self._unpersisted_suspensions)
 
     async def initialize(self) -> None:
         """스키마 생성 + DB에서 계좌 목록 로드."""
@@ -580,32 +586,77 @@ class AccountService:
             self._brokers[account_id] = new_broker
 
     async def suspend(self, account_id: str, reason: str, suspended_by: str) -> None:
-        """계좌 정지 (status -> SUSPENDED).
+        """계좌 정지 (status -> SUSPENDED). 미기록 정지면 상태 쓰기만 다시 한다.
 
         Raises:
             AccountNotFoundError: 계좌를 찾을 수 없음.
             AccountDeletedException: 삭제된 계좌.
+            AccountSuspendNotPersistedError: 정지는 적용됐지만 DB 쓰기가 실패함.
         """
         account = await self.get(account_id)
         if account.status == AccountStatus.DELETED:
             raise AccountDeletedException(
                 f"삭제된 계좌 '{account_id}'는 정지할 수 없습니다."
             )
-        if account.status == AccountStatus.SUSPENDED:
+        if (
+            account.status == AccountStatus.SUSPENDED
+            and account_id not in self._unpersisted_suspensions
+        ):
             from ante.account.errors import AccountAlreadySuspendedError
 
             raise AccountAlreadySuspendedError(
                 f"이미 정지된 계좌입니다: '{account_id}'"
             )
-        status = _transition_status(account, AccountStatus.SUSPENDED)
+        if account.status == AccountStatus.ACTIVE:
+            status = _transition_status(account, AccountStatus.SUSPENDED)
+        else:
+            status = AccountStatus.SUSPENDED
         account.updated_at = clock.now(UTC)
 
-        await self._db.execute(
-            "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
-            (status, account.updated_at.isoformat(), account_id),
-        )
-
         from ante.eventbus.events import AccountSuspendedEvent, NotificationEvent
+
+        try:
+            await self._db.execute(
+                "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
+                (status, account.updated_at.isoformat(), account_id),
+            )
+        except Exception as exc:
+            self._unpersisted_suspensions.add(account_id)
+            logger.error(
+                "계좌 정지 DB 기록 실패 (메모리 정지 유지): %s",
+                account_id,
+                exc_info=True,
+            )
+            await self._eventbus.publish(
+                AccountSuspendedEvent(
+                    account_id=account_id,
+                    reason=reason,
+                    suspended_by=suspended_by,
+                )
+            )
+            await self._eventbus.publish(
+                NotificationEvent(
+                    level="critical",
+                    title="계좌 정지 기록 실패 (킬 스위치)",
+                    message=(
+                        f"계좌 `{account_id}` 정지(SUSPENDED)는 적용됐지만 "
+                        "DB에 기록되지 않았습니다.\n"
+                        "재시작하면 활성으로 돌아옵니다. 정지를 다시 보내 기록하세요.\n"
+                        f"사유: {reason}\n"
+                        f"실행: `{suspended_by}`"
+                    ),
+                    category="system",
+                )
+            )
+            raise AccountSuspendNotPersistedError(
+                f"계좌 '{account_id}'의 정지는 적용됐지만 DB에 기록되지 않았습니다. "
+                "재시작하면 활성으로 돌아옵니다. 정지를 다시 보내면 기록을 다시 "
+                "시도합니다."
+            ) from exc
+        except BaseException:
+            self._unpersisted_suspensions.add(account_id)
+            raise
+        self._unpersisted_suspensions.discard(account_id)
 
         await self._eventbus.publish(
             AccountSuspendedEvent(
@@ -661,6 +712,7 @@ class AccountService:
         except BaseException:
             _restore_status(account, previous_status, previous_updated_at)
             raise
+        self._unpersisted_suspensions.discard(account_id)
 
         from ante.eventbus.events import AccountActivatedEvent, NotificationEvent
 
@@ -711,6 +763,7 @@ class AccountService:
         except BaseException:
             _restore_status(account, previous_status, previous_updated_at)
             raise
+        self._unpersisted_suspensions.discard(account_id)
 
         self._accounts.pop(account_id, None)
         self._brokers.pop(account_id, None)
@@ -763,14 +816,17 @@ class AccountService:
             if account.status == AccountStatus.DELETED:
                 continue
             previous_status = account.status.value
-            if account.status == AccountStatus.ACTIVE:
+            if (
+                account.status == AccountStatus.ACTIVE
+                or account_id in self._unpersisted_suspensions
+            ):
                 try:
                     await self.suspend(account_id, reason, suspended_by)
                 except Exception:
                     logger.exception("전체 계좌 정지 중 계좌 정지 실패: %s", account_id)
                     failed.append(account_id)
                     continue
-                changed = True
+                changed = previous_status == AccountStatus.ACTIVE.value
             else:
                 changed = False
             results.append(
