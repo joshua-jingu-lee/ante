@@ -15,7 +15,7 @@
 ## 2. 테스트 구조
 
 테스트는 `tests/` 아래에 단위(`unit/`), 통합(`integration/`), e2e(`e2e/`), 공용
-픽스처(`fixtures/`)로 구성된다. `unit/`은 규모가 커지면서 도메인별 서브패키지로도 나뉜다.
+픽스처(`fixtures/`)로 구성된다. `unit/`은 규모가 커지면서 도메인별 서브패키지로도 나뉜다. 워크플로 스크립트는 `.github/scripts/*.js`로 두고 같은 자리의 `*.test.js`를 CI `lint` 잡이 `node --test`로 돌리며, post-merge 워크플로의 배선은 `tests/unit/test_post_merge_workflow.py`가 잠근다.
 
 ```
 tests/
