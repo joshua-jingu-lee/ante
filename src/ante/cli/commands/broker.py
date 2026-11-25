@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
+from datetime import UTC
 from typing import Any, cast
 
 import click
@@ -15,6 +16,8 @@ from ante.cli.formatter import CommandResult, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts.ipc_client_errors import IPCServerNotRunningError
+from ante.core import clock
+from ante.core.time import default_order_history_range
 
 
 @click.group()
@@ -307,12 +310,13 @@ def order_history(
         account_id, fmt, context="cli.broker.order-history"
     )
 
+    default_start, default_end = default_order_history_range(clock.now(UTC))
     reject_inverted_date_range(
-        from_date,
-        to_date,
+        from_date or default_start.isoformat(),
+        to_date or default_end.isoformat(),
         fmt,
-        from_label="조회 시작일",
-        to_label="조회 종료일",
+        from_label="조회 시작일" if from_date else "기본 조회 시작일",
+        to_label="조회 종료일" if to_date else "기본 조회 종료일",
     )
 
     extra: dict[str, Any] = {}
