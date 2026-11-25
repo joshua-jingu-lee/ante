@@ -2,7 +2,7 @@
 
 > Parent epic: [#1818 CLI offline service composition factory & runtime guard SSOT](https://github.com/joshua-jingu-lee/ante/issues/1818)
 > Owning issue: [#1854 CLI offline service factory 계약 및 read_only 초기화 정책 정리](https://github.com/joshua-jingu-lee/ante/issues/1854)
-> Status: 1.1 normative — CLI `offline` / `cold-path` execution class가 사용하는 service composition factory의 책임/비책임, read_only 초기화 정책, ctx 기반 path resolution 정책의 단일 SSOT. 1.1(#1974 R2, 2026-05-31 KST)에서 §2를 amend해 `read_only=True`에 옵션 A(`Database` SQLite read-only 연결 모드)를 옵션 B와 함께 normative로 채택했다.
+> Status: 1.1 normative — CLI `offline` / `cold-path` execution class가 사용하는 service composition factory의 책임/비책임, read_only 초기화 정책, ctx 기반 path resolution 정책의 단일 SSOT. 1.1(#1974 R2, 2026-05-31 KST)에서 §2를 amend해 read-only 명령에 옵션 A(`Database` SQLite read-only 연결 모드, factory 인자 `read_only=True`)를 옵션 B(caller의 `initialize()` skip)와 함께 normative로 채택했다.
 > Scope: 본 문서는 SSOT spec. production factory 구현(`open_cli_db`)은 [#1855](https://github.com/joshua-jingu-lee/ante/issues/1855)에서 도입되어 `src/ante/cli/db_context.py`에 존재하며, 옵션 A(`Database` read-only 연결 모드)는 [#1974](https://github.com/joshua-jingu-lee/ante/issues/1974) R2에서 `src/ante/core/database.py`에 도입된다.
 > Migration order: [docs/specs/contracts/README.md#migration-domain-order](README.md#migration-domain-order)와 [#1820](https://github.com/joshua-jingu-lee/ante/issues/1820)에서 SSOT로 결정된 `account → member → approval → bot → treasury → broker → strategy → 기타` 순서를 따른다. 본 문서는 본 순서를 **재선언하지 않는다**.
 
@@ -216,8 +216,9 @@ PRAGMA가 쓰기를 요구하기 때문이다. 따라서 옵션 A를 normative�
 `Database`에 backward-compatible `read_only` 연결 모드를 도입한다. 본 amend의
 구체 정책은 §2.1 (b)에 lock한다.
 
-- 옵션 B와 옵션 A는 상호배타가 아니라 **함께** `read_only=True`의 의미를
-  구성한다(§2.1).
+- 옵션 B와 옵션 A는 상호배타가 아니라 read-only 명령에 **함께** 적용된다 —
+  옵션 A는 factory 인자 `read_only=True`가 열고, 옵션 B는 같은 명령의 caller가
+  지킨다(§2.1).
 - 옵션 A는 `Database` API에 keyword-only `read_only: bool = False`를 추가하되,
   `read_only=False` 경로를 byte-for-byte 보존해 기존 소비자에 무영향이다.
 
