@@ -584,7 +584,7 @@ def _drop_warnings(caplog: Any) -> list[logging.LogRecord]:
     return [
         r
         for r in caplog.records
-        if r.name == DROP_LOGGER and r.levelno == logging.WARNING
+        if r.name == DROP_LOGGER and r.levelno >= logging.WARNING
     ]
 
 

@@ -855,7 +855,7 @@ def _dropped_notices(cap: _Captured) -> list[NotificationEvent]:
     ],
 )
 async def test_second_broken_item_of_the_same_type_is_dropped(
-    db, broken: dict[str, Any]
+    db, caplog, broken: dict[str, Any]
 ) -> None:
     world = await _startup_world(
         db,
@@ -864,10 +864,25 @@ async def test_second_broken_item_of_the_same_type_is_dropped(
     )
     assert world.engine().rules_unavailable_cause == "invalid_item"
     cap = _Captured(world.bus)
+    caplog.set_level(logging.DEBUG, logger=DROPPED_LOGGER)
 
     response = await _ipc_update(world, "daily_loss_limit", dict(LIMIT))
 
     assert response["status"] == "ok", response
+    judged = [
+        r
+        for r in caplog.records
+        if r.name == DROPPED_LOGGER and r.levelno == logging.DEBUG
+    ]
+    assert len(judged) == (0 if "priority" in broken else 1)
+    for record in judged:
+        assert record.exc_info is not None
+        assert "index=1" in record.getMessage()
+    drop_log = "\n".join(
+        caplog.handler.format(r) for r in caplog.records if r.name == DROPPED_LOGGER
+    )
+    for marker in (str(MARK), "9.5", "987654"):
+        assert marker not in drop_log
     assert json.loads(await world.raw() or "null") == [STORED]
     assert world.engine().rules_unavailable is False
     assert world.result(0.02) == RuleResult.REJECT

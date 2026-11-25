@@ -70,13 +70,22 @@ def _priority_errors(params: dict[str, Any]) -> list[str]:
     return ["priority must be an integer"]
 
 
-def _is_unwritable(item: Any, is_first: bool, create_rule: Callable[..., Any]) -> bool:
+def _is_unwritable(
+    index: int, item: Any, is_first: bool, create_rule: Callable[..., Any]
+) -> bool:
     """Return whether a stored dict item blocks and ``rule update`` cannot fix it."""
     if is_first:
         return False
     try:
         rule = create_rule(item)
     except Exception:
+        rule_type = item.get("type")
+        logger.debug(
+            "저장된 규칙 항목을 규칙으로 만들 수 없다고 판정: index=%d, rule_type=%s",
+            index,
+            rule_type if isinstance(rule_type, str) else None,
+            exc_info=True,
+        )
         return True
     if rule is None or "priority" not in item:
         return False
@@ -101,7 +110,7 @@ def _drop_unwritable_items(
             dropped.append((index, item))
             continue
         seen_types.add(rule_type)
-        if _is_unwritable(item, is_first, create_rule):
+        if _is_unwritable(index, item, is_first, create_rule):
             dropped.append((index, item))
             continue
         kept.append(item)
