@@ -59,6 +59,7 @@ class _Harness:
         self.audit_logger = MagicMock()
         self.audit_logger.log = AsyncMock(return_value=None)
         self.rule_update = AsyncMock(side_effect=lambda **_: dict(RULE_RESULT))
+        self.config = MagicMock(name="static-config")
         registry = CommandRegistry()
         register_all_handlers(registry)
         services = ServiceRegistry(
@@ -71,6 +72,7 @@ class _Harness:
             eventbus=MagicMock(),
             strategy_registry=MagicMock(),
             audit_logger=self.audit_logger,
+            config=self.config,
         )
         self.services = services
         self.server = IPCServer("/tmp/unused.sock", services, registry)
@@ -245,6 +247,7 @@ async def test_rule_update_passes_every_field_and_audits() -> None:
         enabled=False,
         params={"max_loss_pct": 3.5, "nested": {"k": [1, "v"]}},
         changed_by=ACTOR,
+        config=harness.config,
         audit_logger=None,
         eventbus=harness.services.eventbus,
     )

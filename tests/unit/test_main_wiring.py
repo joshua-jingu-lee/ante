@@ -604,6 +604,15 @@ async def test_ipc_bot_positions_reports_filled_position(
     assert [(p["symbol"], p["quantity"]) for p in positions] == [("005930", 10.0)]
 
 
+async def test_ipc_service_registry_carries_the_static_config_loaded_by_main(
+    assemble: AssembleFn,
+) -> None:
+    """IPC rule.update 가 기동이 읽은 같은 정적 설정의 seed 를 읽도록 넘긴다(#3043)."""
+    asm = await assemble([])
+    assert asm.s.ipc_server is not None
+    assert asm.s.ipc_server._service_registry.config is asm.s.config
+
+
 async def test_ipc_signal_connect_channel_is_closed_by_bot_manager(
     assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
 ) -> None:

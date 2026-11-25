@@ -1828,6 +1828,7 @@ async def _init_ipc(s: Services) -> None:
         member_service=s.member_service,
         trade_service=s.trade_service,
         signal_channel_registry=s.signal_channel_registry,
+        config=s.config,
     )
 
     command_registry = CommandRegistry()

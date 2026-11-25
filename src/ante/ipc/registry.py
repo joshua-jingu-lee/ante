@@ -700,6 +700,7 @@ async def _handle_rule_update(
         enabled=request.enabled,
         params=request.params,
         changed_by=actor,
+        config=svc.config,
         audit_logger=None,
         eventbus=svc.eventbus,
     )
