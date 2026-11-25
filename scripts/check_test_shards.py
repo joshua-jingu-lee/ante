@@ -93,8 +93,6 @@ def file_weights(
     if not record:
         return None
     known = sorted(path for path in file_counts if path in record)
-    if not known:
-        return None
     seconds = sum(record[path] for path in known)
     count = sum(file_counts[path] for path in known)
     if count == 0:
