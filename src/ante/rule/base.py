@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 
 
 class RuleResult(StrEnum):
@@ -97,8 +97,15 @@ class EvaluationResult:
     actions: list[RuleAction] = field(default_factory=list)
 
 
+COMMON_CONFIG_KEYS: frozenset[str] = frozenset(
+    {"type", "id", "name", "description", "priority", "enabled"}
+)
+
+
 class Rule(ABC):
     """룰 추상 기본 클래스."""
+
+    CONFIG_KEYS: ClassVar[frozenset[str]] = frozenset()
 
     def __init__(self, rule_id: str, config: dict[str, Any]) -> None:
         self.rule_id = rule_id
@@ -124,6 +131,24 @@ class Rule(ABC):
             에러 메시지 리스트. 비어 있으면 유효.
         """
         return []
+
+    @classmethod
+    def config_errors(cls, cfg: dict[str, Any]) -> list[str]:
+        """룰 항목 config의 오류를 정해진 순서로 돌려준다.
+
+        모르는 key(공통 key와 ``CONFIG_KEYS`` 밖, 값은 싣지 않는다), 문자열이 아닌
+        ``id``, ``validate_config`` 의 결과 순이다. 비어 있으면 유효.
+        """
+        rule_type = cfg.get("type")
+        rule_keys = ", ".join(sorted(cls.CONFIG_KEYS))
+        unknown = sorted(cfg.keys() - COMMON_CONFIG_KEYS - cls.CONFIG_KEYS, key=repr)
+        errors = [
+            f"{key!r} is not a config key of {rule_type} (rule keys: {rule_keys})"
+            for key in unknown
+        ]
+        if "id" in cfg and not isinstance(cfg["id"], str):
+            errors.append("id must be a string")
+        return errors + cls.validate_config(cfg)
 
     def is_applicable(self, context: RuleContext) -> bool:
         """이 룰이 해당 상황에 적용되는지 확인."""

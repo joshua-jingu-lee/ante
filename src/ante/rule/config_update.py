@@ -113,7 +113,9 @@ async def update_account_rule_config(
 
     _reject_rule_item_keys(params)
     rule_class = RULE_REGISTRY[rule_type]
-    validation_errors = _priority_errors(params) + rule_class.validate_config(params)
+    validation_errors = _priority_errors(params) + rule_class.config_errors(
+        item_to_rule_config(rule_type, True, params)
+    )
     if validation_errors:
         raise ValueError(f"룰 config 검증 실패: {'; '.join(validation_errors)}")
 
