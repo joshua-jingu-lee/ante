@@ -12,7 +12,8 @@
 부르는 곳은 ``activate``·``delete`` 의 ``except BaseException`` 처리기뿐이다.
 그 처리기는 ``SET status`` UPDATE를 감싼 ``try`` 에 달려 있고 마지막 문이
 인자 없는 ``raise`` 다. 되돌릴 값은 전이 호출보다 앞에서 잡는다. ``suspend``
-에는 되돌리기도 ``try`` 도 없다(실패 정책은 유지관리자 결정 대기).
+에는 되돌리기가 없고, ``SET status`` UPDATE를 감싼 ``try`` 의 처리기는
+``.status`` 를 쓰지 않는다(#2858: 쓰기가 실패해도 정지를 유지한다).
 
 **생성자 키워드**: 이름이 ``status`` 인 키워드 인자를 가진 호출이다. 감싸는
 함수와 호출 대상 이름의 쌍이 계좌는 ``_row_to_account`` 1곳, 멤버는
@@ -342,13 +343,10 @@ def test_restore_is_called_only_in_activate_and_delete_failure_handlers():
         assert captures[0].lineno < transition.lineno, name
 
 
-def test_suspend_does_not_restore_until_maintainer_decides_failure_policy():
+def test_suspend_write_failure_never_restores_status():
     tree = _parse(_ACCOUNT)
     suspend = _async_methods(tree)["suspend"]
-    reason = (
-        "suspend 실패 정책은 유지관리자 결정 대기(#2667): 결정 전까지 "
-        "suspend에 되돌리기나 SET status UPDATE를 감싸는 try를 넣지 않는다"
-    )
+    reason = "#2858: suspend는 상태 쓰기가 실패해도 정지를 되돌리지 않는다"
     restores = [
         node
         for node in ast.walk(suspend)
@@ -362,7 +360,18 @@ def test_suspend_does_not_restore_until_maintainer_decides_failure_policy():
         if isinstance(node, ast.Try)
         and any(update in list(ast.walk(stmt)) for stmt in node.body)
     ]
-    assert wrapping == [], reason
+    assert len(wrapping) == 1, reason
+    handler_writes = [
+        ast.unparse(node)
+        for handler in wrapping[0].handlers
+        for stmt in handler.body
+        for node in _status_assignments(ast.Module(body=[stmt], type_ignores=[]))
+    ]
+    assert handler_writes == [], reason
+    assert [ast.unparse(h.type) for h in wrapping[0].handlers if h.type] == [
+        "Exception",
+        "BaseException",
+    ], reason
 
 
 def _guards_before_transition(method: ast.AsyncFunctionDef) -> list[str]:
