@@ -445,6 +445,7 @@ class TradeRecorder:
             commission=float(row.get("commission", 0)),
             timestamp=datetime.fromisoformat(ts) if ts else None,
             order_id=row.get("order_id"),
+            exchange=row.get("exchange") or "KRX",
             account_id=row["account_id"],
             currency=row.get("currency", "KRW"),
         )
