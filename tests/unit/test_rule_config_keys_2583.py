@@ -748,6 +748,7 @@ def test_startup_notice_names_the_new_causes_without_keys() -> None:
     message = _RULES_UNAVAILABLE_MESSAGES["invalid_item"]
     assert "규칙이 읽지 않는 키" in message
     assert "범위 밖 값" in message
+    assert "문자열이 아닌 id" in message
     assert "ante rule update <rule_type> --account {id}" in message
     assert "max_daily_loss" not in message
 
@@ -793,6 +794,21 @@ async def test_rule_update_of_that_type_releases_unknown_key_block(db) -> None:
     response = await _ipc_update(world, "daily_loss_limit", dict(LIMIT))
 
     assert response["status"] == "ok", response
+    assert world.engine().rules_unavailable is False
+    assert world.result(0.02) == RuleResult.REJECT
+
+
+async def test_rule_update_of_that_type_releases_non_string_id_block(db) -> None:
+    world = await _startup_world(
+        db, "dynamic", [{"type": "daily_loss_limit", "id": 987654}]
+    )
+    assert world.engine().rules_unavailable_cause == "invalid_item"
+
+    response = await _ipc_update(world, "daily_loss_limit", dict(LIMIT))
+
+    assert response["status"] == "ok", response
+    stored = json.loads(await world.raw() or "null")
+    assert all("id" not in item for item in stored)
     assert world.engine().rules_unavailable is False
     assert world.result(0.02) == RuleResult.REJECT
 
