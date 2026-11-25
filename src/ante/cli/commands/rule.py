@@ -340,9 +340,22 @@ def rule_update(
 
     def _lines() -> tuple[str, ...]:
         rule_item = result.get("rule", {})
-        return (
+        lines = (
             f"룰 수정 완료: {result.get('account_id')} "
             f"{rule_item.get('type', rule_type)} enabled={rule_item.get('enabled')}",
+        )
+        dropped = result.get("dropped_items") or []
+        if not dropped:
+            return lines
+        positions = ", ".join(
+            f"stored_index={d.get('stored_index')} rule_type={d.get('rule_type')!r}"
+            for d in dropped
+        )
+        return (
+            *lines,
+            f"저장값에서 쓸 수 없는 항목 {len(dropped)}건을 버림: {positions} "
+            f"(원문은 ante config history accounts.{result.get('account_id')}.rules의 "
+            "이전 값, seed에서 읽었으면 설정 파일에 남음)",
         )
 
     return CommandResult(data=result, text=_lines)
