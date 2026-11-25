@@ -28,13 +28,12 @@ fallback으로만 사용한다. 웹/API에서 룰을 수정하면 `dynamic_confi
     {
       "type": "daily_loss_limit",
       "enabled": true,
-      "max_daily_loss_rate": 0.05,
-      "action": "halt"
+      "max_daily_loss_percent": 0.05
     },
     {
       "type": "total_exposure_limit",
       "enabled": true,
-      "max_exposure_rate": 0.8
+      "max_exposure_percent": 0.8
     }
   ]
 }
@@ -73,6 +72,10 @@ CLI `rule update`는 stored rules만 갱신한다. effective rules의 별도 노
 params의 `priority`는 규칙의 평가 순서([03-two-layer-evaluation.md](03-two-layer-evaluation.md))로
 항목에 저장되며, 정수(bool 제외)가 아니면 저장하지 않고 거부한다.
 
+params에는 공통 key(`name`·`description`·`priority`)와 그 규칙이 읽는 key만 담을 수 있다. 그 밖의
+key(오타, 다른 규칙의 key 등)가 있으면 저장하지 않고 거부한다. 규칙별 key는
+[06-rule-catalog.md](06-rule-catalog.md)에 있고, 정본은 코드다.
+
 ### Static TOML seed
 
 정적 TOML은 운영 중 룰 수정의 저장소가 아니다. 초기 계좌 seed나 복구용 기본값이 필요할
@@ -81,14 +84,14 @@ params의 `priority`는 규칙의 평가 순서([03-two-layer-evaluation.md](03-
 ```toml
 [accounts.domestic]
 rules = [
-  { type = "daily_loss_limit", enabled = true, max_daily_loss_rate = 0.05, action = "halt" },
-  { type = "total_exposure_limit", enabled = true, max_exposure_rate = 0.8 },
+  { type = "daily_loss_limit", enabled = true, max_daily_loss_percent = 0.05 },
+  { type = "total_exposure_limit", enabled = true, max_exposure_percent = 0.8 },
 ]
 
 [accounts.us-stock]
 rules = [
-  { type = "daily_loss_limit", enabled = true, max_daily_loss_rate = 0.03, action = "halt" },
-  { type = "total_exposure_limit", enabled = true, max_exposure_rate = 0.7 },
+  { type = "daily_loss_limit", enabled = true, max_daily_loss_percent = 0.03 },
+  { type = "total_exposure_limit", enabled = true, max_exposure_percent = 0.7 },
 ]
 ```
 

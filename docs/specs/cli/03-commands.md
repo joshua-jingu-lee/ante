@@ -476,8 +476,8 @@ ante rule info <rule_id> --account <account_id>           # 룰 상세
 ante rule update <rule_type> --account <account_id> [--enabled|--disabled] [--param key=value ...] [--params-json '{...}']  # 룰 설정 수정
 ```
 
-`rule update`의 `--param`·`--params-json`에 `type`·`id`·`enabled`가 있거나 `priority`가
-정수가 아니면 저장하지 않고 거부한다(파라미터 검증 실패와 같은 오류 출구). 상세:
+`rule update`의 `--param`·`--params-json`에 `type`·`id`·`enabled`나 규칙이 읽지 않는 key가
+있거나 `priority`가 정수가 아니면 저장하지 않고 거부한다(파라미터 검증 실패와 같은 오류 출구). 상세:
 [rule-engine/09-rule-management.md](../rule-engine/09-rule-management.md#stored-rules-vs-effective-rules).
 
 `rule list`/`rule info` 는 `_create_rule_engine` → `RuleEngine.__init__`
