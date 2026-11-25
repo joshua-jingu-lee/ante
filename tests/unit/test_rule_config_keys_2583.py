@@ -1198,3 +1198,87 @@ async def test_unregistered_type_is_dropped_by_direct_rule_update(db, caplog) ->
     assert len(warnings) == 1
     assert "stored_index=1" in warnings[0].getMessage()
     assert cap.notifications == []
+
+
+# ── 응답의 dropped_items (#3041) ─────────────────────────────────────────────
+
+PARAM_MARKERS = (str(MARK), "9.5", "987654")
+
+
+async def _update_by(path: str, world: _World, rule_type: str) -> dict[str, Any]:
+    params = dict(EXPOSURE) if rule_type == "total_exposure_limit" else dict(LIMIT)
+    if path == "direct":
+        return await world.update(rule_type, params)
+    response = await _ipc_update(world, rule_type, params)
+    assert response["status"] == "ok", response
+    return dict(response["result"])
+
+
+@pytest.mark.parametrize("path", ["direct", "ipc"])
+@pytest.mark.parametrize(
+    ("broken", "rule_type"),
+    [
+        pytest.param(
+            {"type": "daily_loss_limit", "max_daily_loss_rate": MARK},
+            "daily_loss_limit",
+            id="second-of-registered-type",
+        ),
+        pytest.param(987654, None, id="non-dict"),
+        pytest.param({"type": ["x"], "v": 9.5}, None, id="unhashable-type"),
+        pytest.param({"type": "nope", "v": MARK}, "nope", id="unregistered-type"),
+        pytest.param({"max_daily_loss_percent": 9.5}, None, id="no-type"),
+    ],
+)
+async def test_rule_update_response_reports_dropped_items(
+    db, path: str, broken: Any, rule_type: str | None
+) -> None:
+    world = await _unregistered_world(
+        db, "dynamic", [{"type": "daily_loss_limit", **LIMIT}, broken]
+    )
+
+    result = await _update_by(path, world, "total_exposure_limit")
+
+    assert result["dropped_items"] == [{"stored_index": 1, "rule_type": rule_type}]
+    assert json.loads(await world.raw() or "null") == [
+        {"type": "daily_loss_limit", **LIMIT},
+        STORED_EXPOSURE,
+    ]
+    dumped = json.dumps(result)
+    for marker in PARAM_MARKERS:
+        assert marker not in dumped
+
+
+@pytest.mark.parametrize("path", ["direct", "ipc"])
+async def test_rule_update_response_without_drops_has_empty_list(
+    world: _World, path: str
+) -> None:
+    result = await _update_by(path, world, "daily_loss_limit")
+
+    assert result["dropped_items"] == []
+    assert set(result) == {"account_id", "rule_type", "rule", "dropped_items"}
+
+
+async def test_seed_drop_reports_the_seed_positions(db) -> None:
+    world = _World(db)
+    await world.dyn.initialize()
+    seed = [{"type": "nope", "v": MARK}, {"type": "daily_loss_limit", **LIMIT}, 5]
+
+    result = await update_account_rule_config(
+        account_service=world.account_service,
+        dynamic_config=world.dyn,
+        account_id="acc1",
+        rule_type="total_exposure_limit",
+        params=dict(EXPOSURE),
+        changed_by="test",
+        config=_StaticSeed({KEY1: seed}),
+    )
+
+    assert result["dropped_items"] == [
+        {"stored_index": 0, "rule_type": "nope"},
+        {"stored_index": 2, "rule_type": None},
+    ]
+    assert json.loads(await world.raw() or "null") == [
+        {"type": "daily_loss_limit", **LIMIT},
+        STORED_EXPOSURE,
+    ]
+    assert str(MARK) not in json.dumps(result)
