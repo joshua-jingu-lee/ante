@@ -563,7 +563,7 @@ drift다.
 | 상황 | 동작 |
 |------|------|
 | 서버 미기동 (소켓 없음·연결 거부) | 런타임 전용 커맨드는 `IPCClient`가 `ServerNotRunningError` 발생. CLI는 `"서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."` 출력 후 종료. member maintenance fallback 대상은 IPC 실패 전/후 직접 MemberService 경로로 전환 가능 |
-| 타임아웃 (연결·응답 단계, 기본 30초) | `IPCClient`가 `IPCTimeoutError` 발생. CLI는 `"서버 응답 시간 초과"` 출력 후 종료 |
+| 타임아웃 (연결·응답 단계, 기본 30초) | `IPCClient`가 `IPCTimeoutError` 발생. CLI는 `"서버 응답 시간 초과"` 출력 후 종료(비밀을 발급·재발급하는 명령 넷은 안내를 덧붙인다 — [envelopes.md](../contracts/envelopes.md)) |
 | 그 밖의 연결 실패 (권한 거부 등) | 감싸지 않고 올려 명령의 미분류 예외 출구로 끝난다(기본 `EXECUTION_ERROR`. `rule update`·`strategy set-status`는 각각의 도메인 코드). 폴백 없음 |
 | 서버 내부 에러 | 응답 `status: "error"` 반환. CLI는 `error.code` + `error.message` 출력 |
 | 미등록 커맨드 | `_dispatch`에서 `UNKNOWN_COMMAND` 에러 응답 |
