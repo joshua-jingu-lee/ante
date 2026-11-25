@@ -10,11 +10,16 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 
-from ante.core.time import InvalidIsoDateError, format_utc, iso_to_kis_date
+from ante.core.time import (
+    InvalidIsoDateError,
+    default_order_history_range,
+    format_utc,
+    iso_to_kis_date,
+)
 
 
 def test_format_utc_replaces_plus_zero_offset_with_z() -> None:
@@ -127,3 +132,40 @@ def test_iso_to_kis_date_output_has_no_separator() -> None:
     assert converted.isdigit()
     # 사전순 비교가 의도대로 동작함을 직접 확인.
     assert converted >= "20260311"
+
+
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        pytest.param(
+            datetime(2026, 6, 11, 3, 0, tzinfo=UTC),
+            (date(2026, 6, 4), date(2026, 6, 11)),
+            id="kst-noon",
+        ),
+        pytest.param(
+            datetime(2026, 6, 11, 14, 59, 59, tzinfo=UTC),
+            (date(2026, 6, 4), date(2026, 6, 11)),
+            id="just-before-kst-midnight",
+        ),
+        pytest.param(
+            datetime(2026, 6, 11, 15, 0, tzinfo=UTC),
+            (date(2026, 6, 5), date(2026, 6, 12)),
+            id="kst-midnight",
+        ),
+        pytest.param(
+            datetime(2026, 3, 3, 9, 0, tzinfo=timezone(timedelta(hours=9))),
+            (date(2026, 2, 24), date(2026, 3, 3)),
+            id="across-month",
+        ),
+    ],
+)
+def test_default_order_history_range_is_the_kst_week_ending_today(
+    now: datetime, expected: tuple[date, date]
+) -> None:
+    """#3057: 기본 구간은 「지금」의 KST 날짜와 그 달력 7일 전이다."""
+    assert default_order_history_range(now) == expected
+
+
+def test_default_order_history_range_rejects_naive_datetime() -> None:
+    with pytest.raises(ValueError, match="tz-aware"):
+        default_order_history_range(datetime(2026, 6, 11, 12, 0))

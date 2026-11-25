@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 
 
 def format_utc(dt: datetime) -> str:
@@ -62,4 +62,24 @@ def iso_to_kis_date(value: str | None) -> str | None:
     return value.replace("-", "")
 
 
-__all__ = ["InvalidIsoDateError", "format_utc", "iso_to_kis_date"]
+_KST = timezone(timedelta(hours=9))
+
+
+def default_order_history_range(now: datetime) -> tuple[date, date]:
+    """``now``의 KST 날짜 기준 주문 이력 기본 구간 ``(오늘 - 7일, 오늘)``.
+
+    시계를 읽지 않는다. ``now``는 tz-aware여야 하며 naive이면 ``ValueError``.
+    """
+    if now.tzinfo is None or now.tzinfo.utcoffset(now) is None:
+        msg = f"default_order_history_range는 tz-aware datetime만 받는다. got {now!r}"
+        raise ValueError(msg)
+    today = now.astimezone(_KST).date()
+    return today - timedelta(days=7), today
+
+
+__all__ = [
+    "InvalidIsoDateError",
+    "default_order_history_range",
+    "format_utc",
+    "iso_to_kis_date",
+]
