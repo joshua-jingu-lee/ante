@@ -70,8 +70,8 @@ ante approval reopen <id> \
 사용자가 CLI에서 직접 승인·거절할 때 사용. Dashboard와 외부 메신저가 주요 경로이지만, CLI도 지원한다.
 
 ```
-ante approval approve <id>
-ante approval reject <id> --reason "현 시점 리스크 과다"
+ante approval approve <id> [--format json]
+ante approval reject <id> --reason "현 시점 리스크 과다" [--format json]
 ```
 
 ### `ante approval audit-types` (#1472 SPLIT-D)
