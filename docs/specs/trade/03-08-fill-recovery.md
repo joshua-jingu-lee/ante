@@ -25,8 +25,11 @@ DB 트랜잭션으로 수행한다. 빠른 경로(실시간 체결 통보 스트
   유일). CAS는 `WHERE order_id=:oid` 단일 행이라 모호성 없음.
 - `(account_id, broker_order_id, submitted_date)` = UNIQUE 인덱스 + 조회 키.
   KIS `odno`(broker_order_id)가 계좌 간/paper·live/영업일 재사용으로 충돌할 수
-  있어 broker_order_id 단독 키는 쓰지 않는다. 조회는 non-terminal/same-day로
-  한정해 일자 재사용 충돌을 닫는다.
+  있어 broker_order_id 단독 키는 쓰지 않는다. 조회는 「열린 행이면서
+  `submitted_date <= 관측일`」 또는 「상태와 무관하게 `submitted_date == 관측일`」인
+  행 가운데 `submitted_date`가 가장 늦은 1건으로 한정해 일자 재사용 충돌을 닫는다.
+  그래서 취소·만료 등으로 종결된 행도 같은 영업일의 체결은 이어 받는다
+  ([broker-adapter/18-fill-recovery.md](../broker-adapter/18-fill-recovery.md) §4.1).
 
 ### 퍼블릭 메서드
 
@@ -34,11 +37,12 @@ DB 트랜잭션으로 수행한다. 빠른 경로(실시간 체결 통보 스트
 |---|---|---|
 | `initialize` | `None` | 스키마 생성 |
 | `open(order_id, account_id, bot_id, strategy_id, broker_order_id, symbol, side, order_type, ordered_qty, submitted_date)` | `None` | `OrderSubmittedEvent`로 추적 주문 seed |
-| `record_fill(order_id, new_cumulative, avg_price)` | `RecordFillResult(delta, confirmed_cumulative)` | 원자 CAS advance. `delta = new_cumulative - 이전 recorded`; `<=0`이면 `delta=0`(no-op), `>0`이면 recorded 갱신 후 delta. `confirmed_cumulative` = CAS `RETURNING recorded_filled_qty` 확정값(체결 이벤트 outbox `fill_dedup_key` 산출 기준, #1949). **FillApplier 트랜잭션 내에서만 호출** |
+| `record_fill(order_id, new_cumulative, avg_price)` | `RecordFillResult(delta, confirmed_cumulative, new_status)` | 원자 CAS advance. `delta = new_cumulative - 이전 recorded`; `<=0`이면 `delta=0`(no-op), `>0`이면 recorded 갱신 후 delta. 트랜잭션 안에서 읽은 상태가 종결이면 status와 `terminal_at`을 유지하고(`new_status`는 그 종결 상태) `WARNING` 로그를 남긴다. 종결된 행을 열린 상태로 되돌리지 않는다. `confirmed_cumulative` = CAS `RETURNING recorded_filled_qty` 확정값(체결 이벤트 outbox `fill_dedup_key` 산출 기준, #1949). **FillApplier 트랜잭션 내에서만 호출** |
 | `mark_terminal(order_id, status)` | `None` | 취소·거부·실패·만료 종료 표기. 열린 상태(`open`·`partially_filled`)의 행만 갱신하고, 이미 종결된 행(`filled` 포함)은 바꾸지 않는다(첫 종결이 이긴다) |
 | `get_open_orders(account_id)` | `list[OrderTrackerRecord]` | 계좌의 non-terminal 주문 |
 | `get_open_orders_for(account_id, bot_id, symbol, side)` | `list[OrderTrackerRecord]` | `(account_id, bot_id, symbol, side)` 의 non-terminal(open/partially_filled) 주문. PositionReconciler self-check 의 capacity 산출용 — `side="buy"`(#1950 외부 매수 후보·#2352 미귀속 보유 판정), `side="sell"`(#2351 외부 청산/일부 매도 후보 — 미반영 self 매도 capacity). `side` 필터로 buy/sell capacity 가 혼입되지 않는다 |
-| `lookup_order_id(account_id, broker_order_id, submitted_date)` | `str \| None` | 관측 → 내부 order_id 매핑(non-terminal/same-day) |
+| `lookup_order_id(account_id, broker_order_id, submitted_date)` | `str \| None` | 관측 → 내부 order_id 매핑(열린 행은 관측일 이하, 종결된 행은 같은 영업일만. 가장 늦은 `submitted_date` 1건) |
+| `get_late_fill_watch(account_id, terminal_since)` | `list[OrderTrackerRecord]` | `terminal_at >= terminal_since`(UTC)인 `cancelled`·`expired` 가운데 `recorded_filled_qty < ordered_qty`인 행. 체결 폴의 늦은 체결 감시 대상([broker-adapter/18-fill-recovery.md](../broker-adapter/18-fill-recovery.md) §6.3) |
 | `expire_stale(account_id, before_date)` | `int` | EOD 경과 open → `expired`, 만료 건수 반환 |
 
 ### 불변식

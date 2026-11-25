@@ -25,8 +25,9 @@
 기대값은 모두 리터럴(상태 문자열, 예외 종류와 전체 메시지, 건수)이다.
 
 뒤쪽 49쌍 동작 테스트는 7×7 쌍마다 그 다음 상태를 쓸 수 있는 모든 공개 쓰기를
-시도해, 쓰기가 그 행을 실제로 바꾼 쌍의 집합이 리터럴 22쌍과 같은지 본다. 맨 뒤는
-``OrderStatus`` 의 값이 DB 문자열과 같은지, 전이표가 리터럴 22쌍과 같은지 본다.
+시도해, 쓰기가 그 행을 실제로 바꾼 쌍의 집합이 리터럴 17쌍과 같은지 본다. 종결
+상태의 자기 전이는 체결 반영이 상태를 유지한 채 누적을 올린 쌍이다(#2705). 맨 뒤는
+``OrderStatus`` 의 값이 DB 문자열과 같은지, 전이표가 리터럴 17쌍과 같은지 본다.
 """
 
 from __future__ import annotations
@@ -233,10 +234,10 @@ async def test_open_order_dict_json_is_unchanged(tracker):
         ("open", 12.0, "filled", False),
         ("partially_filled", 4.0, "partially_filled", True),
         ("partially_filled", 10.0, "filled", False),
-        ("cancelled", 4.0, "partially_filled", True),
-        ("cancelled", 10.0, "filled", False),
-        ("expired", 4.0, "partially_filled", True),
-        ("expired", 10.0, "filled", False),
+        ("cancelled", 4.0, "cancelled", False),
+        ("cancelled", 10.0, "cancelled", False),
+        ("expired", 4.0, "expired", False),
+        ("expired", 10.0, "expired", False),
     ],
 )
 async def test_record_fill_writes_by_cumulative(
@@ -463,9 +464,9 @@ async def racing(db: Database) -> _CancelOnGet:
 
 @pytest.mark.parametrize(
     ("cumulative", "expected"),
-    [(4.0, ("partially_filled", True, 4.0)), (10.0, ("filled", False, 10.0))],
+    [(4.0, ("cancelled", False, 4.0)), (10.0, ("cancelled", False, 10.0))],
 )
-async def test_cancel_committed_between_lookup_and_fill_is_overwritten(
+async def test_cancel_committed_between_lookup_and_fill_keeps_cancelled(
     db, racing, cumulative, expected
 ):
     applier = await _applier(db, racing)
@@ -484,7 +485,7 @@ async def test_cancel_committed_between_lookup_and_fill_is_overwritten(
     assert _cached_ids(racing) == []
 
 
-async def test_cancel_committed_before_fill_drops_the_fill(db, tracker):
+async def test_cancel_committed_before_fill_applies_the_fill(db, tracker):
     applier = await _applier(db, tracker)
     await _open(tracker, broker_order_id="0001")
     await tracker.mark_terminal("ord-1", "cancelled")
@@ -502,9 +503,10 @@ async def test_cancel_committed_before_fill_drops_the_fill(db, tracker):
         avg_price=70000.0,
         submitted_date=DATE,
     )
-    assert (cumulative, increment) == (0.0, 0.0)
-    assert await _state(db) == ("cancelled", False, 0.0)
-    assert await _trade_count(db) == 0
+    assert (cumulative, increment) == (4.0, 4.0)
+    assert await _state(db) == ("cancelled", False, 8.0)
+    assert await _trade_count(db) == 2
+    assert _cached_ids(tracker) == []
 
 
 async def test_cancel_after_partial_fill_is_cancelled(db, tracker):
@@ -707,16 +709,11 @@ EXPECTED_OBSERVED_PAIRS = {
     ("partially_filled", "rejected"),
     ("partially_filled", "failed"),
     ("partially_filled", "expired"),
-    ("filled", "partially_filled"),
     ("filled", "filled"),
-    ("cancelled", "partially_filled"),
-    ("cancelled", "filled"),
-    ("rejected", "partially_filled"),
-    ("rejected", "filled"),
-    ("failed", "partially_filled"),
-    ("failed", "filled"),
-    ("expired", "partially_filled"),
-    ("expired", "filled"),
+    ("cancelled", "cancelled"),
+    ("rejected", "rejected"),
+    ("failed", "failed"),
+    ("expired", "expired"),
 }
 
 EXPECTED_UNOBSERVED_PAIRS = {
@@ -727,32 +724,39 @@ EXPECTED_UNOBSERVED_PAIRS = {
     ("rejected", "open"),
     ("failed", "open"),
     ("expired", "open"),
+    ("filled", "partially_filled"),
+    ("cancelled", "partially_filled"),
+    ("cancelled", "filled"),
+    ("rejected", "partially_filled"),
+    ("rejected", "filled"),
+    ("failed", "partially_filled"),
+    ("failed", "filled"),
+    ("expired", "partially_filled"),
+    ("expired", "filled"),
     ("filled", "cancelled"),
     ("filled", "rejected"),
     ("filled", "failed"),
     ("filled", "expired"),
-    ("cancelled", "cancelled"),
     ("cancelled", "rejected"),
     ("cancelled", "failed"),
     ("cancelled", "expired"),
     ("rejected", "cancelled"),
-    ("rejected", "rejected"),
     ("rejected", "failed"),
     ("rejected", "expired"),
     ("failed", "cancelled"),
     ("failed", "rejected"),
-    ("failed", "failed"),
     ("failed", "expired"),
     ("expired", "cancelled"),
     ("expired", "rejected"),
     ("expired", "failed"),
-    ("expired", "expired"),
 }
 
 
-def _writers(target: str) -> list[str]:
+def _writers(prior: str, target: str) -> list[str]:
     writers: list[str] = []
-    if target in ("partially_filled", "filled"):
+    if target in ("partially_filled", "filled") or (
+        target == prior and target in ("cancelled", "rejected", "failed", "expired")
+    ):
         writers.append("record_fill")
     if target in ("filled", "cancelled", "rejected", "failed", "expired", "open"):
         writers.append("mark_terminal")
@@ -781,8 +785,8 @@ async def _attempt(
     delta = 0.0
     if writer == "record_fill":
         prev = float(before["recorded_filled_qty"])
-        cumulative = prev + 1.0 if target == "partially_filled" else max(10.0, prev + 1)
-        if target == "partially_filled" and cumulative >= 10.0:
+        cumulative = prev + 1.0 if target != "filled" else max(10.0, prev + 1)
+        if target != "filled" and cumulative >= 10.0:
             return None
         delta = (await tracker.record_fill(order_id, cumulative, 70000.0)).delta
     elif writer == "mark_terminal":
@@ -819,7 +823,7 @@ async def test_order_status_writes_over_all_49_pairs(db, tracker):
         for small_filled in [False, True] if prior == "filled" else [False]:
             for target in ORDER_STATUSES:
                 pairs.add((prior, target))
-                for writer in _writers(target):
+                for writer in _writers(prior, target):
                     n += 1
                     order_id = f"o{n}"
                     account_id = f"acct-{n}"
@@ -845,11 +849,11 @@ async def test_order_status_writes_over_all_49_pairs(db, tracker):
                     if wrote:
                         observed.add((prior, target))
     assert len(pairs) == 49
-    assert attempts == 87
-    assert len(observed) == 22
+    assert attempts == 91
+    assert len(observed) == 17
     assert observed == EXPECTED_OBSERVED_PAIRS
     assert pairs - observed == EXPECTED_UNOBSERVED_PAIRS
-    assert len(pairs - observed) == 27
+    assert len(pairs - observed) == 32
 
 
 # ── enum과 전이표 ────────────────────────────────────────────────
@@ -880,7 +884,7 @@ def test_open_and_terminal_sets_are_unchanged():
     ]
 
 
-def test_order_transition_table_equals_the_22_literal_pairs():
+def test_order_transition_table_equals_the_17_literal_pairs():
     assert sorted(str(k) for k in ORDER_STATUS_TRANSITIONS) == sorted(ORDER_STATUSES)
     assert all(type(v) is set for v in ORDER_STATUS_TRANSITIONS.values())
     table = {
@@ -889,7 +893,7 @@ def test_order_transition_table_equals_the_22_literal_pairs():
         for target in targets
     }
     assert table == EXPECTED_OBSERVED_PAIRS
-    assert len(table) == 22
+    assert len(table) == 17
     every = {(a, b) for a in ORDER_STATUSES for b in ORDER_STATUSES}
     assert every - table == EXPECTED_UNOBSERVED_PAIRS
 

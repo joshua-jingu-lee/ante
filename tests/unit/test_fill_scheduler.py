@@ -668,7 +668,7 @@ async def test_loop_cooldown_cap_below_recovery_and_reconciler_windows() -> None
 # ── Finding 2: 폴 사이클의 EOD 만료 → 만료 주문 더는 폴 안 됨 ──
 
 
-async def test_poll_first_then_expire_stale_no_more_poll(tracker, applier):
+async def test_poll_first_then_expire_stale_no_more_poll(db, tracker, applier):
     """poll-first: EOD 경과 open 은 **폴(복구 시도) 후** expire 되고, 다음
     사이클부턴 폴되지 않는다 (무한 폴 방지하되 복구 우선).
 
@@ -705,9 +705,16 @@ async def test_poll_first_then_expire_stale_no_more_poll(tracker, applier):
     assert (await tracker.get("ord-stale")).status == "expired"
     # 이후 get_open_orders 에도 없음.
     assert await tracker.get_open_orders(ACCT) == []
-    # 둘째 사이클: open 이 비어 더는 폴되지 않음 (무한 폴 없음).
+    # 둘째 사이클: open 은 비었지만 오늘 만료된 행은 늦은 체결 감시 대상이다(#2705).
     await sched.catch_up_once()
-    assert broker.call_count == 1
+    assert broker.call_count == 2
+    # 감시 창(종결 날짜가 오늘·어제)을 벗어나면 더는 폴되지 않음 (무한 폴 없음).
+    await db.execute(
+        "UPDATE order_tracker SET terminal_at = ? WHERE order_id = ?",
+        ("2000-01-01 00:00:00", "ord-stale"),
+    )
+    await sched.catch_up_once()
+    assert broker.call_count == 2
 
 
 async def test_poll_keeps_today_open(tracker, applier):
@@ -2336,3 +2343,219 @@ async def test_fallback_integrates_full_fill_applier_path(db, tracker):
     assert trades[0]["quantity"] == 1.0
     # open 캐시 evict(filled → mirror_fill_to_cache evict).
     assert tracker.get_open_orders_for_bot_sync(ACCT, "bot-1") == []
+
+
+# ── 늦은 체결 감시 (#2705) ────────────────────────────
+
+# 시계는 실제 날짜보다 뒤에 둔다. 종결 시각이 시계를 따르지 않으면 감시 창 밖이 된다.
+LATE_TODAY = "20300115"
+LATE_YESTERDAY = "20300114"
+LATE_AT = datetime(2030, 1, 15, 3, 0, 0, tzinfo=UTC)
+LATE_YESTERDAY_AT = datetime(2030, 1, 14, 3, 0, 0, tzinfo=UTC)
+
+
+class _FailOnceBroker(FakeBroker):
+    def __init__(self, history: list[dict] | None = None) -> None:
+        super().__init__(history)
+        self.fail_next = False
+
+    async def get_order_history(self, from_date=None, to_date=None):
+        if self.fail_next:
+            self.fail_next = False
+            self.call_count += 1
+            raise APIError("일시 오류")
+        return await super().get_order_history(from_date, to_date)
+
+
+async def _seed_on(tracker, day, *, order_id="ord-1", broker_order_id="0001", qty=10.0):
+    await tracker.open(
+        order_id=order_id,
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id=broker_order_id,
+        symbol="005930",
+        side="buy",
+        order_type="limit",
+        ordered_qty=qty,
+        submitted_date=day,
+    )
+
+
+def _late_item(day, cumulative, broker_order_id="0001"):
+    return {
+        "order_id": broker_order_id,
+        "filled_quantity": cumulative,
+        "price": 10_000.0,
+        "timestamp": day,
+    }
+
+
+def _late_sched(broker, tracker, app):
+    return FillReconcileScheduler(
+        broker=broker, order_tracker=tracker, fill_applier=app, account_id=ACCT
+    )
+
+
+async def _row_of(db, order_id="ord-1"):
+    row = await db.fetch_one(
+        "SELECT status, recorded_filled_qty, terminal_at FROM order_tracker"
+        " WHERE order_id = ?",
+        (order_id,),
+    )
+    return dict(row)
+
+
+@pytest.mark.parametrize("manual_clock", [LATE_AT], indirect=True)
+async def test_late_fill_on_today_cancelled_order_is_polled(
+    db, tracker, applier, manual_clock
+):
+    """열린 주문이 없어도 오늘 취소된 감시 대상이 있으면 1콜로 체결을 반영한다."""
+    app, ph, _eb = applier
+    await _seed_on(tracker, LATE_TODAY)
+    await tracker.mark_terminal("ord-1", "cancelled")
+    broker = FakeBroker(history=[_late_item(LATE_TODAY, 4.0)])
+    sched = _late_sched(broker, tracker, app)
+    assert await sched._poll_and_apply() == 1
+    assert broker.call_count == 1
+    assert broker.last_args == (LATE_TODAY, LATE_TODAY)
+    row = await _row_of(db)
+    assert (row["status"], row["recorded_filled_qty"]) == ("cancelled", 4.0)
+    pos = await ph.get_current("bot-1", "005930", account_id=ACCT)
+    assert pos["quantity"] == 4.0
+    assert await sched._poll_and_apply() == 0
+    assert broker.call_count == 2
+
+
+@pytest.mark.parametrize("manual_clock", [LATE_YESTERDAY_AT], indirect=True)
+async def test_yesterday_terminal_order_is_polled_only_until_first_success(
+    db, tracker, applier, manual_clock
+):
+    """어제 종결된 대상은 오늘 첫 성공 폴에만 들고, 두 번째 폴은 0콜이다."""
+    app, _ph, _eb = applier
+    await _seed_on(tracker, LATE_YESTERDAY)
+    await tracker.mark_terminal("ord-1", "cancelled")
+    manual_clock.advance(86400)
+    broker = FakeBroker(history=[_late_item(LATE_YESTERDAY, 4.0)])
+    sched = _late_sched(broker, tracker, app)
+    assert await sched._poll_and_apply() == 1
+    assert broker.last_args == (LATE_YESTERDAY, LATE_TODAY)
+    assert await sched._poll_and_apply() == 0
+    assert broker.call_count == 1
+    assert (await _row_of(db))["recorded_filled_qty"] == 4.0
+
+
+@pytest.mark.parametrize("manual_clock", [LATE_YESTERDAY_AT], indirect=True)
+async def test_yesterday_expired_order_is_polled_on_first_poll(
+    db, tracker, applier, manual_clock
+):
+    """만료된 행도 감시 대상이다(제출 다음 날의 만료 → 그다음 날 첫 폴까지)."""
+    app, _ph, _eb = applier
+    await _seed_on(tracker, "20300113")
+    assert await tracker.expire_stale(ACCT, LATE_YESTERDAY) == 1
+    manual_clock.advance(86400)
+    broker = FakeBroker(history=[_late_item("20300113", 4.0)])
+    sched = _late_sched(broker, tracker, app)
+    assert await sched._poll_and_apply() == 1
+    assert broker.last_args == ("20300113", LATE_TODAY)
+    row = await _row_of(db)
+    assert (row["status"], row["recorded_filled_qty"]) == ("expired", 4.0)
+
+
+@pytest.mark.parametrize("manual_clock", [LATE_YESTERDAY_AT], indirect=True)
+async def test_old_or_fully_filled_terminal_orders_are_not_polled(
+    db, tracker, applier, manual_clock
+):
+    """그저께 종결된 대상, ``recorded == ordered`` 인 대상, 거부된 주문은 0콜이다."""
+    app, _ph, _eb = applier
+    await _seed_on(tracker, LATE_YESTERDAY, order_id="old", broker_order_id="0001")
+    await tracker.mark_terminal("old", "cancelled")
+    manual_clock.advance(2 * 86400)
+    await _seed_on(tracker, LATE_TODAY, order_id="full", broker_order_id="0002")
+    await tracker.record_fill("full", 4.0, 10_000.0)
+    await tracker.mark_terminal("full", "cancelled")
+    await tracker.record_fill("full", 10.0, 10_000.0)
+    await _seed_on(tracker, LATE_TODAY, order_id="rej", broker_order_id="0003")
+    await tracker.mark_terminal("rej", "rejected")
+    broker = FakeBroker(history=[])
+    sched = _late_sched(broker, tracker, app)
+    assert await sched._poll_and_apply() == 0
+    assert broker.call_count == 0
+
+
+@pytest.mark.parametrize("manual_clock", [LATE_YESTERDAY_AT], indirect=True)
+async def test_failed_poll_keeps_yesterday_target_for_next_cycle(
+    db, tracker, applier, manual_clock
+):
+    """폴이 실패하면 어제 종결된 대상이 다음 사이클에 남는다."""
+    app, _ph, _eb = applier
+    await _seed_on(tracker, LATE_YESTERDAY)
+    await tracker.mark_terminal("ord-1", "cancelled")
+    manual_clock.advance(86400)
+    broker = _FailOnceBroker(history=[_late_item(LATE_YESTERDAY, 4.0)])
+    broker.fail_next = True
+    sched = _late_sched(broker, tracker, app)
+    with pytest.raises(APIError):
+        await sched._poll_and_apply()
+    assert await sched._poll_and_apply() == 1
+    assert broker.call_count == 2
+    assert await sched._poll_and_apply() == 0
+    assert broker.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "manual_clock", [datetime(2030, 1, 14, 16, 0, 0, tzinfo=UTC)], indirect=True
+)
+async def test_terminal_date_is_judged_in_kst(db, tracker, applier, manual_clock):
+    """KST 00~09시의 종결은 UTC 날짜가 전날이어도 KST의 오늘로 감시한다."""
+    app, _ph, _eb = applier
+    assert business_date_kst() == LATE_TODAY
+    await _seed_on(tracker, LATE_TODAY)
+    await tracker.mark_terminal("ord-1", "cancelled")
+    assert (await _row_of(db))["terminal_at"] == "2030-01-14 16:00:00"
+    broker = FakeBroker(history=[])
+    sched = _late_sched(broker, tracker, app)
+    assert await sched._poll_and_apply() == 0
+    assert await sched._poll_and_apply() == 0
+    assert broker.call_count == 2
+
+
+@pytest.mark.parametrize("manual_clock", [LATE_AT], indirect=True)
+async def test_late_buy_fill_on_cancelled_order_settles_treasury(
+    db, tracker, applier, manual_clock
+):
+    """늦은 매수 체결: ``available -= cost``, ``spent += cost``, ``reserved`` 불변."""
+    from ante.treasury import Treasury
+
+    app, _ph, eb = applier
+    treasury = Treasury(
+        db=db,
+        eventbus=eb,
+        account_id=ACCT,
+        currency="KRW",
+        buy_commission_rate=0.0,
+        sell_commission_rate=0.0,
+        order_tracker=tracker,
+    )
+    await treasury.initialize()
+    await treasury.set_account_balance(10_000_000.0)
+    await treasury.allocate("bot-1", 1_000_000.0)
+    await treasury.reserve_for_order("bot-1", "ord-1", 100_015.0)
+    await _seed_on(tracker, LATE_TODAY)
+    await tracker.mark_terminal("ord-1", "cancelled")
+    await treasury.release_reservation("bot-1", "ord-1")
+    budget = treasury.get_budget("bot-1")
+    assert budget is not None
+    assert (budget.available, budget.reserved, budget.spent) == (1_000_000.0, 0.0, 0.0)
+
+    broker = FakeBroker(history=[_late_item(LATE_TODAY, 4.0)])
+    assert await _late_sched(broker, tracker, app)._poll_and_apply() == 1
+    assert (budget.available, budget.reserved, budget.spent, budget.returned) == (
+        960_000.0,
+        0.0,
+        40_000.0,
+        0.0,
+    )
+    assert budget.available == (
+        budget.allocated - budget.reserved - budget.spent + budget.returned
+    )
