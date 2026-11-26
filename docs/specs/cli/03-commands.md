@@ -529,10 +529,14 @@ strict zero-padded 검증). 어댑터 경계가 요구하는 압축 `YYYYMMDD`�
 어긋나므로, 변환 지점은 단일 chokepoint로 고정한다. 두 옵션 모두 생략 가능하며
 생략 시 어댑터 기본 구간(최근 7일)을 따른다.
 
-`--from`이 `--to`보다 뒤이면(inverted date range) 서비스/IPC 호출 이전에
-`INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(빈 결과 반환 금지).
-한쪽만 지정·둘 다 미지정·동일 날짜는 정상 처리한다 — `audit list`/`trade list`/
-`report performance`와 동일 계약이다.
+빈 쪽을 기본 구간(시작 KST 오늘−7일·끝 KST 오늘, `ante.core.time.default_order_history_range`)으로
+채운 실효 구간의 시작일이 종료일 이후이면(inverted date range) 서비스/IPC 호출 이전에
+`INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(빈 결과 반환 금지). 채운 쪽의 메시지
+라벨은 `기본 조회 시작일`·`기본 조회 종료일`이다. 둘 다 미지정·동일 날짜는 정상 처리한다. 채운
+값은 이 검사에만 쓰고 어댑터에는 사용자가 준 값(미지정은 `None`)을 그대로 넘긴다. 두 값을 다
+준 경우는 `audit list`/`trade list`/`report performance`와 같은 계약이지만, 그 셋은 한쪽 미지정을
+열린 구간으로 두고 기본값을 채우지 않는다. 검사와 어댑터가 시계를 따로 읽으므로 KST 자정을
+사이에 두면 둘의 「오늘」이 하루 어긋날 수 있다(조회 전용 known-limitation).
 
 폴백 경계는 형제 명령과 같다. `IPC_SERVER_NOT_RUNNING`에서만 직접 연결로 내려가고,
 `IPC_TIMEOUT`과 서버 error envelope은 폴백 없이 원본 코드/메시지로 노출한다.
