@@ -26,7 +26,7 @@ import shutil
 import tempfile
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -59,6 +59,7 @@ from ante.ipc.client import IPCClient
 from ante.trade.fill_outbox import FillOutboxPublisher
 from tests.conftest import ManualClock
 
+_KST = timezone(timedelta(hours=9))
 _CREDS = {"app_key": "k", "app_secret": "s", "account_no": "1234567890"}
 
 
@@ -1454,8 +1455,8 @@ async def test_every_account_gets_its_own_daily_report_and_snapshot(
 async def test_second_account_daily_loss_limit_judges_with_its_own_snapshot(
     assemble: AssembleFn,
 ) -> None:
-    """둘째 계좌의 일일 손실 한도가 그 계좌의 전일 스냅샷으로 판정해 주문을 거부한다.
-    전날은 규칙 엔진과 같은 기준(고정한 시계의 ``now(None)``)으로 잡는다."""
+    """둘째 계좌의 일일 손실 한도가 그 계좌의 전일 스냅샷(일일 보고가 기록한 분모)으로
+    판정해 주문을 거부한다. 날짜는 규칙 엔진과 같은 기준(고정한 시계의 KST 오늘)이다."""
     rules = [
         {"type": "trading_hours", "enabled": False},
         {"type": "daily_loss_limit", "max_daily_loss_percent": 0.05},
@@ -1468,17 +1469,22 @@ async def test_second_account_daily_loss_limit_judges_with_its_own_snapshot(
     await _fund(s, "kis-b", "bot-1")
     manual = ManualClock(datetime(2026, 3, 20, 3, 0, tzinfo=UTC))
     with clock.use_clock(manual):
-        yesterday = clock.now(None).date() - timedelta(days=1)
-        for target, eval_amount in (
-            (yesterday - timedelta(days=1), 10_000_000.0),
-            (yesterday, 8_000_000.0),
-        ):
-            for treasury in s.treasury_manager.list_all():
-                await treasury.sync_balance(
-                    {"cash": 2_000_000.0, "eval_amount": eval_amount}
-                )
-            for scheduler in s.daily_report_schedulers.values():
-                await scheduler.run_once(target_date=target)
+        yesterday = clock.now(_KST).date() - timedelta(days=1)
+        for scheduler in s.daily_report_schedulers.values():
+            await scheduler.run_once(target_date=yesterday)
+        await s.db.execute(
+            "INSERT INTO position_history (bot_id, symbol, action, quantity, price,"
+            " pnl, timestamp, account_id) VALUES (?, ?, 'sell', ?, ?, ?, ?, ?)",
+            (
+                "bot-1",
+                "005930",
+                10.0,
+                100.0,
+                -1_000_000.0,
+                clock.now(UTC).isoformat(),
+                "kis-b",
+            ),
+        )
         cap = _capture(s, OrderRejectedEvent, OrderSubmittedEvent)
 
         await s.eventbus.publish(_request("kis-b"))
