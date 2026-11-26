@@ -5983,6 +5983,7 @@ class TestRuleEngineUnrealizedPnl:
                 ),
             ]
         )
+        service.get_realized_pnl = AsyncMock(return_value=0.0)
         return service
 
     @pytest.fixture
