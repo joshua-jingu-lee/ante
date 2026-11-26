@@ -430,6 +430,12 @@ ante strategy summary <strategy_id> --period daily|weekly|monthly  # 전략 기�
 `strategy list`의 `--status` 값이 `StrategyStatus`의 값에 없으면 DB 접근 이전에
 `STRATEGY_VALIDATION_ERROR` 에러 코드와 exit code 1로 거부한다.
 
+`strategy info`는 전략의 `get_params()`가 Mapping이 아니거나 `get_risks()`가 리스트·튜플이
+아니어도, 그 값이 내장 타입만으로 이루어져 있으면 text 모드는 성공한다. text 모드는 그 값이 비어 있지
+않으면 `repr` 한 줄로 내고, JSON 출력은 전과 같다. 사용자 정의 객체(여러 줄을 내는
+`__repr__`, 진릿값이 모호한 배열 등)는 이 보장 밖이다. 전략 파일을 로드·인스턴스화하거나 메타를 읽다 실패하면 그 키들을 빼고
+성공하며 경고 로그 한 줄을 남긴다(파일이 없으면 로그 없이 뺀다).
+
 `strategy summary`는 전략의 `trades.strategy_id`(거래 시점 전략 귀속 키)로
 해당 전략의 **모든 거래**를 집계한다. 같은 전략을 여러 봇·여러 계좌에서
 운용해도 전체가 합산되며, 삭제된 봇의 과거 거래도 포함되고, 봇이 이후 다른
@@ -523,10 +529,14 @@ strict zero-padded 검증). 어댑터 경계가 요구하는 압축 `YYYYMMDD`�
 어긋나므로, 변환 지점은 단일 chokepoint로 고정한다. 두 옵션 모두 생략 가능하며
 생략 시 어댑터 기본 구간(최근 7일)을 따른다.
 
-`--from`이 `--to`보다 뒤이면(inverted date range) 서비스/IPC 호출 이전에
-`INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(빈 결과 반환 금지).
-한쪽만 지정·둘 다 미지정·동일 날짜는 정상 처리한다 — `audit list`/`trade list`/
-`report performance`와 동일 계약이다.
+빈 쪽을 기본 구간(시작 KST 오늘−7일·끝 KST 오늘, `ante.core.time.default_order_history_range`)으로
+채운 실효 구간의 시작일이 종료일 이후이면(inverted date range) 서비스/IPC 호출 이전에
+`INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(빈 결과 반환 금지). 채운 쪽의 메시지
+라벨은 `기본 조회 시작일`·`기본 조회 종료일`이다. 둘 다 미지정·동일 날짜는 정상 처리한다. 채운
+값은 이 검사에만 쓰고 어댑터에는 사용자가 준 값(미지정은 `None`)을 그대로 넘긴다. 두 값을 다
+준 경우는 `audit list`/`trade list`/`report performance`와 같은 계약이지만, 그 셋은 한쪽 미지정을
+열린 구간으로 두고 기본값을 채우지 않는다. 검사와 어댑터가 시계를 따로 읽으므로 KST 자정을
+사이에 두면 둘의 「오늘」이 하루 어긋날 수 있다(조회 전용 known-limitation).
 
 폴백 경계는 형제 명령과 같다. `IPC_SERVER_NOT_RUNNING`에서만 직접 연결로 내려가고,
 `IPC_TIMEOUT`과 서버 error envelope은 폴백 없이 원본 코드/메시지로 노출한다.

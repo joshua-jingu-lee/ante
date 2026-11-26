@@ -37,13 +37,15 @@ import asyncio
 import inspect
 import json
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
 from ante.cli.main import cli
+from ante.contracts.ipc_client_errors import IPCServerNotRunningError
+from ante.core import clock
 from ante.member.models import Member, MemberRole, MemberType
 from tests.unit._async_test_utils import asyncio_run_returning
 
@@ -888,3 +890,122 @@ class TestEffectiveRangeAfterDefaults:
         assert result.exit_code == 0, _stdout(result)
         treasury_obj.get_snapshots.assert_awaited_once_with("2026-06-01", "2026-06-15")
         assert _fixed_today.call_count == 1
+
+
+class _FixedClock:
+    def __init__(self, at: datetime) -> None:
+        self._at = at
+
+    def now(self, tz: tzinfo | None) -> datetime:
+        return self._at.astimezone(tz or UTC)
+
+    def monotonic(self) -> float:
+        return 1000.0
+
+
+_BROKER_HISTORY = ["broker", "order-history", "--account", "sample-paper"]
+
+
+class TestBrokerOrderHistoryEffectiveRange:
+    """#3057: 빈 쪽을 기본 구간으로 채운 실효 구간이 뒤집히면 INVALID_DATE_RANGE."""
+
+    @pytest.fixture(autouse=True)
+    def _kst_2026_06_11(self):
+        noon = datetime(2026, 6, 11, 12, tzinfo=timezone(timedelta(hours=9)))
+        with clock.use_clock(_FixedClock(noon)):
+            yield
+
+    @pytest.mark.parametrize(
+        ("args", "message"),
+        [
+            pytest.param(
+                ["--from", "2026-06-12"],
+                "조회 시작일(2026-06-12)이(가) "
+                "기본 조회 종료일(2026-06-11) 이후입니다.",
+                id="from-only-future",
+            ),
+            pytest.param(
+                ["--to", "2026-06-03"],
+                "기본 조회 시작일(2026-06-04)이(가) "
+                "조회 종료일(2026-06-03) 이후입니다.",
+                id="to-only-before-default-start",
+            ),
+        ],
+    )
+    def test_one_sided_inverted_rejected_before_ipc(self, runner, args, message):
+        with patch("ante.cli.commands.broker._run") as mock_run:
+            result = runner.invoke(cli, ["--format", "json", *_BROKER_HISTORY, *args])
+        _assert_invalid_date_range_json(result)
+        assert json.loads(_stdout(result))["message"] == message
+        mock_run.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            pytest.param(["--from", "2026-06-12"], id="from-only-future"),
+            pytest.param(["--to", "2026-06-03"], id="to-only-before-default-start"),
+        ],
+    )
+    def test_one_sided_inverted_rejected_before_direct_fallback(self, runner, args):
+        with (
+            patch(
+                "ante.cli.commands.broker._ipc_broker_command",
+                new=AsyncMock(side_effect=IPCServerNotRunningError("down")),
+            ) as mock_ipc,
+            patch("ante.cli.commands.broker._direct_broker") as mock_direct,
+        ):
+            result = runner.invoke(cli, ["--format", "json", *_BROKER_HISTORY, *args])
+        _assert_invalid_date_range_json(result)
+        mock_ipc.assert_not_called()
+        mock_direct.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("args", "extra"),
+        [
+            pytest.param(
+                ["--from", "2026-06-11"], {"from_date": "2026-06-11"}, id="from-today"
+            ),
+            pytest.param(
+                ["--to", "2026-06-04"],
+                {"to_date": "2026-06-04"},
+                id="to-default-start",
+            ),
+        ],
+    )
+    def test_one_sided_boundary_passes_user_values_only(self, runner, args, extra):
+        with patch(
+            "ante.cli.commands.broker._ipc_broker_command",
+            new=AsyncMock(return_value={"orders": []}),
+        ) as mock_ipc:
+            result = runner.invoke(cli, ["--format", "json", *_BROKER_HISTORY, *args])
+        assert result.exit_code == 0, _stdout(result)
+        mock_ipc.assert_awaited_once()
+        assert mock_ipc.await_args.kwargs == {"extra": extra}
+
+    @pytest.mark.parametrize(
+        ("args", "passed"),
+        [
+            pytest.param(["--from", "2026-06-11"], ("20260611", None), id="from-today"),
+            pytest.param(
+                ["--to", "2026-06-04"], (None, "20260604"), id="to-default-start"
+            ),
+        ],
+    )
+    def test_one_sided_boundary_reaches_direct_fallback(self, runner, args, passed):
+        adapter = MagicMock()
+        adapter.get_order_history = AsyncMock(return_value=[])
+
+        @asynccontextmanager
+        async def _fake_direct(*_a, **_k):
+            yield adapter, None
+
+        with (
+            patch(
+                "ante.cli.commands.broker._ipc_broker_command",
+                new=AsyncMock(side_effect=IPCServerNotRunningError("down")),
+            ),
+            patch("ante.cli.commands.broker._direct_broker", side_effect=_fake_direct),
+        ):
+            result = runner.invoke(cli, ["--format", "json", *_BROKER_HISTORY, *args])
+        assert result.exit_code == 0, _stdout(result)
+        adapter.get_order_history.assert_awaited_once_with(*passed)

@@ -34,6 +34,7 @@ from ante.broker.exceptions import (
 from ante.broker.fill_scheduler import business_date_kst
 from ante.broker.models import CommissionInfo
 from ante.core import clock
+from ante.core.time import default_order_history_range
 
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
@@ -1389,8 +1390,9 @@ class KISDomesticAdapter(KISBaseAdapter):
         """
         now = clock.now(UTC)
         today = business_date_kst(now)
-        start_date = from_date or business_date_kst(now - timedelta(days=7))
-        end_date = to_date or today
+        default_start, default_end = default_order_history_range(now)
+        start_date = from_date or default_start.strftime("%Y%m%d")
+        end_date = to_date or default_end.strftime("%Y%m%d")
 
         cutoff = _ccld_three_month_cutoff(today)
         is_inner = start_date >= cutoff

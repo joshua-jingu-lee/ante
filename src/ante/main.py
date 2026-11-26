@@ -585,6 +585,7 @@ async def _init_trading(s: Services) -> None:
         trade_service=s.trade_service,
         signal_key_manager=signal_key_manager,
         signal_channel_registry=s.signal_channel_registry,
+        order_tracker=s.order_tracker,
     )
     await s.bot_manager.initialize()
 
@@ -652,6 +653,8 @@ async def _init_gateway(s: Services) -> None:
     stop_order_manager.start()
 
     s.stop_order_manager = stop_order_manager
+    if s.bot_manager is not None:
+        s.bot_manager.set_stop_order_manager(stop_order_manager)
     s.stop_session_expiry_task = asyncio.create_task(
         _stop_session_expiry_loop(stop_order_manager),
         name="stop-session-expiry",

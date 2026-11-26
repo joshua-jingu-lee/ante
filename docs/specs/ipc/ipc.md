@@ -79,7 +79,7 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 |-----------|-----------|-------------|-------------|
 | `ante bot create` | `bot.create` | `BotManager.create_bot()` | 등록된 `strategy_id`를 서버 StrategyRegistry에서 해석하고 BotManager 인메모리 `_bots` 반영 필요 |
 | `ante bot start <bot_id>` | `bot.start` | `BotManager.get_bot()` + `account_service.get()` + `BotManager.start_bot()` | live 봇 존재 확인 + 계좌 프리셋의 필수 인증정보 preflight + asyncio task 생성 + `BotStartedEvent` 발행. 성공 시 audit `bot.start` 기록 (#1712) |
-| `ante bot stop <bot_id>` | `bot.stop` | `BotManager.get_bot()` + `BotManager.stop_bot()` | live 봇 존재 확인 + 실행 task 취소 + `BotStoppedEvent` 발행. 성공 시 audit `bot.stop` 기록 (#1712) |
+| `ante bot stop <bot_id>` | `bot.stop` | `BotManager.get_bot()` + `BotManager.stop_bot()` | live 봇 존재 확인 + 실행 task 취소 + `BotStoppedEvent` 발행 + 그 봇의 스탑 주문 만료·미체결 주문 취소(브로커 응답까지 기다린다, 응답 키는 그대로). 성공 시 audit `bot.stop` 기록 (#1712) |
 | `ante bot update <bot_id>` | `bot.update` | `BotManager.update_bot()` | 중지 상태 봇 설정을 서버 BotManager 기준으로 갱신 |
 | `ante bot status <bot_id>` | `bot.status` | `BotManager.get_bot()` (read-only) | live 조회. 응답은 `{"bot": info}` envelope이며 `strategy_registry`/`treasury_manager`/`trade_service`가 있는 경우 strategy/budget/positions를 동적으로 보강 (#1712) |
 | `ante bot list [--account]` | `bot.list` | `BotManager.list_bots()` (read-only) | live 봇 목록 조회. `--account` 필터 후 CLI 6-key(`bot_id`/`name`/`strategy_id`/`account_id`/`status`/`created_at`) projection, `{"bots": [...]}` envelope. 서버 정지 시 snapshot DB fallback |
@@ -157,7 +157,7 @@ cold-path 삭제는 항상 keep 의미다.
 | `ante broker status` | `broker.status` | `BrokerAdapter.health_check()` | 서버가 보유한 BrokerAdapter 연결 상태와 circuit breaker 상태 조회 |
 | `ante broker balance` | `broker.balance` | `BrokerAdapter.get_account_balance()` | 서버 시작 시 생성된 adapter/credentials/rate limit 상태 재사용 |
 | `ante broker positions` | `broker.positions` | `BrokerAdapter.get_positions()` | 서버 adapter 연결과 계좌 topology 기준으로 live 포지션 조회 |
-| `ante broker order-history` | `broker.order_history` | `BrokerAdapter.get_order_history()` | 서버 adapter 연결/credentials/rate limit/circuit breaker 재사용. `--from`/`--to`는 ISO `YYYY-MM-DD`로 받아 어댑터 경계 압축 `YYYYMMDD`로 변환한 뒤 전달한다. 응답은 `{"orders": [...]}` envelope. CLI를 거치지 않는 직접 호출의 잘못된 ISO 날짜는 요청 모델이 `VALIDATION_ERROR`로 거부한다(#2412). 두 날짜가 다 있고 `from_date`가 `to_date`보다 뒤면 핸들러가 브로커를 부르기 전에 CLI와 같은 `INVALID_DATE_RANGE`로 거부한다(#2736) |
+| `ante broker order-history` | `broker.order_history` | `BrokerAdapter.get_order_history()` | 서버 adapter 연결/credentials/rate limit/circuit breaker 재사용. `--from`/`--to`는 ISO `YYYY-MM-DD`로 받아 어댑터 경계 압축 `YYYYMMDD`로 변환한 뒤 전달한다. 응답은 `{"orders": [...]}` envelope. CLI를 거치지 않는 직접 호출의 잘못된 ISO 날짜는 요청 모델이 `VALIDATION_ERROR`로 거부한다(#2412). 빈 날짜를 기본 구간(`ante.core.time.default_order_history_range`)으로 채운 실효 구간의 시작일이 종료일보다 뒤면 핸들러가 브로커를 부르기 전에 CLI와 같은 `INVALID_DATE_RANGE`로 거부한다(#2736, #3057). 채운 값은 검사에만 쓰고 어댑터에는 받은 값(`None` 포함)을 그대로 넘긴다 |
 | `ante broker reconcile --fix` | `broker.reconcile` | `PositionReconciler.reconcile()` | TradeService 인메모리 반영 + `NotificationEvent` 알림 |
 
 일반 운영 CLI는 broker adapter를 직접 생성하지 않는다. 직접 생성 경로는 서버의
@@ -568,7 +568,7 @@ drift다.
 | 서버 내부 에러 | 응답 `status: "error"` 반환. CLI는 `error.code` + `error.message` 출력 |
 | 미등록 커맨드 | `_dispatch`에서 `UNKNOWN_COMMAND` 에러 응답 |
 | 인자 검증 실패 | 모든 명령은 요청 모델을 가진다. 인자가 모델을 통과하지 못하면 핸들러를 부르지 않고 `VALIDATION_ERROR` 에러 응답. 메시지는 명령 이름과 필드 경로·검증 종류만 싣는다(`<명령> 인자 검증 실패: <필드 경로>(<검증 종류>), …`). 모르는 키의 이름은 필드 경로로 실리고(인쇄 가능하지 않은 문자는 이스케이프한다), 키 이름 외의 입력값은 싣지 않는다. 전체 응답이 메시지 최대 크기(1MB)를 넘게 되면 앞에서부터 들어가는 필드만 싣고 나머지는 `외 N건`으로 줄인다 |
-| 뒤집힌 날짜 범위 (`broker.order_history`) | 요청 모델은 두 날짜의 형식만 본다. 순서는 핸들러가 브로커를 부르기 전에 검사해 `INVALID_DATE_RANGE` 에러 응답을 낸다(#2736). |
+| 뒤집힌 날짜 범위 (`broker.order_history`) | 요청 모델은 두 날짜의 형식만 본다. 순서는 핸들러가 브로커를 부르기 전에 빈 쪽을 기본 구간으로 채운 실효 구간으로 검사해 `INVALID_DATE_RANGE` 에러 응답을 낸다(#2736, #3057). |
 | 킬 스위치의 일부 계좌 실패 (`system.halt`·`system.clear_halt`) | `ACCOUNT_SUSPEND_ALL_FAILED`·`ACCOUNT_ACTIVATE_ALL_FAILED` 에러 응답. 메시지는 실패한 계좌 id와 바뀐 계좌 수만 싣고 원인 예외의 문자열은 싣지 않는다. 성공 응답의 `accounts` 목록은 오지 않는다. 감사는 남는다([audit.md](../audit/audit.md#cliipc-기록-대상)) |
 | shutdown 중 mutating 명령 | `SHUTTING_DOWN` 상태의 mutating 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
 | 리소스 drain 중 dispatch | `DRAINING` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |

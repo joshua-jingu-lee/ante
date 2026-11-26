@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ante.account.errors import (
@@ -1094,16 +1094,16 @@ async def _handle_broker_order_history(
     svc: ServiceRegistry, request: BrokerOrderHistoryRequest, actor: str
 ) -> dict[str, Any]:
     """``broker.order_history`` — 주문/체결 이력 read-only 조회."""
-    from ante.core.time import iso_to_kis_date
+    from ante.core.time import default_order_history_range, iso_to_kis_date
 
-    if (
-        request.from_date is not None
-        and request.to_date is not None
-        and date.fromisoformat(request.from_date) > date.fromisoformat(request.to_date)
-    ):
+    default_start, default_end = default_order_history_range(clock.now(UTC))
+    start = request.from_date or default_start.isoformat()
+    end = request.to_date or default_end.isoformat()
+    if date.fromisoformat(start) > date.fromisoformat(end):
+        start_label = "조회 시작일" if request.from_date else "기본 조회 시작일"
+        end_label = "조회 종료일" if request.to_date else "기본 조회 종료일"
         raise InvalidDateRangeError(
-            f"조회 시작일({request.from_date})이(가) "
-            f"조회 종료일({request.to_date}) 이후입니다."
+            f"{start_label}({start})이(가) {end_label}({end}) 이후입니다."
         )
     from_date = iso_to_kis_date(request.from_date)
     to_date = iso_to_kis_date(request.to_date)
