@@ -163,7 +163,7 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 | `/balance` | 전 계좌 자금 현황 요약 (계좌별 잔고, 할당/미할당) | - |
 | `/halt [reason]` | 전체 거래 중지 (모든 ACTIVE 계좌를 SUSPENDED로 전환) | 2단계 확인 |
 | `/clear_halt` | 전역 정지 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 봇 자동 재시작 아님) | 2단계 확인 |
-| `/stop <bot_id>` | 특정 봇 중지 | 2단계 확인 |
+| `/stop <bot_id>` | 특정 봇 중지. 응답에 취소한 미체결 주문 수·취소에 실패한 주문 수·만료한 스탑 주문을 적는다(「봇 중지」 알림과 같은 내용 — [bot/05-notification-events.md](../bot/05-notification-events.md)) | 2단계 확인 |
 | `/confirm` | 위험 명령 확인 | - |
 
 **2단계 확인**: `halt`, `clear_halt`, `stop` 명령은 `_DANGEROUS_COMMANDS`로 분류되며, `/confirm` 입력 후 `confirm_timeout` 내에서만 실행된다. `/clear_halt`는 계좌 상태만 ACTIVE로 복구하며 봇을 자동 재시작하지 않는다.

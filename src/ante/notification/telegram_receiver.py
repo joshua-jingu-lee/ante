@@ -579,30 +579,27 @@ class TelegramCommandReceiver:
             return f"이미 중지된 봇입니다: {bot_id}"
 
         positions = bot._ctx.get_positions()
-        open_orders = bot._ctx.get_open_orders()
 
-        await self._bot_manager.stop_bot(bot_id, suppress_notification=True)
+        cleanup = await self._bot_manager.stop_bot(bot_id, suppress_notification=True)
 
         bot_name = bot.config.name or bot_id
         header = f"ℹ️ *봇 중지*\n\n봇: {bot_name} ({bot_id})\n상태: 실행 중 → 중지됨"
+        lines = [header]
+        if cleanup is not None:
+            lines.extend(["", *cleanup.summary_lines()])
 
-        if not positions:
-            return f"{header}\n\n미체결 주문은 자동 취소되지 않습니다."
-
-        symbols = sorted(positions.keys())
-        pending_count = len(open_orders)
-
-        held_line = await self._format_held_symbols(bot, symbols)
-
-        lines = [
-            header,
-            "",
-            f"⚠️ 보유 종목 {len(symbols)}개가 유지됩니다.",
-            "중지 후 포지션을 직접 관리해야 합니다.",
-            "",
-            f"보유: {held_line}",
-            f"체결대기 주문: {pending_count}건",
-        ]
+        if positions:
+            symbols = sorted(positions.keys())
+            held_line = await self._format_held_symbols(bot, symbols)
+            lines.extend(
+                [
+                    "",
+                    f"⚠️ 보유 종목 {len(symbols)}개가 유지됩니다.",
+                    "중지 후 포지션을 직접 관리해야 합니다.",
+                    "",
+                    f"보유: {held_line}",
+                ]
+            )
         return "\n".join(lines)
 
     async def _format_held_symbols(self, bot: Any, symbols: list[str]) -> str:
