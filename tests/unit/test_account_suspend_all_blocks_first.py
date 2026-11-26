@@ -146,7 +146,10 @@ async def test_every_active_account_is_suspended_before_any_subscriber_returns(
     task = asyncio.create_task(
         service.suspend_all(reason="킬 스위치", suspended_by="admin")
     )
-    await entered.wait()
+    entered_wait = asyncio.create_task(entered.wait())
+    await asyncio.wait({task, entered_wait}, return_when=asyncio.FIRST_COMPLETED)
+    entered_wait.cancel()
+    assert entered.is_set(), "정지 이벤트 구독자에 들어오지 않았다"
 
     assert service._accounts["acct-a"].status == AccountStatus.SUSPENDED
     assert service._accounts["acct-b"].status == AccountStatus.SUSPENDED
