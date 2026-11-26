@@ -2,7 +2,7 @@
 
 스펙: `docs/specs/rule-engine/07-rule-engine-core.md` 「판정 입력 조회 실패」.
 Treasury 미주입·Treasury 조회 예외 → `account_not_ready: treasury_unavailable`,
-포지션 조회 예외 → `account_not_ready: positions_unavailable`. 매도·정정·
+포지션·당일 실현 손익 조회 예외 → `account_not_ready: positions_unavailable`. 매도·정정·
 값 없음(`None`)은 지금처럼 0으로 채워 평가한다.
 """
 
@@ -33,6 +33,10 @@ BOT = "bot1"
 SYMBOL = "005930"
 
 TREASURY_REASON = "account_not_ready: treasury_unavailable"
+TRADE_FAILURES = [
+    pytest.param({"fail": True}, id="get_positions"),
+    pytest.param({"fail_realized": True}, id="get_realized_pnl"),
+]
 POSITIONS_REASON = "account_not_ready: positions_unavailable"
 
 
@@ -58,10 +62,15 @@ class _Position:
 
 
 class StubTradeService:
-    """`get_positions`만 쓰는 TradeService. `fail=True`면 예외를 던진다."""
+    """`get_positions`·`get_realized_pnl`만 쓰는 TradeService.
 
-    def __init__(self, *, fail: bool = False) -> None:
+    `fail=True`면 `get_positions`, `fail_realized=True`면 `get_realized_pnl`이
+    예외를 던진다.
+    """
+
+    def __init__(self, *, fail: bool = False, fail_realized: bool = False) -> None:
         self._fail = fail
+        self._fail_realized = fail_realized
 
     async def get_positions(
         self,
@@ -73,6 +82,11 @@ class StubTradeService:
         if self._fail:
             raise RuntimeError("simulated get_positions failure")
         return []
+
+    async def get_realized_pnl(self, *, account_id: str, start: Any, end: Any) -> float:
+        if self._fail_realized:
+            raise RuntimeError("simulated get_realized_pnl failure")
+        return 0.0
 
 
 def _account() -> Account:
@@ -167,9 +181,12 @@ class TestBuyRejectedOnQueryFailure:
         _assert_rejected(cap, TREASURY_REASON)
 
     @pytest.mark.asyncio
-    async def test_positions_exception_rejects_buy(self) -> None:
+    @pytest.mark.parametrize("trade_fail", TRADE_FAILURES)
+    async def test_positions_exception_rejects_buy(
+        self, trade_fail: dict[str, bool]
+    ) -> None:
         eventbus, _, cap = _build(
-            treasury=_healthy(), trade_service=StubTradeService(fail=True)
+            treasury=_healthy(), trade_service=StubTradeService(**trade_fail)
         )
 
         await eventbus.publish(_order("buy"))
@@ -177,10 +194,13 @@ class TestBuyRejectedOnQueryFailure:
         _assert_rejected(cap, POSITIONS_REASON)
 
     @pytest.mark.asyncio
-    async def test_treasury_reason_wins_when_both_fail(self) -> None:
+    @pytest.mark.parametrize("trade_fail", TRADE_FAILURES)
+    async def test_treasury_reason_wins_when_both_fail(
+        self, trade_fail: dict[str, bool]
+    ) -> None:
         eventbus, _, cap = _build(
-            treasury=_healthy(fail="get_latest_snapshot"),
-            trade_service=StubTradeService(fail=True),
+            treasury=_healthy(fail="get_prev_day_snapshot"),
+            trade_service=StubTradeService(**trade_fail),
         )
 
         await eventbus.publish(_order("buy"))
@@ -227,9 +247,12 @@ class TestSellUnchanged:
         assert cap.notifications == []
 
     @pytest.mark.asyncio
-    async def test_positions_exception_allows_sell(self) -> None:
+    @pytest.mark.parametrize("trade_fail", TRADE_FAILURES)
+    async def test_positions_exception_allows_sell(
+        self, trade_fail: dict[str, bool]
+    ) -> None:
         eventbus, _, cap = _build(
-            treasury=_healthy(), trade_service=StubTradeService(fail=True)
+            treasury=_healthy(), trade_service=StubTradeService(**trade_fail)
         )
 
         await eventbus.publish(_order("sell"))
@@ -281,7 +304,7 @@ class TestControls:
     @pytest.mark.asyncio
     async def test_missing_snapshots_and_budget_still_validate_buy(self) -> None:
         eventbus, engine, cap = _build(
-            treasury=_healthy(budget=None, prev_snapshot=None, latest_snapshot=None),
+            treasury=_healthy(budget=None, prev_snapshot=None),
             trade_service=StubTradeService(),
         )
         engine.add_account_rule(
@@ -310,17 +333,23 @@ class TestModifyUnchanged:
     @pytest.mark.parametrize(
         ("treasury", "trade_fail"),
         [
-            (None, False),
-            (_healthy(fail="get_latest_snapshot"), False),
-            (_healthy(), True),
+            (None, {}),
+            (_healthy(fail="get_prev_day_snapshot"), {}),
+            (_healthy(), {"fail": True}),
+            (_healthy(), {"fail_realized": True}),
         ],
-        ids=["no_treasury", "treasury_exception", "positions_exception"],
+        ids=[
+            "no_treasury",
+            "treasury_exception",
+            "positions_exception",
+            "realized_pnl_exception",
+        ],
     )
     async def test_modify_not_rejected_by_engine(
-        self, treasury: Any, trade_fail: bool
+        self, treasury: Any, trade_fail: dict[str, bool]
     ) -> None:
         eventbus, _, cap = _build(
-            treasury=treasury, trade_service=StubTradeService(fail=trade_fail)
+            treasury=treasury, trade_service=StubTradeService(**trade_fail)
         )
 
         for side in ("buy", "sell"):

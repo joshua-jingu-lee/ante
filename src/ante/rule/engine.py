@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable
+from datetime import date, datetime, time, timedelta, timezone
 from typing import TYPE_CHECKING, Any, TypeGuard
 
 from ante.core import clock
@@ -41,6 +42,8 @@ if TYPE_CHECKING:
     from ante.treasury.treasury import Treasury
 
 logger = logging.getLogger(__name__)
+
+_KST = timezone(timedelta(hours=9))
 
 _VALID_ORDER_SIDES: frozenset[str] = frozenset({"buy", "sell"})
 
@@ -432,12 +435,11 @@ class RuleEngine:
         return overall, reason, actions
 
     async def _query_treasury_data(
-        self, bot_id: str = ""
+        self, bot_id: str = "", today: date | None = None
     ) -> tuple[dict[str, float], str | None]:
         """Treasury 값과, 미주입·조회 예외면 ``treasury_unavailable``을 돌려준다."""
         failure: str | None = None
         result = {
-            "daily_pnl": 0.0,
             "total_pnl": 0.0,
             "prev_day_total_asset": 0.0,
             "total_asset": 0.0,
@@ -466,25 +468,56 @@ class RuleEngine:
                 logger.warning("Treasury 봇 예산 조회 실패: bot=%s", bot_id)
 
         try:
-            from datetime import timedelta
-
-            yesterday = (clock.now(None).date() - timedelta(days=1)).isoformat()
-            snapshot = await self._treasury.get_daily_snapshot(yesterday)
-            if snapshot is not None:
-                result["prev_day_total_asset"] = snapshot.get("total_asset", 0.0)
+            day = today or clock.now(_KST).date()
+            snapshot = await self._treasury.get_prev_day_snapshot(day.isoformat())
         except Exception:
             failure = "treasury_unavailable"
             logger.warning("Treasury 전일 스냅샷 조회 실패: %s", self._account_id)
-
-        try:
-            latest = await self._treasury.get_latest_snapshot()
-            if latest is not None:
-                result["daily_pnl"] = latest.get("daily_pnl", 0.0)
-        except Exception:
-            failure = "treasury_unavailable"
-            logger.warning("Treasury 최신 스냅샷 조회 실패: %s", self._account_id)
+        else:
+            total_asset = None if snapshot is None else snapshot.get("total_asset")
+            if _is_finite_quantity(total_asset):
+                result["prev_day_total_asset"] = float(total_asset)
+            self._warn_if_daily_loss_skipped(snapshot)
 
         return result, failure
+
+    def _warn_if_daily_loss_skipped(self, snapshot: dict[str, Any] | None) -> None:
+        """분모가 없거나 비양수·비유한이면, 켜진 일일 손실 규칙이 있을 때만 경고한다."""
+        value = None if snapshot is None else snapshot.get("total_asset")
+        if _is_finite_quantity(value) and value > 0:
+            return
+        if not any(
+            isinstance(rule, DailyLossLimitRule) and rule.enabled
+            for rule in self._account_rules
+        ):
+            return
+        logger.warning(
+            "일일 손실 판정 건너뜀 — 전일 총 자산 없음: account=%s snapshot_date=%s "
+            "total_asset=%s",
+            self._account_id,
+            None if snapshot is None else snapshot.get("snapshot_date"),
+            value,
+        )
+
+    async def _query_daily_realized_pnl(
+        self, today: date | None = None
+    ) -> float | None:
+        """KST 하루의 계좌 실현 손익. 조회 예외·비수·비유한 값이면 ``None``."""
+        if self._trade_service is None:
+            return 0.0
+        start = datetime.combine(today or clock.now(_KST).date(), time(), tzinfo=_KST)
+        try:
+            value = await self._trade_service.get_realized_pnl(
+                account_id=self._account_id,
+                start=start,
+                end=start + timedelta(days=1),
+            )
+        except Exception:
+            value = math.nan
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            return float(value)
+        logger.warning("당일 실현 손익 조회 실패: %s", self._account_id)
+        return None
 
     async def _calculate_bot_unrealized_pnl(
         self, bot_id: str, current_price: float, order_symbol: str
@@ -929,7 +962,7 @@ class RuleEngine:
             currency = "KRW"
             trading_hours_start = "09:00"
             trading_hours_end = "15:30"
-            timezone = "Asia/Seoul"
+            account_timezone = "Asia/Seoul"
             if self._account_service is not None:
                 try:
                     account = await self._account_service.get(self._account_id)
@@ -937,14 +970,15 @@ class RuleEngine:
                     currency = account.currency
                     trading_hours_start = account.trading_hours_start
                     trading_hours_end = account.trading_hours_end
-                    timezone = account.timezone
+                    account_timezone = account.timezone
                 except Exception:
                     logger.warning(
                         "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
                     )
 
+            today = clock.now(_KST).date()
             treasury_data, input_failure = await self._query_treasury_data(
-                bot_id=event.bot_id
+                bot_id=event.bot_id, today=today
             )
 
             current_price = event.price or 0.0
@@ -955,6 +989,10 @@ class RuleEngine:
             )
             if unrealized_pnl is None:
                 unrealized_pnl = 0.0
+                input_failure = input_failure or "positions_unavailable"
+            daily_pnl = await self._query_daily_realized_pnl(today)
+            if daily_pnl is None:
+                daily_pnl = 0.0
                 input_failure = input_failure or "positions_unavailable"
             if input_failure is not None and event.side == "buy":
                 input_reason = f"{ACCOUNT_NOT_READY_REASON}: {input_failure}"
@@ -988,7 +1026,7 @@ class RuleEngine:
                 account_status=account_status,
                 currency=currency,
                 unrealized_pnl=unrealized_pnl,
-                daily_pnl=treasury_data["daily_pnl"],
+                daily_pnl=daily_pnl,
                 total_pnl=treasury_data["total_pnl"],
                 prev_day_total_asset=treasury_data["prev_day_total_asset"],
                 total_asset=treasury_data["total_asset"],
@@ -996,7 +1034,7 @@ class RuleEngine:
                 bot_allocated_budget=treasury_data["bot_allocated_budget"],
                 trading_hours_start=trading_hours_start,
                 trading_hours_end=trading_hours_end,
-                timezone=timezone,
+                timezone=account_timezone,
             )
 
             result = self.evaluate(context)
@@ -1173,7 +1211,7 @@ class RuleEngine:
         currency = "KRW"
         trading_hours_start = "09:00"
         trading_hours_end = "15:30"
-        timezone = "Asia/Seoul"
+        account_timezone = "Asia/Seoul"
         if self._account_service is not None:
             try:
                 account = await self._account_service.get(self._account_id)
@@ -1181,13 +1219,16 @@ class RuleEngine:
                 currency = account.currency
                 trading_hours_start = account.trading_hours_start
                 trading_hours_end = account.trading_hours_end
-                timezone = account.timezone
+                account_timezone = account.timezone
             except Exception:
                 logger.warning(
                     "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
                 )
 
-        treasury_data, _ = await self._query_treasury_data(bot_id=event.bot_id)
+        today = clock.now(_KST).date()
+        treasury_data, _ = await self._query_treasury_data(
+            bot_id=event.bot_id, today=today
+        )
 
         modify_price = float(event.price)
         unrealized_pnl = (
@@ -1198,6 +1239,7 @@ class RuleEngine:
             )
             or 0.0
         )
+        daily_pnl = await self._query_daily_realized_pnl(today) or 0.0
 
         context = RuleContext(
             bot_id=event.bot_id,
@@ -1212,7 +1254,7 @@ class RuleEngine:
             account_status=account_status,
             currency=currency,
             unrealized_pnl=unrealized_pnl,
-            daily_pnl=treasury_data["daily_pnl"],
+            daily_pnl=daily_pnl,
             total_pnl=treasury_data["total_pnl"],
             prev_day_total_asset=treasury_data["prev_day_total_asset"],
             total_asset=treasury_data["total_asset"],
@@ -1220,7 +1262,7 @@ class RuleEngine:
             bot_allocated_budget=treasury_data["bot_allocated_budget"],
             trading_hours_start=trading_hours_start,
             trading_hours_end=trading_hours_end,
-            timezone=timezone,
+            timezone=account_timezone,
         )
 
         try:

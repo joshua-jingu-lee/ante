@@ -15,8 +15,7 @@ from typing import Any
 TREASURY_QUERIES = (
     "get_summary",
     "get_budget",
-    "get_daily_snapshot",
-    "get_latest_snapshot",
+    "get_prev_day_snapshot",
 )
 
 
@@ -26,7 +25,7 @@ class StubBudget:
 
 
 class StubTreasury:
-    """룰 엔진이 읽는 Treasury 조회 넷만 흉내 낸다."""
+    """룰 엔진이 읽는 Treasury 조회 셋만 흉내 낸다."""
 
     def __init__(
         self,
@@ -35,7 +34,6 @@ class StubTreasury:
         summary: dict[str, float] | None = None,
         budget: float | None = None,
         prev_snapshot: dict[str, Any] | None = None,
-        latest_snapshot: dict[str, Any] | None = None,
     ) -> None:
         if fail is not None and fail not in TREASURY_QUERIES:
             raise ValueError(f"unknown treasury query: {fail}")
@@ -47,7 +45,6 @@ class StubTreasury:
         }
         self._budget = budget
         self._prev = prev_snapshot
-        self._latest = latest_snapshot
 
     def _maybe_fail(self, name: str) -> None:
         if self._fail == name:
@@ -61,13 +58,9 @@ class StubTreasury:
         self._maybe_fail("get_budget")
         return None if self._budget is None else StubBudget(self._budget)
 
-    async def get_daily_snapshot(self, date: str) -> dict[str, Any] | None:
-        self._maybe_fail("get_daily_snapshot")
+    async def get_prev_day_snapshot(self, before_date: str) -> dict[str, Any] | None:
+        self._maybe_fail("get_prev_day_snapshot")
         return self._prev
-
-    async def get_latest_snapshot(self) -> dict[str, Any] | None:
-        self._maybe_fail("get_latest_snapshot")
-        return self._latest
 
 
 class StubTreasuryManager:

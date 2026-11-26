@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import statistics
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ante.account.errors import InvalidAccountIdError
@@ -175,6 +175,30 @@ class PerformanceTracker:
             )
             for row in rows
         ]
+
+    async def get_realized_pnl(
+        self, *, account_id: str, start: datetime, end: datetime
+    ) -> float:
+        """계좌의 ``[start, end)`` 매도 실현 손익 합. naive면 ``ValueError``."""
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError("get_realized_pnl needs aware datetimes")
+        try:
+            row = await self._db.fetch_one(
+                """SELECT COALESCE(SUM(pnl), 0.0) AS realized_pnl
+                   FROM position_history
+                   WHERE account_id = ? AND action = 'sell'
+                     AND timestamp >= ? AND timestamp < ?""",
+                (
+                    account_id,
+                    start.astimezone(UTC).isoformat(),
+                    end.astimezone(UTC).isoformat(),
+                ),
+            )
+        except OperationalError as exc:
+            if not is_missing_table(exc):
+                raise
+            return 0.0
+        return 0.0 if row is None else float(row["realized_pnl"])
 
     async def get_weekly_summary(
         self,

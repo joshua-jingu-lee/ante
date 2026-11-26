@@ -157,6 +157,11 @@ class FakeTradeService:
         scoped = self._positions.get(account_id or "", [])
         return [p for p in scoped if p.bot_id == bot_id]
 
+    async def get_realized_pnl(
+        self, *, account_id: str, start: datetime, end: datetime
+    ) -> float:
+        return 0.0
+
 
 def _iso_age(seconds: float) -> str:
     """현재로부터 ``seconds`` 초 전의 tz-aware ISO 문자열."""
