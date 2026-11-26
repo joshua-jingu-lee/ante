@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -787,12 +788,12 @@ class TestLoopDate:
         self, monkeypatch, make_scheduler, eventbus
     ):
         """Waking before midnight still reports the next-day target's date."""
-        sched = make_scheduler(time(0, 5))
+        sched = make_scheduler(time(0, 40))
         events, delays, _ = await self._run_loop(
             monkeypatch,
             sched,
             eventbus,
-            start=datetime(2026, 3, 19, 0, 6, 0, tzinfo=KST),
+            start=datetime(2026, 3, 19, 0, 41, 0, tzinfo=KST),
             wake_at=datetime(2026, 3, 19, 23, 59, 0, tzinfo=KST),
         )
 
@@ -815,3 +816,65 @@ class TestLoopDate:
         assert [e.report_date for e in events] == [
             fake_clock.now(KST).date().isoformat()
         ]
+
+    def _record_trades_until_now(self, trade_recorder, trades):
+        async def get_trades(*, from_date, to_date, **kwargs):
+            now = clock.now(KST)
+            return [t for t in trades if from_date <= t.timestamp <= min(to_date, now)]
+
+        trade_recorder.get_trades = AsyncMock(side_effect=get_trades)
+
+    async def test_report_after_midnight_covers_the_closing_day(
+        self, monkeypatch, make_scheduler, eventbus, trade_recorder, treasury
+    ):
+        """A 23:59 close reports the closing day at 00:29 the next day (#3093)."""
+        trade = replace(
+            _make_trade(side="buy", price=50000.0, quantity=10.0),
+            timestamp=datetime(2026, 11, 24, 12, 0, tzinfo=KST),
+        )
+        self._record_trades_until_now(trade_recorder, [trade])
+        notifications: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
+        sched = make_scheduler(compute_report_time("23:59"))
+        events, delays, _ = await self._run_loop(
+            monkeypatch,
+            sched,
+            eventbus,
+            start=datetime(2026, 11, 24, 0, 30, tzinfo=KST),
+            wake_at=datetime(2026, 11, 25, 0, 29, tzinfo=KST),
+        )
+
+        window = trade_recorder.get_trades.await_args.kwargs
+        assert window["from_date"] == datetime(2026, 11, 24, tzinfo=KST)
+        assert window["to_date"] == datetime.combine(
+            date(2026, 11, 24), time.max, tzinfo=KST
+        )
+        assert delays[0] == 86_340.0
+        assert [e.report_date for e in events] == ["2026-11-24"]
+        assert events[0].trade_count == 1
+        assert events[0].net_trade_amount == 500_000.0
+        assert [n.title for n in notifications] == ["일일 성과 요약 (2026-11-24)"]
+        treasury.get_daily_snapshot.assert_awaited_once_with("2026-11-23")
+        treasury.save_daily_snapshot.assert_awaited_once_with("2026-11-24")
+
+    async def test_report_before_midnight_keeps_the_same_day(
+        self, monkeypatch, make_scheduler, eventbus, trade_recorder, treasury
+    ):
+        """A 15:30 close still reports the same day at 16:00."""
+        sched = make_scheduler(compute_report_time("15:30"))
+        events, _, _ = await self._run_loop(
+            monkeypatch,
+            sched,
+            eventbus,
+            start=datetime(2026, 11, 24, 15, 0, tzinfo=KST),
+            wake_at=datetime(2026, 11, 24, 16, 0, tzinfo=KST),
+        )
+
+        window = trade_recorder.get_trades.await_args.kwargs
+        assert window["from_date"] == datetime(2026, 11, 24, tzinfo=KST)
+        assert window["to_date"] == datetime.combine(
+            date(2026, 11, 24), time.max, tzinfo=KST
+        )
+        assert [e.report_date for e in events] == ["2026-11-24"]
+        treasury.get_daily_snapshot.assert_awaited_once_with("2026-11-23")
+        treasury.save_daily_snapshot.assert_awaited_once_with("2026-11-24")

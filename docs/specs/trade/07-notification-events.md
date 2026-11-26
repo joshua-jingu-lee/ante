@@ -74,8 +74,11 @@ Account 모듈의 `trading_hours_end` + 30분을 실행 시각으로 사용한�
 |--------|--------------------|-----------|-----------|
 | kis-domestic | 15:30 | Asia/Seoul | 16:00 KST |
 | kis-overseas | 16:00 | America/New_York | 16:30 ET |
+| test·mock | 23:59 | Asia/Seoul | 다음 날 00:29 KST |
 
 > 현재 구현체는 `DEFAULT_REPORT_TIME = time(16, 0)`으로 하드코딩되어 있다. Account 기반 시각 참조로 변경 필요.
+
+보고 날짜(`report_date`, 조회하는 하루, 알림 제목의 날짜)는 마감 시각(`trading_hours_end`)의 날짜다. 실행 시각이 자정을 넘으면(예: 23:59 마감 → 다음 날 00:29) 전날을 보고한다.
 
 #### 이벤트 발행
 

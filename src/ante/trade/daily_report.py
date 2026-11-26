@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 KST = timezone(timedelta(hours=9))
 DEFAULT_REPORT_TIME = time(16, 0)
+_REPORT_DELAY = timedelta(minutes=30)
 
 _CURRENCY_SYMBOLS: dict[str, str] = {
     "KRW": "원",
@@ -37,7 +38,7 @@ def compute_report_time(trading_hours_end: str) -> time:
         report_time (time).
     """
     h, m = trading_hours_end.split(":")
-    dt = datetime(2000, 1, 1, int(h), int(m)) + timedelta(minutes=30)
+    dt = datetime(2000, 1, 1, int(h), int(m)) + _REPORT_DELAY
     return dt.time()
 
 
@@ -256,7 +257,7 @@ class DailyReportScheduler:
             await asyncio.sleep(delay)
 
             try:
-                await self.run_once(target_date=target.date())
+                await self.run_once(target_date=(target - _REPORT_DELAY).date())
             except asyncio.CancelledError:
                 raise
             except Exception:
