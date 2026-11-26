@@ -9,7 +9,7 @@ Rule Engine이 발행하는 `NotificationEvent` 목록 (category: `"rule"`).
 ### 일일 손실 한도 초과
 
 **트리거**: `DailyLossLimitRule`에서 일일 손실률이 한도를 초과하여 매수 주문이 거부될 때
-**데이터 수집**: 계좌 ID, 봇 ID, 종목, 현재 손실률, 한도, 당일 PnL
+**데이터 수집**: 계좌 ID, 봇 ID, 종목, 현재 손실률, 한도, 당일 실현 손익
 
 ```
 ⚠️ 일일 손실 한도 초과

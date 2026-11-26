@@ -84,6 +84,7 @@ Treasury 퍼블릭 메서드:
 |--------|----------|--------|------|
 | `take_snapshot` | event: DailyReportEvent | dict | 이벤트의 성과 필드 + get_summary() 자산 현황을 합쳐 스냅샷 기록. INSERT OR REPLACE. 저장한 스냅샷 dict 반환 |
 | `get_daily_snapshot` | snapshot_date: str | dict \| None | 특정일 스냅샷 조회 |
+| `get_prev_day_snapshot` | before_date: str | dict \| None | `snapshot_date < before_date`인 가장 최근 스냅샷 조회. 없으면 None. RuleEngine이 일일 손실 한도의 분모(KST 오늘 이전)로 쓴다 |
 | `get_snapshots` | start_date: str, end_date: str | list[dict] | 기간 내 스냅샷 목록 조회 (차트용) |
 
 ### 설계 결정

@@ -14,6 +14,7 @@
 | `get_positions` | `bot_id: str`, `include_closed: bool = False` | `list[PositionSnapshot]` | 봇의 현재 포지션 조회 |
 | `get_all_positions` | — | `list[PositionSnapshot]` | 전체 봇의 모든 포지션 조회 (대사 계좌 합산 검증용) |
 | `get_position_history` | `bot_id: str`, `symbol: str \| None` | `list[dict]` | 포지션 변동 이력 조회 |
+| `get_realized_pnl` | `account_id: str`, `start: datetime`, `end: datetime` | `float` | PerformanceTracker.get_realized_pnl 위임. RuleEngine이 일일 손실 한도의 분자로 쓴다 |
 | `get_performance` | `account_id: str`, `bot_id: str \| None`, `strategy_id: str \| None`, `from_date: datetime \| None`, `to_date: datetime \| None` | `PerformanceMetrics` | 성과 지표 조회. account_id 필수 |
 | `get_summary` | `bot_id: str` | `dict` | 봇 요약 정보 (현재 포지션 + 성과 지표 + 최근 거래) |
 | `correct_position` | `bot_id: str`, `symbol: str`, `quantity: float`, `avg_price: float \| None`, `reason: str = ""` | `dict` | 포지션을 브로커 기준으로 강제 보정. Reconciler가 호출. 보정 내역(old/new 값) 반환 |

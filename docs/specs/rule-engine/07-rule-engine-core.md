@@ -132,10 +132,10 @@ OrderRequestEvent preflight 도메인 검증(`side`/`order_type`/`symbol`/`price
 
 > 소스: `RuleEngine._on_order_request` (`src/ante/rule/engine.py`)
 
-미복구 매수 가드 뒤, RuleContext를 만들기 전에 엔진은 룰 판정 입력을 조회한다. Treasury에서 `get_summary`·`get_budget(bot_id)`(`bot_id`가 있을 때)·`get_daily_snapshot(전일)`·`get_latest_snapshot`을, TradeService에서 봇 포지션(`get_positions`)을 읽는다. 조회는 `buy`·`sell` 모두 수행한다.
+미복구 매수 가드 뒤, RuleContext를 만들기 전에 엔진은 룰 판정 입력을 조회한다. Treasury에서 `get_summary`·`get_budget(bot_id)`(`bot_id`가 있을 때)·`get_prev_day_snapshot(KST 오늘)`을, TradeService에서 봇 포지션(`get_positions`)과 계좌의 KST 오늘 실현 손익(`get_realized_pnl`)을 읽는다. 조회는 `buy`·`sell` 모두 수행한다.
 
-- **매수 거부**: `side == "buy"`이고 Treasury가 주입되지 않았거나 Treasury 조회 중 하나라도 예외를 던지면 `_build_safe_rejected_event(reason="account_not_ready: treasury_unavailable")`와 `build_not_ready_notification`을 한 건씩 발행하고 룰 평가 없이 return한다. 포지션 조회가 예외를 던지면 같은 모양으로 사유가 `account_not_ready: positions_unavailable`이다. 둘 다 실패하면 사유는 `treasury_unavailable`이다.
+- **매수 거부**: `side == "buy"`이고 Treasury가 주입되지 않았거나 Treasury 조회 중 하나라도 예외를 던지면 `_build_safe_rejected_event(reason="account_not_ready: treasury_unavailable")`와 `build_not_ready_notification`을 한 건씩 발행하고 룰 평가 없이 return한다. 포지션 또는 실현 손익 조회가 예외를 던지면 같은 모양으로 사유가 `account_not_ready: positions_unavailable`이다. 둘 다 실패하면 사유는 `treasury_unavailable`이다.
 - **룰 구성과 무관**: 계좌·전략에 켜진 룰이 그 값을 읽는지와 상관없이 거부한다. 손실 룰을 하나도 켜지 않은 계좌와 가상 계좌도 조회 장애 동안 매수가 막히고, 그 순간 트리거된 스탑 매수는 다시 걸리지 않는다(readiness 차단과 같은 성질).
 - **사유 토큰은 둘뿐**: 어느 조회가 실패했는지는 사유에 담지 않고 warning 로그로 남긴다. 알림의 중복 묶음 키가 장애 동안 바뀌지 않게 하기 위해서다.
 - **매도·정정은 불변**: `side == "sell"`(청산 매도·스탑 매도 트리거 포함)과 `OrderModifyEvent`는 실패한 값을 `0.0`으로 채워 룰을 평가한다.
-- **실패가 아닌 것**: 조회가 성공했지만 값이 없는 경우(전일·최신 스냅샷 없음, 봇 예산 없음)와 TradeService 미주입은 지금처럼 `0.0`으로 채우며 거부 사유가 아니다. 스냅샷이 없을 때의 처리는 #2622에서 정한다.
+- **실패가 아닌 것**: 조회가 성공했지만 값이 없는 경우(오늘 이전 스냅샷 없음, 봇 예산 없음)와 TradeService 미주입은 지금처럼 `0.0`으로 채우며 거부 사유가 아니다. 오늘 이전 스냅샷이 없거나 그 `total_asset`이 0 이하·비유한이면 일일 손실 판정은 건너뛰고, 계좌에 켜진 `DailyLossLimitRule`이 있을 때만 주문마다 warning 로그(계좌·스냅샷 날짜·값)를 남긴다. 대체 분모는 #2621에서 정한다.

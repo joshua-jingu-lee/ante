@@ -1968,6 +1968,18 @@ class Treasury:
             return None
         return self._row_to_snapshot(rows[0])
 
+    async def get_prev_day_snapshot(self, before_date: str) -> dict[str, Any] | None:
+        """``snapshot_date < before_date``인 가장 최근 스냅샷. 없으면 None."""
+        rows = await self._db.fetch_all(
+            """SELECT * FROM treasury_daily_snapshots
+               WHERE account_id = ? AND snapshot_date < ?
+               ORDER BY snapshot_date DESC LIMIT 1""",
+            (self._account_id, before_date),
+        )
+        if not rows:
+            return None
+        return self._row_to_snapshot(rows[0])
+
     async def get_latest_snapshot(self) -> dict[str, Any] | None:
         """가장 최근 일별 스냅샷 조회.
 
