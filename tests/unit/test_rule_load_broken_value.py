@@ -518,7 +518,8 @@ async def test_broken_item_log_names_effective_position_without_values(
         category="rule",
         changed_by="test",
     )
-    caplog.set_level(logging.INFO, logger="ante.rule.engine")
+    caplog.set_level(logging.INFO)
+    caplog.clear()
     manager = RuleEngineManager(eventbus=bus, account_service=MagicMock())
     await manager.initialize_all([account], dynamic_config=dyn)
 
@@ -647,6 +648,7 @@ async def test_dropped_item_is_logged_once_without_values(db, caplog) -> None:
     world = await _item_broken_world(db, value, "dynamic")
     cap = _Captured(world.bus)
     caplog.set_level(logging.INFO)
+    caplog.clear()
 
     await _update_with_bus(world)
 
