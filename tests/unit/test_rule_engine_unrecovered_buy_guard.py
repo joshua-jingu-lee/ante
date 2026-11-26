@@ -36,7 +36,11 @@ from ante.eventbus.events import (
     OrderValidatedEvent,
 )
 from ante.rule import RuleEngine
-from tests.unit._rule_engine_helpers import StubTreasury, StubTreasuryManager
+from tests.unit._rule_engine_helpers import (
+    StubTreasury,
+    StubTreasuryManager,
+    fixed_quote,
+)
 
 ACCOUNT = "domestic"
 BOT = "bot1"
@@ -182,7 +186,7 @@ def _build_engine(
     allow_overlap: bool = False,
     min_age: float = 60.0,
 ) -> RuleEngine:
-    return RuleEngine(
+    engine = RuleEngine(
         eventbus=eventbus,
         account_id=ACCOUNT,
         treasury=StubTreasury(),
@@ -194,6 +198,8 @@ def _build_engine(
         account=_gate_account(),
         runtime_readiness=_gate_ready_registry(),
     )
+    engine.set_market_price_resolver(fixed_quote)
+    return engine
 
 
 def _capture(eventbus: EventBus) -> _Captured:
@@ -698,6 +704,7 @@ class TestRuleEngineManagerPropagatesGuardConfig:
             runtime_readiness=_gate_ready_registry(),
         )
         manager.create_engine(ACCOUNT, account=_gate_account())
+        manager.set_market_price_resolver(ACCOUNT, fixed_quote)
         cap = _capture(eventbus)
 
         await eventbus.publish(_buy_order())

@@ -31,7 +31,7 @@ from ante.rule import (
     UnrealizedLossLimitRule,
 )
 from ante.rule.exceptions import RuleConfigError
-from tests.unit._rule_engine_helpers import StubTreasury
+from tests.unit._rule_engine_helpers import StubTreasury, fixed_quote
 
 
 class _UserBaseException(BaseException):
@@ -816,6 +816,7 @@ class TestRuleEngineEventBus:
             # #2398: 계층1 gate 통과(기존 order-request 동작 보존).
             runtime_readiness=_gate_ready_registry(),
         )
+        engine.set_market_price_resolver(fixed_quote)
         engine.start()
         return engine
 
@@ -4985,6 +4986,7 @@ class TestRuleEngineEventBus:
             account_service=mock_account_service,
             runtime_readiness=_gate_ready_registry(),
         )
+        engine.set_market_price_resolver(fixed_quote)
 
         await engine._on_order_request(
             OrderRequestEvent(
@@ -6365,6 +6367,7 @@ class TestRuleEngineWarnEventBus:
             runtime_readiness=_gate_ready_registry(),
         )
         engine.add_account_rule(_WarnRule("w1", {"name": "Warn1"}))
+        engine.set_market_price_resolver(fixed_quote)
         engine.start()
         return engine
 

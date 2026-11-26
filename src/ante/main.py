@@ -763,7 +763,7 @@ async def _init_gateway(s: Services) -> None:
 
     _init_context_factory(s)
 
-    if s.treasury_manager is not None and s.api_gateway is not None:
+    if s.api_gateway is not None:
         gateway = s.api_gateway
         for account in accounts:
 
@@ -776,15 +776,27 @@ async def _init_gateway(s: Services) -> None:
 
                 return _resolver
 
-            try:
-                s.treasury_manager.set_order_reserve_price_resolver(
-                    account.account_id, _make_resolver(account.account_id)
-                )
-            except KeyError:
-                logger.debug(
-                    "Treasury 미등록 계좌 — order_reserve_price_resolver 주입 생략: %s",
-                    account.account_id,
-                )
+            if s.treasury_manager is not None:
+                try:
+                    s.treasury_manager.set_order_reserve_price_resolver(
+                        account.account_id, _make_resolver(account.account_id)
+                    )
+                except KeyError:
+                    logger.debug(
+                        "Treasury 미등록 계좌 — order_reserve_price_resolver "
+                        "주입 생략: %s",
+                        account.account_id,
+                    )
+            if s.rule_engine_manager is not None:
+                try:
+                    s.rule_engine_manager.set_market_price_resolver(
+                        account.account_id, _make_resolver(account.account_id)
+                    )
+                except KeyError:
+                    logger.debug(
+                        "RuleEngine 미등록 계좌 — 시장가 시세 조회 주입 생략: %s",
+                        account.account_id,
+                    )
 
     broker_init_accounts = _broker_ready_init_accounts(s, accounts)
 
@@ -2009,6 +2021,13 @@ async def _shutdown(s: Services) -> None:
                 exc_info=True,
             )
     s.stream_integrations.clear()
+
+    if s.rule_engine_manager is not None:
+        try:
+            await s.rule_engine_manager.aclose()
+            logger.info("RuleEngine 시세 조회 정리 완료")
+        except Exception:
+            logger.warning("RuleEngine 시세 조회 정리 실패", exc_info=True)
 
     if s.api_gateway:
         s.api_gateway.stop()

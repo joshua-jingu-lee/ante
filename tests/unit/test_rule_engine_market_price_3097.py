@@ -234,6 +234,14 @@ async def _publish(bus: EventBus, event: Any, guard: float = 5.0) -> None:
     await asyncio.wait_for(bus.publish(event), guard)
 
 
+async def _until(predicate: Callable[[], bool], guard: float = 2.0) -> None:
+    async def _spin() -> None:
+        while not predicate():
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(_spin(), guard)
+
+
 # ── (a) 재현: 시장가 노출·포지션 ────────────────────────────────────────
 
 
@@ -519,16 +527,16 @@ class TestInflightLookup:
         fake = _FakeClock(100.0)
         waits: list[float] = []
 
-        async def _spy_wait_for(aw: Any, timeout: float | None) -> Any:
+        async def _spy_wait(aws: Any, *, timeout: float | None = None) -> Any:
             waits.append(float(timeout or 0.0))
-            aw.cancel()
-            raise TimeoutError
+            return set(), set(aws)
 
         resolver = BlockingResolver()
         bus, engine, cap = _build(resolver=resolver)
         with clock.use_clock(fake):
-            monkeypatch.setattr(engine_mod.asyncio, "wait_for", _spy_wait_for)
+            monkeypatch.setattr(engine_mod.asyncio, "wait", _spy_wait)
             await bus.publish(_order("buy"))
+            await asyncio.sleep(0)
             fake.t = 107.0
             await bus.publish(_order("buy"))
             fake.t = 110.5
@@ -636,8 +644,7 @@ class TestInflightLookup:
         bus, engine, cap = _build(resolver=resolver)
 
         waiting = asyncio.create_task(bus.publish(_order("buy")))
-        while resolver.calls == 0:
-            await asyncio.sleep(0)
+        await _until(lambda: resolver.calls > 0)
         await asyncio.wait_for(engine.aclose(), 1.0)
         await asyncio.wait_for(waiting, 1.0)
 
@@ -651,6 +658,7 @@ class TestInflightLookup:
             account_service=AsyncMock(),
             treasury_manager=StubTreasuryManager(_treasury()),
             trade_service=StubTradeService(),
+            runtime_readiness=_ready_registry(),
         )
         engine = manager.create_engine(ACCOUNT, None, account=_account())
         resolver = BlockingResolver()
@@ -659,8 +667,7 @@ class TestInflightLookup:
             manager.set_market_price_resolver("missing", resolver)
 
         waiting = asyncio.create_task(bus.publish(_order("buy")))
-        while resolver.calls == 0:
-            await asyncio.sleep(0)
+        await _until(lambda: resolver.calls > 0)
         await asyncio.wait_for(manager.aclose(), 1.0)
         await asyncio.wait_for(waiting, 1.0)
 
