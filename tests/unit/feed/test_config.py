@@ -551,6 +551,25 @@ class TestSetApiKeyAtomicWrite:
         assert cfg.env_path.read_bytes() == before
         assert _leftovers(cfg) == []
 
+    def test_fdopen_failure_leaves_no_temp_file(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        before = _seed(cfg)
+        real_fdopen = os.fdopen
+
+        def failing_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+            ino = os.fstat(fd).st_ino
+            if any(p.stat().st_ino == ino for p in cfg.feed_dir.iterdir()):
+                os.close(fd)
+                raise OSError(24, "Too many open files")
+            return real_fdopen(fd, *args, **kwargs)
+
+        monkeypatch.setattr(os, "fdopen", failing_fdopen)
+        with pytest.raises(OSError, match="Too many open files"):
+            cfg.set_api_key("ANTE_DART_API_KEY", "newkey")
+        assert cfg.env_path.read_bytes() == before
+        assert _leftovers(cfg) == []
+
     def test_new_file_bytes_only_reach_0600_file(
         self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
     ) -> None:
