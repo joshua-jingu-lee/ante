@@ -35,6 +35,15 @@ class PositionSizeRule(Rule):
         return errors
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
+        if context.side == "sell":
+            return RuleEvaluation(
+                rule_id=self.rule_id,
+                rule_name=self.name,
+                result=RuleResult.PASS,
+                action=RuleAction.LOG,
+                message="Sell order is always allowed for position liquidation",
+            )
+
         max_position_percent = self.config.get("max_position_percent", 0.10)
         max_position_amount = self.config.get("max_position_amount", float("inf"))
 
