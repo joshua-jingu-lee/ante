@@ -1207,6 +1207,7 @@ async def _init_daily_report_scheduler(s: Services) -> None:
         compute_report_time,
     )
 
+    assert s.eventbus is not None
     accounts = await s.account_service.list() if s.account_service else []
     for account in accounts:
         account_id = account.account_id
