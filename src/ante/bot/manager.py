@@ -34,6 +34,8 @@ from ante.eventbus.events import NotificationEvent, OrderCancelEvent
 from ante.strategy.exceptions import StrategyError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ante.account.service import AccountService
     from ante.bot.context_factory import StrategyContextFactory
     from ante.bot.signal_channel_registry import SignalChannelRegistry
@@ -1177,6 +1179,7 @@ class BotManager:
             restart.cancel()
         was_running = bot.status == BotStatus.RUNNING
         if was_running:
+            self._last_cleanup.pop(bot.bot_id, None)
             self._suspending_bot_ids.add(bot.bot_id)
             try:
                 await bot.stop()
@@ -1213,29 +1216,30 @@ class BotManager:
     async def _run_suspension_cleanup(
         self, account_id: str, expired: list[StopOrder]
     ) -> None:
-        """정리 태스크 본문: 예외는 로그와 critical 알림, 끝나면 등록을 지운다."""
+        """정리 태스크 본문: 회차마다 돌고, 그 사이 정지가 예약한 재실행만 더 돈다."""
         task = asyncio.current_task()
         try:
-            await self._sweep_rounds(account_id, expired)
+            while True:
+                await self._sweep_round(account_id, expired)
+                if self._shutting_down or account_id not in self._suspension_rerun:
+                    return
+                expired = self._suspension_rerun.pop(account_id)
+        finally:
+            if self._suspension_cleanups.get(account_id) is task:
+                del self._suspension_cleanups[account_id]
+            self._suspension_rerun.pop(account_id, None)
+
+    async def _sweep_round(self, account_id: str, expired: list[StopOrder]) -> None:
+        """정리 한 회차와 결과 알림. 예외는 로그와 critical 알림(취소는 다시 올린다)."""
+        try:
+            cleanup = await self._sweep_account(account_id, tuple(expired))
+            await self._notify_sweep(account_id, cleanup)
         except asyncio.CancelledError:
             logger.warning("계좌 정지 — 주문 정리 취소: account=%s", account_id)
             raise
         except Exception:
             logger.exception("계좌 정지 — 주문 정리 실패: account=%s", account_id)
             await self._notify_cleanup_failure(account_id)
-        finally:
-            if self._suspension_cleanups.get(account_id) is task:
-                del self._suspension_cleanups[account_id]
-            self._suspension_rerun.pop(account_id, None)
-
-    async def _sweep_rounds(self, account_id: str, expired: list[StopOrder]) -> None:
-        """정리를 돌고 결과를 알린다. 그 사이 정지가 다시 왔으면 한 번 더 돈다."""
-        while True:
-            cleanup = await self._sweep_account(account_id, tuple(expired))
-            await self._notify_sweep(account_id, cleanup)
-            if account_id not in self._suspension_rerun:
-                return
-            expired = self._suspension_rerun.pop(account_id)
 
     async def _sweep_account(
         self, account_id: str, expired: tuple[StopOrder, ...]
@@ -1251,13 +1255,12 @@ class BotManager:
             logger.exception("계좌 정지 — 열린 주문 조회 실패: account=%s", account_id)
             return dataclasses.replace(cleanup, lookup_failed=True)
         for record in records:
-            bot = self._bots.get(record.bot_id)
-            if bot is not None and (
-                bot.status == BotStatus.RUNNING or bot in self._deleting_bots
-            ):
+            if self._sweep_skips(record):
                 cleanup = _tally(cleanup, "skipped")
                 continue
-            outcome = await self._request_cancel(record, "account_suspended")
+            outcome = await self._request_cancel(
+                record, "account_suspended", skip=self._sweep_skips
+            )
             cleanup = _tally(cleanup, outcome)
         logger.info(
             "계좌 정지 주문 정리: account=%s 취소 %d건, 실패 %d건, 건너뜀 %d건",
@@ -1267,6 +1270,13 @@ class BotManager:
             cleanup.skipped,
         )
         return cleanup
+
+    def _sweep_skips(self, record: OrderTrackerRecord) -> bool:
+        """계좌 정지 정리가 건너뛰는 주문(봇이 실행 중이거나 삭제 중)인지."""
+        bot = self._bots.get(record.bot_id)
+        return bot is not None and (
+            bot.status == BotStatus.RUNNING or bot in self._deleting_bots
+        )
 
     async def _notify_sweep(self, account_id: str, cleanup: StopCleanup) -> None:
         """계좌 정지 정리 결과 알림 한 건(정리할 것이 없었으면 내지 않는다)."""
@@ -1420,8 +1430,13 @@ class BotManager:
             cleanup = _tally(cleanup, outcome)
         return cleanup
 
-    async def _request_cancel(self, record: OrderTrackerRecord, reason: str) -> str:
-        """취소 요청의 유일한 출구: 진행 중이면 skipped, 닫혔으면 closed."""
+    async def _request_cancel(
+        self,
+        record: OrderTrackerRecord,
+        reason: str,
+        skip: Callable[[OrderTrackerRecord], bool] | None = None,
+    ) -> str:
+        """취소 요청의 유일한 출구: 진행 중이거나 재조회 뒤 skip이면 skipped."""
         order_id = record.order_id
         if order_id in self._cancelling_order_ids:
             return "skipped"
@@ -1429,6 +1444,8 @@ class BotManager:
         try:
             if not await self._still_open(order_id):
                 return "closed"
+            if skip is not None and skip(record):
+                return "skipped"
             await self._eventbus.publish(
                 OrderCancelEvent(
                     account_id=record.account_id,
