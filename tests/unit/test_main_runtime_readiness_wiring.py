@@ -1029,7 +1029,9 @@ def _stub_init_gateway_followups(s: Any, monkeypatch: pytest.MonkeyPatch) -> Non
     s.position_history = None
     s.fill_outbox_publisher = None
     s.virtual_executor = SimpleNamespace(_gateway=None)
-    s.bot_manager = SimpleNamespace(_context_factory=None)
+    s.bot_manager = SimpleNamespace(
+        _context_factory=None, set_stop_order_manager=lambda _manager: None
+    )
 
 
 @pytest.mark.asyncio
@@ -1254,7 +1256,9 @@ def _stub_init_gateway_infra_only(s: Any, monkeypatch: pytest.MonkeyPatch) -> No
     s.position_history = None
     s.fill_outbox_publisher = None
     s.virtual_executor = SimpleNamespace(_gateway=None)
-    s.bot_manager = SimpleNamespace(_context_factory=None)
+    s.bot_manager = SimpleNamespace(
+        _context_factory=None, set_stop_order_manager=lambda _manager: None
+    )
     # treasury 는 실제 _init_treasury_sync 가 쓰므로 reserve-price-resolver 주입
     # 블록(_init_gateway 후반)도 통과하도록 더블에 메서드를 추가한다.
     existing_treasury = s.treasury_manager

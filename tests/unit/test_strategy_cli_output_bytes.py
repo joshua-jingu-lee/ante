@@ -1074,9 +1074,22 @@ _STRATEGY_EDGE_BYTES: dict[tuple[str, str], tuple[str, str, int]] = {
         0,
     ),
     ("info_odd_params", "text"): (
+        (
+            "  이름             : my_strategy\n"
+            "  버전             : 1.0.0\n"
+            "  상태             : registered\n"
+            "  설명             : 테스트 전략\n"
+            "  작성자            : agent\n"
+            "  작성자 ID         : agent-1\n"
+            "  파일 경로          : strat.py\n"
+            "  등록일            : 2026-01-01T09:00:00+00:00\n"
+            "  투자 근거          : 모멘텀\n"
+            "  리스크            :\n"
+            "    - 급락\n"
+            "  파라미터           : ['window', 20]\n"
+        ),
         "",
-        "Error: EXECUTION_ERROR: 'list' object has no attribute 'items'\n",
-        1,
+        0,
     ),
     ("info_none_schema", "json"): (
         (

@@ -3,7 +3,7 @@
 `--format json` 출력을 스크립트나 에이전트로 읽고 있다면, 이 문서에서 고쳐야 할 경로를 찾으세요.
 
 > [!NOTE]
-> 이 문서는 명령이 직접 만든 JSON 성공 출력을 내던 CLI 명령을 공통 성공 봉투로 옮긴 뒤 처음 나오는 릴리스에 맞춘 스냅샷입니다. 옮긴 대상은 `feed`·`init`·`update`와 `signal connect`를 뺀 계약 명령입니다(`system start`는 전부터 봉투를 직접 냅니다). 이 문서는 그 전환과 그에 딸린 실패 출력의 변경만 다루며, 그 뒤의 변경은 담지 않습니다. 명령과 옵션의 현재 목록은 [CLI 레퍼런스](cli.md)에 있습니다.
+> 이 문서는 명령이 직접 만든 JSON 성공 출력을 내던 CLI 명령을 공통 성공 봉투로 옮긴 뒤 처음 나오는 릴리스에 맞춘 스냅샷입니다. 옮긴 대상은 `feed`·`init`·`update`와 `signal connect`를 뺀 계약 명령입니다(`system start`는 전부터 봉투를 직접 냅니다). 이 문서는 그 전환과 그에 딸린 실패 출력의 변경, 그리고 [`strategy info`의 text 출력 변경](#strategy-info의-text-출력-변경)에 적은 조건의 전략에서 달라지는 text 출력·종료 코드만 다루며, 그 뒤의 변경은 담지 않습니다. 명령과 옵션의 현재 목록은 [CLI 레퍼런스](cli.md)에 있습니다.
 
 ## 요약
 
@@ -11,8 +11,8 @@
 
 다음은 바뀌지 않았습니다.
 
-- text 출력. 예외는 [실패 출력](#실패-출력의-변경)에 적은 것뿐입니다.
-- 종료 코드.
+- text 출력. 예외는 [실패 출력](#-실패-출력의-변경)과 [`strategy info`의 text 출력 변경](#strategy-info의-text-출력-변경)에 적은 것뿐입니다.
+- 종료 코드. [`strategy info`의 text 출력 변경](#strategy-info의-text-출력-변경)에 적은 조건의 전략에서만 달라집니다.
 
 ```text
 # 전
@@ -334,16 +334,23 @@ JSON 모드의 실패는 다음 모양의 에러 봉투로 stdout에 한 줄로 
 | 시간 초과 | `서버 응답 시간 초과` | `Error: IPC_TIMEOUT: 서버 응답 시간 초과` |
 | 데몬이 거부 | `Invalid signal key` 등 | `Error: INVALID_SIGNAL_KEY: Invalid signal key` 등 |
 
-### text 출력의 예외 하나
+---
 
-`strategy info`는 전략의 파라미터 모양이 기대와 다르면 실패합니다. 전에는 표의 앞부분을 stdout에 낸 뒤 `Error: EXECUTION_ERROR: …`를 냈습니다. 이제는 stdout에 아무것도 내지 않고 같은 오류 한 줄만 냅니다. 종료 코드(1)는 그대로입니다.
+## `strategy info`의 text 출력 변경
+
+`get_params()`가 Mapping이 아닌 값을 돌려주거나 `get_risks()`가 리스트·튜플이 아닌 값을 돌려주는 전략에서 `strategy info`의 text 출력과 종료 코드가 달라졌습니다. 비어 있는 값은 전과 같이 생략됩니다. 그 밖의 전략은 아래의 stderr 경고 한 줄을 빼고 text 출력과 종료 코드가 그대로입니다.
+
+- 이제: 그 값이 내장 타입만으로 이루어져 있으면 `파라미터`·`리스크` 줄에 `repr` 한 줄로 내고 종료 코드 0으로 끝납니다.
+- 전에는: 값의 종류에 따라 달랐습니다. 분류되지 않은 오류(`Error: EXECUTION_ERROR: …`, 종료 코드 1)로 끝나거나(예: 리스트 파라미터, 숫자 위험 고지), 항목·글자마다 한 줄을 냈습니다(예: 문자열 위험 고지).
+
+이와 별개로, 전략 파일을 로드·인스턴스화하거나 메타를 읽다 실패하면 text·JSON 두 모드 모두 stderr에 경고 한 줄이 새로 나옵니다. stdout과 종료 코드는 전과 같습니다.
 
 ---
 
 ## ✅ 바뀌지 않은 것
 
-- **text 출력** — 위 실패 출력의 접두와 예외 하나를 빼고 그대로입니다.
-- **종료 코드** — 이 문서의 명령 모두 그대로입니다.
+- **text 출력** — 위 실패 출력의 접두와 [`strategy info`의 text 출력 변경](#strategy-info의-text-출력-변경)에 적은 것을 빼고 그대로입니다.
+- **종료 코드** — [`strategy info`의 text 출력 변경](#strategy-info의-text-출력-변경)에 적은 조건의 전략을 빼고 이 문서의 명령 모두 그대로입니다.
 - **전부터 봉투였던 명령의 JSON** — 다음 명령은 전부터 `{"status": "ok", "message", "data"}`를 냈고 그대로입니다.
   - `account activate`·`create`·`delete`·`repair-timezone`·`suspend`
   - `approval approve`·`cancel`·`cancel-invalid`·`reject`·`reopen`·`request`·`review`

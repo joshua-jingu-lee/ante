@@ -79,7 +79,7 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 |-----------|-----------|-------------|-------------|
 | `ante bot create` | `bot.create` | `BotManager.create_bot()` | 등록된 `strategy_id`를 서버 StrategyRegistry에서 해석하고 BotManager 인메모리 `_bots` 반영 필요 |
 | `ante bot start <bot_id>` | `bot.start` | `BotManager.get_bot()` + `account_service.get()` + `BotManager.start_bot()` | live 봇 존재 확인 + 계좌 프리셋의 필수 인증정보 preflight + asyncio task 생성 + `BotStartedEvent` 발행. 성공 시 audit `bot.start` 기록 (#1712) |
-| `ante bot stop <bot_id>` | `bot.stop` | `BotManager.get_bot()` + `BotManager.stop_bot()` | live 봇 존재 확인 + 실행 task 취소 + `BotStoppedEvent` 발행. 성공 시 audit `bot.stop` 기록 (#1712) |
+| `ante bot stop <bot_id>` | `bot.stop` | `BotManager.get_bot()` + `BotManager.stop_bot()` | live 봇 존재 확인 + 실행 task 취소 + `BotStoppedEvent` 발행 + 그 봇의 스탑 주문 만료·미체결 주문 취소(브로커 응답까지 기다린다, 응답 키는 그대로). 성공 시 audit `bot.stop` 기록 (#1712) |
 | `ante bot update <bot_id>` | `bot.update` | `BotManager.update_bot()` | 중지 상태 봇 설정을 서버 BotManager 기준으로 갱신 |
 | `ante bot status <bot_id>` | `bot.status` | `BotManager.get_bot()` (read-only) | live 조회. 응답은 `{"bot": info}` envelope이며 `strategy_registry`/`treasury_manager`/`trade_service`가 있는 경우 strategy/budget/positions를 동적으로 보강 (#1712) |
 | `ante bot list [--account]` | `bot.list` | `BotManager.list_bots()` (read-only) | live 봇 목록 조회. `--account` 필터 후 CLI 6-key(`bot_id`/`name`/`strategy_id`/`account_id`/`status`/`created_at`) projection, `{"bots": [...]}` envelope. 서버 정지 시 snapshot DB fallback |

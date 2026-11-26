@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from ante.core import clock
@@ -221,6 +222,14 @@ class StopOrderManager:
         logger.info("스탑 주문 취소: %s", stop_order_id)
         return True
 
+    async def expire_for_bot(self, bot_id: str, reason: str) -> list[StopOrder]:
+        """봇의 활성 스탑 주문을 첫 await 전에 모두 만료로 표시한 뒤 종결을 발행한다."""
+        targets = self.get_orders_for_bot(bot_id)
+        for order in targets:
+            order.expired = True
+        await self._shielded(self._publish_all_expired(targets, reason))
+        return targets
+
     def get_order(self, stop_order_id: str) -> StopOrder | None:
         """스탑 주문 조회."""
         return self._orders.get(stop_order_id)
@@ -385,7 +394,11 @@ class StopOrderManager:
 
     async def _expire_order(self, order: StopOrder, reason: str) -> None:
         """스탑 주문 만료 처리(shield 보장)."""
-        inner = asyncio.ensure_future(self._do_expire_order(order, reason))
+        await self._shielded(self._do_expire_order(order, reason))
+
+    async def _shielded(self, coro: Coroutine[Any, Any, None]) -> None:
+        """종결 발행을 shield 된 inner 로 돌리고 in-flight 목록에 둔다."""
+        inner = asyncio.ensure_future(coro)
         self._inflight_expires.add(inner)
         try:
             await asyncio.shield(inner)
@@ -400,7 +413,15 @@ class StopOrderManager:
         if order.triggered or order.expired:
             return
         order.expired = True
+        await self._publish_expired(order, reason)
 
+    async def _publish_all_expired(self, orders: list[StopOrder], reason: str) -> None:
+        """만료로 표시된 스탑 주문들의 종결 이벤트를 차례로 발행한다."""
+        for order in orders:
+            await self._publish_expired(order, reason)
+
+    async def _publish_expired(self, order: StopOrder, reason: str) -> None:
+        """만료로 표시된 스탑 주문의 종결 이벤트를 발행한다."""
         logger.info(
             "스탑 주문 만료: %s (%s)",
             order.stop_order_id,

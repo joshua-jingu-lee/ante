@@ -44,7 +44,7 @@ from ante.bot.bot import Bot, _transition_status
 from ante.bot.cold_path import cold_path_remove_bot
 from ante.bot.config import BOT_STATUS_TRANSITIONS, BotStatus
 from ante.bot.exceptions import BotError, BotNotFoundError, BotStateConflict
-from ante.bot.manager import BOT_SCHEMA
+from ante.bot.manager import BOT_SCHEMA, StopCleanup
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
@@ -445,7 +445,7 @@ async def test_stop_bot_moves_to_stopped(manager, ctx, events, db, prior):
     bot = await _enter(manager, ctx, prior)
     before = len(events)
 
-    assert await manager.stop_bot(BOT_ID) is None
+    assert await manager.stop_bot(BOT_ID) == StopCleanup()
 
     assert bot.status.value == "stopped"
     assert bot.stopped_at is not None

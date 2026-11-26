@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -330,6 +331,124 @@ class TestStrategyInfo:
             assert result.exit_code == 0
             data = json.loads(result.output)["data"]
             assert "params" not in data
+
+
+_ODD_HEAD = """
+from typing import Any
+from ante.strategy.base import Signal, Strategy, StrategyMeta
+class S(Strategy):
+    meta = StrategyMeta(
+        name="odd", version="1.0.0", description="d", author_name="a",
+        author_id="a", symbols=["005930"], timeframe="1d", exchange="KRX",
+    )
+    async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+        return []
+"""
+
+_LOADER_LOGGER = "ante.cli.commands.strategy"
+
+
+class TestStrategyInfoOddStrategyFile:
+    """#3065: 실제 StrategyLoader로 계약을 어긴 전략 파일을 읽는다."""
+
+    def _invoke(self, runner, tmp_path, body, *, fmt="text", exists=True):  # noqa: ANN001, ANN202
+        path = tmp_path / "odd.py"
+        if exists:
+            path.write_text(_ODD_HEAD + body, encoding="utf-8")
+        record = StrategyRecord(
+            strategy_id="odd-1",
+            name="odd",
+            version="1.0.0",
+            filepath=str(path),
+            status=StrategyStatus.REGISTERED,
+            registered_at=_NOW,
+            description="d",
+            author_name="a",
+            author_id="a",
+            validation_warnings=[],
+        )
+        registry = _mock_registry([record])
+        args = ["strategy", "info", "odd"]
+        if fmt == "json":
+            args = ["--format", "json", *args]
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new=_acm_factory((registry, _mock_db())),
+        ):
+            return runner.invoke(cli, args), str(path)
+
+    @pytest.mark.parametrize(
+        ("value", "line"),
+        [
+            ("['window', 20]", "  파라미터           : ['window', 20]"),
+            ("'a\\nb'", "  파라미터           : 'a\\nb'"),
+        ],
+    )
+    def test_non_dict_params_succeed_in_both_modes(self, runner, tmp_path, value, line):
+        body = f"    def get_params(self):\n        return {value}\n"
+        text, _ = self._invoke(runner, tmp_path, body)
+        assert text.exit_code == 0, text.output
+        assert line in text.output.splitlines()
+        assert text.output.endswith(line + "\n")
+        js, _ = self._invoke(runner, tmp_path, body, fmt="json")
+        assert js.exit_code == 0, js.output
+        assert json.loads(js.output)["data"]["params"] == eval(value)  # noqa: S307
+
+    def test_mapping_params_match_dict_bytes(self, runner, tmp_path):
+        schema = "    def get_param_schema(self):\n        return {'window': '기간'}\n"
+        as_dict = "    def get_params(self):\n        return {'window': 20, 'k': 0.5}\n"
+        as_mapping = (
+            "    def get_params(self):\n"
+            "        import types\n"
+            "        return types.MappingProxyType({'window': 20, 'k': 0.5})\n"
+        )
+        expected, _ = self._invoke(runner, tmp_path, as_dict + schema)
+        actual, _ = self._invoke(runner, tmp_path, as_mapping + schema)
+        assert expected.exit_code == 0, expected.output
+        assert "    window = 20  (기간)" in expected.output.splitlines()
+        assert actual.exit_code == 0, actual.output
+        assert actual.output == expected.output
+
+    def test_str_risks_are_one_line(self, runner, tmp_path):
+        body = "    def get_risks(self):\n        return '급락'\n"
+        result, _ = self._invoke(runner, tmp_path, body)
+        assert result.exit_code == 0, result.output
+        lines = result.output.splitlines()
+        assert "  리스크            : '급락'" in lines
+        assert "    - 급" not in lines
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "    def get_params(self):\n        raise RuntimeError('boom')\n",
+            "    def __init__(self, ctx):\n        raise RuntimeError('boom')\n",
+            "    def get_params(self):\n        raise RuntimeError('bo\\nom')\n",
+        ],
+        ids=["get_params_raises", "init_raises", "message_with_newline"],
+    )
+    @pytest.mark.parametrize("fmt", ["text", "json"])
+    def test_load_failure_leaves_one_warning(self, runner, tmp_path, caplog, body, fmt):
+        caplog.set_level(logging.WARNING, logger=_LOADER_LOGGER)
+        result, path = self._invoke(runner, tmp_path, body, fmt=fmt)
+        assert result.exit_code == 0, result.output
+        if fmt == "json":
+            assert "params" not in json.loads(result.output)["data"]
+        records = [r for r in caplog.records if r.name == _LOADER_LOGGER]
+        assert len(records) == 1
+        (rec,) = records
+        assert rec.levelno == logging.WARNING
+        assert rec.exc_info is None
+        message = rec.getMessage()
+        assert path in message
+        assert "RuntimeError" in message
+        assert "\n" not in message
+
+    def test_missing_file_has_no_warning(self, runner, tmp_path, caplog):
+        caplog.set_level(logging.WARNING, logger=_LOADER_LOGGER)
+        result, _ = self._invoke(runner, tmp_path, "", fmt="json", exists=False)
+        assert result.exit_code == 0, result.output
+        assert "params" not in json.loads(result.output)["data"]
+        assert [r for r in caplog.records if r.name == _LOADER_LOGGER] == []
 
 
 class TestStrategyPerformance:

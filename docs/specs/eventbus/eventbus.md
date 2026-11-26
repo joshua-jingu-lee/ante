@@ -441,6 +441,8 @@ Bot.on_signal()
 >   미트리거 주문을 만료시킬 때.
 > - `"manager_stopped"`: `StopOrderManager.stop()` 이 매니저를 중지시키며
 >   활성 주문을 일괄 만료시킬 때.
+> - `"bot_stopped"`: 봇 정지의 정리가 `StopOrderManager.expire_for_bot()` 으로
+>   그 봇의 활성 주문을 만료시킬 때.
 >
 > 추후 `"manual_cancel"` 등 다른 reason 도입은 별도 이슈로 분리한다 (현재
 > `cancel()` 은 expired event 를 발행하지 않음).

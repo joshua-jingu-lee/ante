@@ -30,7 +30,7 @@ from ante.bot.exceptions import (
     SignalKeyManagerNotConfigured,
 )
 from ante.core.account_id import AccountError
-from ante.eventbus.events import NotificationEvent
+from ante.eventbus.events import NotificationEvent, OrderCancelEvent
 from ante.strategy.exceptions import StrategyError
 
 if TYPE_CHECKING:
@@ -40,10 +40,12 @@ if TYPE_CHECKING:
     from ante.bot.signal_key import SignalKeyManager
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
+    from ante.gateway.stop_order import StopOrder, StopOrderManager
     from ante.rule.engine import RuleEngine
     from ante.strategy.base import Strategy
     from ante.strategy.context import StrategyContext
     from ante.strategy.snapshot import StrategySnapshot
+    from ante.trade.order_tracker import OrderTracker
     from ante.trade.service import TradeService
     from ante.treasury.manager import TreasuryManager
 
@@ -127,6 +129,45 @@ async def _cooldown_sleep(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
+@dataclasses.dataclass(frozen=True)
+class StopCleanup:
+    """봇 정지가 정리한 주문: 취소·실패 건수, 만료한 스탑 주문, 열린 주문 조회 실패."""
+
+    cancelled: int = 0
+    failed: int = 0
+    stop_orders: tuple[StopOrder, ...] = ()
+    lookup_failed: bool = False
+
+    def summary_lines(self) -> list[str]:
+        """「봇 중지」 알림과 텔레그램 응답에 쓰는 정리 결과 줄."""
+        lines = [f"미체결 주문 취소: {self.cancelled}건 (실패 {self.failed}건)"]
+        if self.lookup_failed:
+            lines.append("열린 주문 조회 실패 — 직접 확인 필요")
+        lines.append(f"스탑 주문 만료: {len(self.stop_orders)}건")
+        lines.extend(
+            f"- {o.symbol} {o.side} stop {_format_price(o.stop_price)}"
+            for o in self.stop_orders
+        )
+        return lines
+
+
+def _format_price(price: float) -> str:
+    """천 단위 구분 가격(소수는 끝의 0을 지운다, 지수 표기 없음)."""
+    return f"{price:,.4f}".rstrip("0").rstrip(".")
+
+
+def _cleanup_interrupted(bot: Bot, mark: tuple[BotStatus, int]) -> bool:
+    """정리를 시작할 때와 봇의 상태·세대가 다르면(재시작) 경고하고 참."""
+    if (bot.status, bot._generation) == mark:
+        return False
+    logger.warning(
+        "봇 정지 주문 정리 중단: %s 정리 도중 재시작 (상태 %s)",
+        bot.bot_id,
+        bot.status.value,
+    )
+    return True
+
+
 class BotManager:
     """봇들의 생명주기를 중앙 관리."""
 
@@ -143,6 +184,7 @@ class BotManager:
         treasury_manager: TreasuryManager | None = None,
         trade_service: TradeService | None = None,
         signal_channel_registry: SignalChannelRegistry | None = None,
+        order_tracker: OrderTracker | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._db = db
@@ -163,6 +205,14 @@ class BotManager:
         self._bot_update_locks: dict[str, asyncio.Lock] = {}
         self._bot_signal_locks: dict[str, asyncio.Lock] = {}
         self._deleting_bots: set[Bot] = set()
+        self._order_tracker = order_tracker
+        self._stop_order_manager: StopOrderManager | None = None
+        self._shutting_down = False
+        self._last_cleanup: dict[str, StopCleanup] = {}
+
+    def set_stop_order_manager(self, manager: StopOrderManager) -> None:
+        """봇 정지 때 스탑 주문을 만료시킬 ``StopOrderManager`` 를 주입한다."""
+        self._stop_order_manager = manager
 
     def _get_signal_lock(self, bot_id: str) -> asyncio.Lock:
         """``on_step`` ↔ ``on_external_signal`` 직렬화용 per-bot lock(lazy)."""
@@ -705,15 +755,13 @@ class BotManager:
 
     async def stop_bot(
         self, bot_id: str, *, suppress_notification: bool = False
-    ) -> None:
-        """봇 중지. 전략별 룰을 RuleEngine에서 제거.
+    ) -> StopCleanup | None:
+        """봇 중지. 전략별 룰을 RuleEngine에서 제거하고 주문 정리 결과를 돌려준다.
 
         suppress_notification이 True이면 BotStoppedEvent에 의한
-        NotificationEvent 발행을 1회 억제한다.
-
+        NotificationEvent 발행을 1회 억제한다(주문 정리는 그대로 한다).
         ``RUNNING`` / ``ERROR`` 가 아닌 상태에서의 중복 호출은
-        ``BotStateConflict`` 로 거부한다. 허용 범위는 ``Bot.stop()`` 이
-        실제로 처리하는 상태 집합 (``RUNNING``/``ERROR``) 과 정합시킨다.
+        ``BotStateConflict`` 로 거부한다. 정리를 건너뛰었으면 ``None``.
         """
         bot = self._get_bot(bot_id)
         if bot.status not in (BotStatus.RUNNING, BotStatus.ERROR):
@@ -722,7 +770,9 @@ class BotManager:
             )
         if suppress_notification:
             self._suppress_notification_bot_ids.add(bot_id)
+        self._last_cleanup.pop(bot_id, None)
         await self._stop_and_remove_rules(bot)
+        return self._last_cleanup.pop(bot_id, None)
 
     async def delete_bot(
         self,
@@ -754,6 +804,9 @@ class BotManager:
                 reg.close_bot(bot_id, "deleted")
             if bot.status == BotStatus.RUNNING:
                 await bot.stop()
+            elif bot.status in (BotStatus.STOPPED, BotStatus.ERROR):
+                await self._cancel_bot_orders(bot)
+            self._last_cleanup.pop(bot_id, None)
 
             if handle_positions == "liquidate":
                 await self._liquidate_positions(bot)
@@ -882,7 +935,8 @@ class BotManager:
         )
 
     async def stop_all(self) -> None:
-        """모든 봇 중지."""
+        """모든 봇 중지. 서버 종료이므로 미체결 주문을 취소하지 않는다."""
+        self._shutting_down = True
         for task in list(self._restart_tasks.values()):
             task.cancel()
         for task in list(self._restart_reset_tasks.values()):
@@ -1111,25 +1165,112 @@ class BotManager:
         )
 
     async def _on_bot_stopped(self, event: object) -> None:
-        """봇 중지 알림 발행. suppress 목록에 있으면 알림 생략."""
+        """주문 정리 → 시그널 채널 닫기 → 봇 중지 알림(억제 시 알림만 생략)."""
         from ante.eventbus.events import BotStoppedEvent, NotificationEvent
 
         if not isinstance(event, BotStoppedEvent):
             return
-        reg = self._signal_channel_registry
-        if reg is not None:
-            reg.close_bot(event.bot_id, "bot_stopped")
-        if event.bot_id in self._suppress_notification_bot_ids:
+        cleanup = None
+        try:
+            if not self._shutting_down:
+                cleanup = await self._cleanup_stopped(event)
+        finally:
+            reg = self._signal_channel_registry
+            if reg is not None:
+                reg.close_bot(event.bot_id, "bot_stopped")
+            suppressed = event.bot_id in self._suppress_notification_bot_ids
             self._suppress_notification_bot_ids.discard(event.bot_id)
+        if suppressed:
             return
+        lines = [f"봇 `{event.bot_id}` 중지 완료"]
+        if cleanup is not None:
+            lines.extend(cleanup.summary_lines())
         await self._eventbus.publish(
             NotificationEvent(
                 level="info",
                 title="봇 중지",
-                message=f"봇 `{event.bot_id}` 중지 완료",
+                message="\n".join(lines),
                 category="bot",
             )
         )
+
+    async def _cleanup_stopped(self, event: Any) -> StopCleanup | None:
+        """STOPPED 인 봇의 주문을 정리하고 결과를 남긴다(재시작됐으면 건너뛴다)."""
+        bot = self._bots.get(event.bot_id)
+        if bot is None:
+            return None
+        if bot.status != BotStatus.STOPPED:
+            logger.warning(
+                "봇 정지 주문 정리 건너뜀: %s 상태 %s (정리 전 재시작)",
+                bot.bot_id,
+                bot.status.value,
+            )
+            return None
+        cleanup = await self._cancel_bot_orders(bot)
+        self._last_cleanup[bot.bot_id] = cleanup
+        return cleanup
+
+    async def _cancel_bot_orders(self, bot: Bot) -> StopCleanup:
+        """대기 액션 폐기 → 스탑 주문 만료 → 열린 주문 취소(재시작되면 멈춘다)."""
+        mark = (bot.status, bot._generation)
+        dropped = bot._ctx._drain_actions()
+        if dropped:
+            logger.warning(
+                "봇 정지 — 대기 액션 %d건 버림: %s", len(dropped), bot.bot_id
+            )
+        cleanup = StopCleanup()
+        if self._stop_order_manager is not None:
+            expired = await self._stop_order_manager.expire_for_bot(
+                bot.bot_id, "bot_stopped"
+            )
+            cleanup = dataclasses.replace(cleanup, stop_orders=tuple(expired))
+            if _cleanup_interrupted(bot, mark):
+                return cleanup
+        if self._order_tracker is not None:
+            cleanup = await self._cancel_open_orders(bot, mark, cleanup)
+        logger.info(
+            "봇 정지 주문 정리: %s 취소 %d건, 실패 %d건, 스탑 만료 %d건",
+            bot.bot_id,
+            cleanup.cancelled,
+            cleanup.failed,
+            len(cleanup.stop_orders),
+        )
+        return cleanup
+
+    async def _cancel_open_orders(
+        self, bot: Bot, mark: tuple[BotStatus, int], cleanup: StopCleanup
+    ) -> StopCleanup:
+        """추적기의 그 봇 열린 주문마다 취소를 요청하고 결과를 센다."""
+        tracker = self._order_tracker
+        assert tracker is not None
+        account_id = bot.config.account_id
+        try:
+            records = await tracker.get_open_orders(account_id)
+        except Exception:
+            logger.exception("봇 정지 — 열린 주문 조회 실패: %s", bot.bot_id)
+            return dataclasses.replace(cleanup, lookup_failed=True)
+        for record in [r for r in records if r.bot_id == bot.bot_id]:
+            if _cleanup_interrupted(bot, mark):
+                break
+            await self._eventbus.publish(
+                OrderCancelEvent(
+                    account_id=account_id,
+                    bot_id=bot.bot_id,
+                    strategy_id=record.strategy_id,
+                    order_id=record.order_id,
+                    reason="bot_stopped",
+                )
+            )
+            try:
+                after = await tracker.get(record.order_id)
+            except Exception:
+                logger.exception("봇 정지 — 취소 결과 조회 실패: %s", record.order_id)
+                after = None
+            if after is not None and after.status == "cancelled":
+                cleanup = dataclasses.replace(cleanup, cancelled=cleanup.cancelled + 1)
+            else:
+                cleanup = dataclasses.replace(cleanup, failed=cleanup.failed + 1)
+        return cleanup
 
     async def _on_bot_error(self, event: object) -> None:
         """봇 에러 시 알림 발행 + 재시작 정책에 따라 자동 재시작."""
