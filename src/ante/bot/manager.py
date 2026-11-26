@@ -829,7 +829,7 @@ class BotManager:
                 reg.close_bot(bot_id, "deleted")
             if bot.status == BotStatus.RUNNING:
                 await bot.stop()
-            elif bot.status in (BotStatus.STOPPED, BotStatus.ERROR):
+            elif bot.status in (BotStatus.CREATED, BotStatus.STOPPED, BotStatus.ERROR):
                 await self._cancel_bot_orders(bot)
             self._last_cleanup.pop(bot_id, None)
 
