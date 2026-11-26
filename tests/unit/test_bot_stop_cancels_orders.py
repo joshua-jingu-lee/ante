@@ -1029,19 +1029,30 @@ async def test_bot_whose_stop_raises_is_still_cleaned(
     assert [e.reason for e in rig.events("cancel")] == ["bot_stopped"]
 
 
-@pytest.mark.parametrize("broken", ["_expire_bot_orders", "_suspend_bot"])
+@pytest.mark.parametrize(
+    ("broken", "error"),
+    [
+        ("_expire_bot_orders", RuntimeError("subscriber broke")),
+        ("_suspend_bot", RuntimeError("subscriber broke")),
+        ("_suspend_bot", asyncio.CancelledError()),
+    ],
+)
 async def test_subscriber_failure_still_starts_cleanup(
-    rig: Rig, monkeypatch: pytest.MonkeyPatch, broken: str
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, broken: str, error: BaseException
 ) -> None:
     await _bot_in(rig, BOT, "error")
     await rig.seed("ord-1")
 
     async def _boom(*args: Any) -> Any:
-        raise RuntimeError("subscriber broke")
+        raise error
 
     monkeypatch.setattr(rig.manager, broken, _boom)
 
-    await rig.bus.publish(_suspend())
+    if isinstance(error, asyncio.CancelledError):
+        with pytest.raises(asyncio.CancelledError):
+            await rig.bus.publish(_suspend())
+    else:
+        await rig.bus.publish(_suspend())
     await _drain_cleanups(rig)
 
     assert [e.order_id for e in rig.events("cancel")] == ["ord-1"]
