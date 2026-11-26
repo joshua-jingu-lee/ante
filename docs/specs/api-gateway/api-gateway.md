@@ -279,7 +279,7 @@ KRX는 네이티브 스탑 주문을 지원하지 않으므로, 실시간 시세
 |------|-------------|-----------------------------------|------|
 | 등록 (`StopOrderManager.register`) | `StopOrderRegisteredEvent` | `"stop_registered"` | dict에 `stop_order_id`, `stop_price`, `limit_price` 포함. 전략은 이 시점에 후속 취소에 쓸 식별자를 획득(식별자 획득 자체는 유효). 단, **stop 주문 자체의 정정(`modify`)은 미지원**(아직 broker에 접수되지 않아 `broker_order_id`/OrderTracker record가 없음)이라 취소만 가능. broker-level 정정 v1(price-only, #2391)은 이미 접수된 `open` 일반 주문에만 적용된다(고급=#2393). |
 | 발동 (`_trigger_order`) | `StopOrderTriggeredEvent` (+ 별도 `OrderRequestEvent`) | `"stop_triggered"` | 변환된 일반 주문은 자체 라이프사이클(`OrderSubmittedEvent` 등)을 별도로 통보한다. `StopOrderTriggeredEvent`는 stop 식별 단위(`stop_order_id`, `trigger_price`, `converted_order_type`)를 보존한다. |
-| 만료 (`_expire_order`) | `StopOrderExpiredEvent` | `"stop_expired"` | `reason` 허용 값: `"session_ended"` (세션 종료) / `"manager_stopped"` (매니저 stop) / `"bot_stopped"` (봇 정지 — `expire_for_bot`, [bot/03-design-decisions.md](../bot/03-design-decisions.md) 「정지 때의 미체결 주문」). |
+| 만료 (`_expire_order`) | `StopOrderExpiredEvent` | `"stop_expired"` | `reason` 허용 값: `"session_ended"` (세션 종료) / `"manager_stopped"` (매니저 stop) / `"bot_stopped"` (봇 정지 — `expire_for_bot`, [bot/03-design-decisions.md](../bot/03-design-decisions.md) 「정지 때의 미체결 주문」) / `"account_suspended"` (계좌 정지 — 같은 절). |
 
 한 스탑 주문의 종결(발동·만료·취소)은 한 번만 일어난다. 먼저 종결된 처리가 이기고, 이미 종결된 주문에 대한 뒤의 발동·만료는 이벤트를 발행하지 않는다(#2874).
 

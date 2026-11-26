@@ -57,14 +57,14 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
-| `ante system halt` | `system.halt` | `AccountService.suspend_all()` | `AccountSuspendedEvent` → BotManager 소속 봇 중지. 일부 계좌의 정지가 실패하면 모든 계좌를 시도한 뒤 `ACCOUNT_SUSPEND_ALL_FAILED` 에러 응답 |
+| `ante system halt` | `system.halt` | `AccountService.suspend_all()` | `AccountSuspendedEvent` → BotManager 봇 중지·스탑 주문 만료(열린 주문의 취소는 백그라운드에서 돌아 응답이 기다리지 않는다). 일부 계좌의 정지가 실패하면 모든 계좌를 시도한 뒤 `ACCOUNT_SUSPEND_ALL_FAILED` 에러 응답 |
 | `ante system clear-halt` | `system.clear_halt` | `AccountService.activate_all()` | 계좌 상태만 ACTIVE로 복구; BotManager는 `AccountActivatedEvent` 수신 시 로깅만 수행 (자동 재시작은 수행하지 않음). 한 계좌의 활성화가 실패하면 거기서 멈추고 `ACCOUNT_ACTIVATE_ALL_FAILED` 에러 응답 |
 
 #### Account
 
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
-| `ante account suspend` | `account.suspend` | `AccountService.suspend()` | `AccountSuspendedEvent` → BotManager 소속 봇 중지 |
+| `ante account suspend` | `account.suspend` | `AccountService.suspend()` | `AccountSuspendedEvent` → BotManager 봇 중지·스탑 주문 만료(열린 주문의 취소는 백그라운드에서 돌아 응답이 기다리지 않는다) |
 | `ante account activate` | `account.activate` | `AccountService.activate()` | 계좌 상태만 ACTIVE로 복구; BotManager는 `AccountActivatedEvent` 수신 시 로깅만 수행 (자동 재시작은 수행하지 않음) |
 
 `ante account create`, `ante account delete`, `ante account set-credentials`는 IPC 대상이 아니다.

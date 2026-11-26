@@ -140,7 +140,7 @@
   (`OrderSubmittedEvent` 등)를 별도로 발행하므로, 스탑 식별 단위로 받고 싶은
   경우 본 알림으로 분기한다.
 - 만료(`stop_expired`) 알림의 `reason` 허용 값: `"session_ended"`,
-  `"manager_stopped"`, `"bot_stopped"` (현재 코드 기준). 추후 `manual_cancel` 등
+  `"manager_stopped"`, `"bot_stopped"`, `"account_suspended"` (현재 코드 기준). 추후 `manual_cancel` 등
   도입은 별도 이슈로 분리한다.
 - 스탑 알림에는 자금 reserve 정보가 포함되지 않는다 (#1337 정책: 매수 stop은
   등록 시점 자금 잠금 없음, 트리거 시점 잠금).

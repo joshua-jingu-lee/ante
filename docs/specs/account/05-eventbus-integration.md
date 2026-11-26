@@ -8,7 +8,7 @@
 
 | 이벤트 | 발행 시점 | 구독자 |
 |--------|----------|--------|
-| `AccountSuspendedEvent` | `suspend()` 호출 시 (상태 DB 쓰기가 `Exception`으로 실패해도 발행); `delete()`가 직전 상태가 SUSPENDED가 아닌 계좌를 지울 때 (사유 `"Account deletion"`, cold-path 전용이라 런타임 구독자는 없다) | BotManager (소속 봇 전체 중지). 알림은 구독이 아니다 — `AccountService`가 같은 자리에서 별도의 `NotificationEvent`로 낸다 (`delete`는 알림을 내지 않는다) |
+| `AccountSuspendedEvent` | `suspend()` 호출 시 (상태 DB 쓰기가 `Exception`으로 실패해도 발행); `delete()`가 직전 상태가 SUSPENDED가 아닌 계좌를 지울 때 (사유 `"Account deletion"`, cold-path 전용이라 런타임 구독자는 없다) | BotManager (그 계좌의 실행 중인 봇 중지, 그 계좌 봇들의 스탑 주문 즉시 만료, 열린 주문의 백그라운드 취소 — [bot/03-design-decisions.md](../bot/03-design-decisions.md) 「정지 때의 미체결 주문」). 알림은 구독이 아니다 — `AccountService`가 같은 자리에서 별도의 `NotificationEvent`로 낸다 (`delete`는 알림을 내지 않는다) |
 | `AccountActivatedEvent` | `activate()` 호출 시 | BotManager (계좌 상태 변화 인지 + 로깅만; 자동 재시작은 수행하지 않음). 알림은 구독이 아니다 — `AccountService`가 같은 자리에서 별도의 `NotificationEvent`로 낸다 |
 
 `AccountCreatedEvent`와 `AccountDeletedEvent`는 1.0 런타임 EventBus 계약에 포함하지 않는다.
@@ -40,7 +40,7 @@ ante system clear-halt              # 전역 정지 해제 (모든 SUSPENDED 계
 
 기존 `TradingStateChangedEvent`는 `AccountSuspendedEvent` / `AccountActivatedEvent`로 대체된다.
 
-- `AccountSuspendedEvent`: BotManager가 해당 계좌의 소속 봇을 중지한다.
+- `AccountSuspendedEvent`: BotManager가 해당 계좌의 실행 중인 봇을 중지하고 그 계좌 봇들의 활성 스탑 주문을 곧바로 만료(`account_suspended`)시킨 뒤 돌아온다. 그 계좌의 열린 주문은 봇의 상태와 무관하게(실행 중·삭제 중인 봇의 주문 제외) 백그라운드에서 취소하고, 결과는 계좌당 알림 한 건(「계좌 정지 — 주문 정리 결과」)으로 온다. 상태 쓰기가 실패한 정지를 다시 보내면 이벤트가 다시 나가 남은 취소를 다시 시도한다.
 - `AccountActivatedEvent`: BotManager는 계좌 상태 변화를 인지하고 로깅만 수행한다. 자동 재시작은 수행하지 않는다.
 
 재시작은 운영자가 명시적으로 `ante bot start <bot_id>` CLI로 수행한다. 런타임 중에는
@@ -56,7 +56,7 @@ Kill Switch(`AccountStatus.SUSPENDED`)는 **user-initiated 축**이고, runtime 
 |---|---|---|
 | 트리거 | `ante account suspend` / `system halt` (운영자) | startup 스케줄러 등록 실패 / 런타임 broker 저하 (자동) |
 | SSOT | `Account.status` | `RuntimeReadinessRegistry` |
-| 봇 영향 | `AccountSuspendedEvent` → BotManager 봇 중지 | **봇 stop 안 함** — active-order만 gate |
+| 봇 영향 | `AccountSuspendedEvent` → BotManager 봇 중지, 스탑 주문 즉시 만료, 열린 주문 백그라운드 취소 | **봇 stop 안 함** — active-order만 gate |
 | active-order 효과 | 차단 | 차단 (둘 중 하나라도 막으면 거부) |
 | `AccountStatus` 변경 | 직접 변경(SUSPENDED) | **변경 금지** (SUSPENDED 자동 전이 금지 — user 결정 침해 방지) |
 | 회복 | `ante account activate` / `system clear-halt` (운영자) | self-healing background retry loop 유한시간 ready 전이 |
