@@ -9,6 +9,7 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC
 from typing import TYPE_CHECKING, Any, cast
 
+from ante.broker.kis import DEFAULT_TIMEOUT_AUTH
 from ante.core import clock
 
 if TYPE_CHECKING:
@@ -357,7 +358,8 @@ class KISStreamClient:
             "secretkey": self._app_secret,
         }
 
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT_AUTH)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, json=data) as resp:
                 if resp.status != 200:
                     text = await resp.text()

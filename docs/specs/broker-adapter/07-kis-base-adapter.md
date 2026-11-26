@@ -27,11 +27,13 @@ KISBaseAdapter는 한국투자증권 Open API의 국내/해외 공통 로직을 
 | 항목 | 실전투자 | 모의투자 |
 |------|----------|----------|
 | REST Base URL | `https://openapi.koreainvestment.com:9443` | `https://openapivts.koreainvestment.com:29443` |
-| WebSocket URL | `ws://ops.koreainvestment.com:31000` | `ws://ops.koreainvestment.com:21000` |
+| WebSocket URL | `ws://ops.koreainvestment.com:21000` | `ws://ops.koreainvestment.com:31000` |
 | Rate Limit | 분당 20회 | 초당 5회 |
 | 인증 방식 | OAuth2 (`client_credentials` grant) | 동일 |
 | 토큰 유효기간 | 24시간 | 동일 |
 | 인증 엔드포인트 | `/oauth2/tokenP` | 동일 |
+
+> WebSocket 포트의 근거: KIS 공식 `open-trading-api` 저장소의 `kis_devlp.yaml`이 `ops`(실전)를 `:21000`, `vops`(모의)를 `:31000`으로 적는다.
 
 ### HTTP/Business 에러 분류 (`_handle_response`)
 

@@ -7,14 +7,15 @@
 ### 실시간 시세 스트리밍 (`realtime_price_stream`)
 
 오픈 시점에는 실시간 가격 스트리밍을 필수 범위로 포함하지 않았다. 이후
-`KISStreamClient`가 추가되어 실시간 시세 스트리밍과 REST 폴백을 지원한다
+`KISStreamClient`가 추가되어 실시간 시세 스트리밍을 지원한다. 끊긴 동안의 REST 폴백은
+지금 꺼져 있다
 ([api-gateway](../api-gateway/api-gateway.md), `gateway/stream_integration.py`).
 
 ### 체결 통보 (`realtime_order_stream`) — 정정 (#1946)
 
-> **정정**: 아래는 더 이상 정확하지 않다. 체결 통보는 실시간 스트림
-> (`H0STCNI0`, 빠른 경로)에 더해 **REST `get_order_history` 백스톱 폴**로
-> 정합성이 보증된다. 체결→포지션 반영은 스트림 유무·모의투자·실전투자 무관하게
+> **정정**: 아래는 더 이상 정확하지 않다. 체결 통보는 **REST `get_order_history`
+> 백스톱 폴**로 정합성이 보증된다. 실시간 스트림(`H0STCNI0`, 빠른 경로)은 현재
+> 꺼져 있다(18의 해당 절, #2561). 체결→포지션 반영은 스트림 유무·모의투자·실전투자 무관하게
 > 일관된다. 설계 SSOT는 [18-fill-recovery.md](18-fill-recovery.md)다.
 
 (이전 서술) 오픈 시점에는 실시간 체결 통보 스트리밍을 필수 범위에 포함하지

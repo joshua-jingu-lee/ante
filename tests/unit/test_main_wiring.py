@@ -79,6 +79,8 @@ def _kis_account(account_id: str, *, mode: TradingMode = TradingMode.LIVE) -> Ac
 class _FakeBroker:
     """BrokerAdapter 더블. 연결·주문·해제를 기록한다."""
 
+    websocket_url: str | None = None
+
     def __init__(self, account_id: str, factory: _BrokerFactory) -> None:
         self.account_id = account_id
         self.account_no = "1234567890"
@@ -921,6 +923,120 @@ async def test_ipc_server_listens_on_overridden_socket_path(
     response = await client.send("bot.positions", {"bot_id": "missing"})
 
     assert response["error"]["code"] == "BOT_NOT_FOUND"
+
+
+# ── _init_gateway 의 스트림 연동 (#2804) ──────────────────────────────────────
+
+
+class _RecordingStreamClient:
+    """KISStreamClient 더블. 생성 인자와 해제를 기록하고 외부에 접속하지 않는다."""
+
+    instances: list[_RecordingStreamClient] = []
+
+    def __init__(self, websocket_url: str, *args: Any, **kwargs: Any) -> None:
+        self.websocket_url = websocket_url
+        self.account_id = kwargs.get("account_id", "")
+        self.disconnected = False
+        _RecordingStreamClient.instances.append(self)
+
+    is_connected = False
+    subscribed_symbols: set[str] = set()
+
+    def on_price(self, callback: Any) -> None:
+        return None
+
+    def on_execution(self, callback: Any) -> None:
+        return None
+
+    async def connect(self) -> None:
+        return None
+
+    async def disconnect(self) -> None:
+        self.disconnected = True
+
+    async def subscribe_execution(self) -> None:
+        return None
+
+    async def subscribe(self, symbol: str) -> bool:
+        return True
+
+    async def unsubscribe(self, symbol: str) -> None:
+        return None
+
+
+async def test_live_account_stream_is_registered_and_closed_on_shutdown(
+    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LIVE kis-domestic 계좌는 어댑터의 URL로 스트림이 등록되고 종료가 해제한다.
+
+    가상 계좌에는 스트림이 없다."""
+    import ante.broker.kis_stream as kis_stream_mod
+
+    url = "ws://ops.koreainvestment.com:31000"
+    _RecordingStreamClient.instances = []
+    monkeypatch.setattr(kis_stream_mod, "KISStreamClient", _RecordingStreamClient)
+    monkeypatch.setattr(_FakeBroker, "websocket_url", url)
+    asm = await assemble(
+        [_kis_account("live-a"), _kis_account("virt-a", mode=TradingMode.VIRTUAL)]
+    )
+
+    assert list(asm.s.stream_integrations) == ["live-a"]
+    clients = _RecordingStreamClient.instances
+    assert [(c.account_id, c.websocket_url) for c in clients] == [("live-a", url)]
+
+    await _shutdown_in_test(asm)
+
+    assert _RecordingStreamClient.instances[0].disconnected
+
+
+async def test_assembled_stream_does_not_poll_gateway_after_disconnect(
+    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """조립된 스트림 연동은 끊김 뒤에도 REST 폴링을 시작하지 않는다 (#2804).
+
+    폴링은 주문과 같은 계좌별 호출 한도를 써서 주문을 늦추므로 켜지 않는다."""
+    import ante.broker.kis_stream as kis_stream_mod
+    from ante.eventbus.events import StreamDisconnectedEvent
+
+    _RecordingStreamClient.instances = []
+    monkeypatch.setattr(kis_stream_mod, "KISStreamClient", _RecordingStreamClient)
+    monkeypatch.setattr(
+        _FakeBroker, "websocket_url", "ws://ops.koreainvestment.com:31000"
+    )
+    asm = await assemble([_kis_account("live-a")])
+    s = asm.s
+    assert s.api_gateway is not None
+    price_calls: list[str] = []
+
+    async def _price(symbol: str, *, account_id: str) -> float:
+        price_calls.append(symbol)
+        return 100.0
+
+    monkeypatch.setattr(s.api_gateway, "get_current_price", _price)
+    await s.eventbus.publish(
+        OrderApprovedEvent(
+            account_id="live-a",
+            order_id="stop-1",
+            bot_id="bot-1",
+            strategy_id="strategy-1",
+            symbol="005930",
+            side="sell",
+            quantity=1.0,
+            order_type="stop",
+            stop_price=50.0,
+        )
+    )
+    integration = s.stream_integrations["live-a"]
+
+    await s.eventbus.publish(
+        StreamDisconnectedEvent(account_id="live-a", broker="kis", reason="test")
+    )
+    for _ in range(20):
+        await asyncio.sleep(0)
+
+    assert price_calls == []
+    assert integration._fallback_task is None
+    assert not integration.is_fallback_active
 
 
 # ── _init_gateway 의 기동 순서와 readiness ────────────────────────────────────

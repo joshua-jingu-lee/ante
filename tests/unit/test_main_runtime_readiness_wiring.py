@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -132,19 +132,27 @@ def _services(
     s.treasury_manager = SimpleNamespace(get=lambda account_id: treasury)
 
     broker_map = brokers or {}
+    cached: dict[str, Any] = {}
 
     async def _get_broker(account_id: str) -> Any:
         if account_id in broker_map:
             result = broker_map[account_id]
             if isinstance(result, Exception):
                 raise result
+            cached[account_id] = result
             return result
         broker = AsyncMock()
         broker.connect = AsyncMock()
+        broker.websocket_url = None
+        cached[account_id] = broker
         return broker
+
+    async def _get_cached_broker(account_id: str) -> Any:
+        return cached.get(account_id)
 
     account_service = AsyncMock()
     account_service.get_broker = AsyncMock(side_effect=_get_broker)
+    account_service.get_cached_broker = AsyncMock(side_effect=_get_cached_broker)
     s.account_service = account_service  # type: ignore[assignment]
     return s
 
@@ -981,6 +989,56 @@ def test_self_healing_loop_backs_off_between_attempts() -> None:
 # ── broker_ready connect 시점 mark (init_gateway 발췌 경로) ─────────────────
 
 
+class _FakeKISStreamClient:
+    """KISStreamClient 더블 — 생성 인자를 기록하고 외부에 접속하지 않는다 (#2804)."""
+
+    instances: list[_FakeKISStreamClient] = []
+    connect_errors: dict[str, BaseException] = {}
+
+    def __init__(
+        self,
+        websocket_url: str,
+        app_key: str,
+        app_secret: str,
+        approval_key: str | None = None,
+        eventbus: Any = None,
+        ping_interval: float = 30.0,
+        *,
+        account_id: str = "",
+    ) -> None:
+        self.websocket_url = websocket_url
+        self.account_id = account_id
+        self.disconnected = False
+        self.subscribe_execution_calls = 0
+        _FakeKISStreamClient.instances.append(self)
+
+    is_connected = False
+    subscribed_symbols: set[str] = set()
+
+    def on_price(self, callback: Any) -> None:
+        return None
+
+    def on_execution(self, callback: Any) -> None:
+        return None
+
+    async def connect(self) -> None:
+        error = _FakeKISStreamClient.connect_errors.get(self.account_id)
+        if error is not None:
+            raise error
+
+    async def disconnect(self) -> None:
+        self.disconnected = True
+
+    async def subscribe_execution(self) -> None:
+        self.subscribe_execution_calls += 1
+
+    async def subscribe(self, symbol: str) -> bool:
+        return True
+
+    async def unsubscribe(self, symbol: str) -> None:
+        return None
+
+
 def _stub_init_gateway_followups(s: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """_init_gateway connect 루프만 검증하도록 후속 단계·게이트웨이 더블을 깐다."""
 
@@ -1005,6 +1063,8 @@ def _stub_init_gateway_followups(s: Any, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(main_module, "_stop_session_expiry_loop", _noop)
 
     class _FakeStopOrderManager:
+        active_orders: list[Any] = []
+
         def __init__(self, **kwargs: Any) -> None:
             pass
 
@@ -1013,16 +1073,22 @@ def _stub_init_gateway_followups(s: Any, monkeypatch: pytest.MonkeyPatch) -> Non
 
     class _FakeGateway:
         def __init__(self, **kwargs: Any) -> None:
-            pass
+            from ante.gateway.cache import ResponseCache
+
+            self._cache = ResponseCache()
 
         def start(self) -> None:
             pass
 
+    import ante.broker.kis_stream as kis_stream_mod
     import ante.gateway as gateway_mod
     import ante.gateway.stop_order as stop_order_mod
 
+    _FakeKISStreamClient.instances = []
+    _FakeKISStreamClient.connect_errors = {}
     monkeypatch.setattr(gateway_mod, "APIGateway", _FakeGateway)
     monkeypatch.setattr(stop_order_mod, "StopOrderManager", _FakeStopOrderManager)
+    monkeypatch.setattr(kis_stream_mod, "KISStreamClient", _FakeKISStreamClient)
     s.treasury_manager = None
     s.performance_tracker = None
     s.trade_recorder = None
@@ -1030,7 +1096,9 @@ def _stub_init_gateway_followups(s: Any, monkeypatch: pytest.MonkeyPatch) -> Non
     s.fill_outbox_publisher = None
     s.virtual_executor = SimpleNamespace(_gateway=None)
     s.bot_manager = SimpleNamespace(
-        _context_factory=None, set_stop_order_manager=lambda _manager: None
+        _context_factory=None,
+        set_stop_order_manager=lambda _manager: None,
+        list_bots=lambda: [],
     )
 
 
@@ -1115,6 +1183,7 @@ async def test_init_gateway_get_broker_egw00133_retry_then_ready(
 
     connected_broker = AsyncMock()
     connected_broker.connect = AsyncMock()
+    connected_broker.websocket_url = None
     state = {"fails": 1}
 
     async def _get_broker(account_id: str) -> Any:
@@ -1142,6 +1211,152 @@ async def test_init_gateway_get_broker_egw00133_retry_then_ready(
     assert slept == [60]
     # 둘째 attempt 성공 → broker_ready.
     assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.BROKER)
+
+
+# ── #2804: 스트림 연동의 조립 조건과 주소 ──────────────────────────────────
+
+
+def _ws_broker(url: str | None) -> Any:
+    broker = AsyncMock()
+    broker.connect = AsyncMock()
+    broker.websocket_url = url
+    return broker
+
+
+async def _stop_stream_integrations(s: Any) -> None:
+    for integration in list(s.stream_integrations.values()):
+        await integration.stop()
+
+
+def _stream_stage_ids(mock: Any) -> list[str]:
+    return [c.args[0] for c in mock.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_registers_stream_for_live_kis_with_adapter_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2804 (a): LIVE kis-domestic 계좌는 어댑터의 websocket_url로 등록된다."""
+    url = "ws://ops.koreainvestment.com:31000"
+    s = _services(brokers={"live-1": _ws_broker(url)})
+    s.eventbus.subscribe = MagicMock()
+    s.account_service.list = AsyncMock(return_value=[_account("live-1")])
+    _stub_init_gateway_followups(s, monkeypatch)
+
+    await main_module._init_gateway(s)
+    try:
+        assert list(s.stream_integrations) == ["live-1"]
+        assert [c.websocket_url for c in _FakeKISStreamClient.instances] == [url]
+        assert [c.account_id for c in _FakeKISStreamClient.instances] == ["live-1"]
+        assert _FakeKISStreamClient.instances[0].subscribe_execution_calls == 0
+    finally:
+        await _stop_stream_integrations(s)
+    assert _FakeKISStreamClient.instances[0].disconnected
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_skips_stream_for_exempt_accounts_without_broker_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2804 (b): 가상·test·mock 계좌는 스트림이 없고 브로커도 조회하지 않는다."""
+    s = _services()
+    s.eventbus.subscribe = MagicMock()
+    accounts = [
+        _account("virt-kis", trading_mode=TradingMode.VIRTUAL),
+        _account("test", broker_type="test", trading_mode=TradingMode.VIRTUAL),
+        _account("mock", broker_type="mock", trading_mode=TradingMode.VIRTUAL),
+    ]
+    s.account_service.list = AsyncMock(return_value=accounts)
+    _stub_init_gateway_followups(s, monkeypatch)
+
+    await main_module._init_gateway(s)
+
+    assert s.stream_integrations == {}
+    assert _FakeKISStreamClient.instances == []
+    assert s.account_service.get_broker.call_args_list == []
+    assert s.account_service.get_cached_broker.call_args_list == []
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_skips_stream_when_adapter_has_no_websocket_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2804 (c): 어댑터의 websocket_url이 None이면 등록하지 않는다."""
+    s = _services(brokers={"live-1": _ws_broker(None)})
+    s.eventbus.subscribe = MagicMock()
+    s.account_service.list = AsyncMock(
+        return_value=[_account("live-1", broker_type="test")]
+    )
+    _stub_init_gateway_followups(s, monkeypatch)
+
+    await main_module._init_gateway(s)
+
+    assert s.stream_integrations == {}
+    assert _FakeKISStreamClient.instances == []
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_stream_connect_timeout_leaves_only_that_account_rest(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#2804 (d): 한 계좌의 connect 시간 초과는 그 계좌만 미등록·경고·알림 1건."""
+    import logging
+
+    from ante.eventbus.events import NotificationEvent
+
+    s = _services(
+        brokers={
+            "live-a": _ws_broker("ws://ops.koreainvestment.com:21000"),
+            "live-b": _ws_broker("ws://ops.koreainvestment.com:21000"),
+        }
+    )
+    s.eventbus.subscribe = MagicMock()
+    s.account_service.list = AsyncMock(
+        return_value=[_account("live-a"), _account("live-b")]
+    )
+    _stub_init_gateway_followups(s, monkeypatch)
+    _FakeKISStreamClient.connect_errors = {"live-a": TimeoutError()}
+
+    with caplog.at_level(logging.WARNING, logger="ante.main"):
+        await main_module._init_gateway(s)
+    try:
+        assert list(s.stream_integrations) == ["live-b"]
+        failures = [
+            r
+            for r in caplog.records
+            if r.getMessage() == "StreamIntegration 초기화 실패: account=live-a"
+        ]
+        assert len(failures) == 1
+        notifications = [
+            c.args[0]
+            for c in s.eventbus.publish.await_args_list
+            if isinstance(c.args[0], NotificationEvent)
+            and c.args[0].title == "실시간 시세 연결 실패"
+        ]
+        assert len(notifications) == 1
+        assert "live-a" in notifications[0].message
+    finally:
+        await _stop_stream_integrations(s)
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_not_ready_live_skips_stream_broker_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2804 (e): not_ready LIVE 계좌는 스트림 단계에서 브로커를 조회하지 않는다."""
+    s = _services(brokers={"live-down": RuntimeError("conn refused")})
+    s.eventbus.subscribe = MagicMock()
+    s.account_service.list = AsyncMock(return_value=[_account("live-down")])
+    _stub_init_gateway_followups(s, monkeypatch)
+
+    await main_module._init_gateway(s)
+
+    assert not s.runtime_readiness.is_ready("live-down", ReadinessFlag.BROKER)
+    assert _stream_stage_ids(s.account_service.get_broker) == ["live-down"]
+    assert s.account_service.get_cached_broker.call_args_list == []
+    assert s.stream_integrations == {}
+    assert _FakeKISStreamClient.instances == []
 
 
 # ── #2399 Codex P2(attempt 2): 후속 broker-backed init 에서 not_ready 계좌 skip ─
