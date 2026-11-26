@@ -809,13 +809,18 @@ class AccountService:
             - ``status`` (str): 호출 직후 상태 (소문자 wire 값)
             - ``changed`` (bool): 실제 전환 여부
         """
+        candidates = [
+            (account_id, account, account.status)
+            for account_id, account in list(self._accounts.items())
+            if account.status != AccountStatus.DELETED
+        ]
+        for account_id, account, previous in candidates:
+            if previous == AccountStatus.ACTIVE:
+                _transition_status(account, AccountStatus.SUSPENDED)
+                self._unpersisted_suspensions.add(account_id)
         results: list[dict[str, Any]] = []
         failed: list[str] = []
-        for account_id in list(self._accounts.keys()):
-            account = self._accounts[account_id]
-            if account.status == AccountStatus.DELETED:
-                continue
-            previous_status = account.status.value
+        for account_id, account, previous in candidates:
             if (
                 account.status == AccountStatus.ACTIVE
                 or account_id in self._unpersisted_suspensions
@@ -826,15 +831,12 @@ class AccountService:
                     logger.exception("전체 계좌 정지 중 계좌 정지 실패: %s", account_id)
                     failed.append(account_id)
                     continue
-                changed = previous_status == AccountStatus.ACTIVE.value
-            else:
-                changed = False
             results.append(
                 {
                     "account_id": account_id,
-                    "previous_status": previous_status,
+                    "previous_status": previous.value,
                     "status": AccountStatus.SUSPENDED.value,
-                    "changed": changed,
+                    "changed": previous == AccountStatus.ACTIVE,
                 }
             )
         changed_count = sum(1 for r in results if r["changed"])
