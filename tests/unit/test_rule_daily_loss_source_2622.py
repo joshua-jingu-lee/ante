@@ -306,9 +306,9 @@ async def test_t2_only_yesterdays_loss_over_limit_validates_buy(
 
 @pytest.fixture
 def utc_host_clock() -> Iterator[_UtcHostClock]:
-    at = datetime(2026, 11, 25, 23, 30, tzinfo=UTC)
-    with clock.use_clock(_UtcHostClock(at)) as c:
-        yield c  # type: ignore[misc]
+    host = _UtcHostClock(datetime(2026, 11, 25, 23, 30, tzinfo=UTC))
+    with clock.use_clock(host):
+        yield host
 
 
 async def test_t3_kst_day_with_utc_host(db: Database, utc_host_clock: Any) -> None:
