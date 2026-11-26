@@ -10,6 +10,7 @@ PositionHistory·PerformanceTracker·TradeService로 돈다.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import Any
@@ -42,6 +43,7 @@ from ante.trade.recorder import TradeRecorder
 from ante.trade.service import TradeService
 from ante.treasury.treasury import Treasury
 from tests.unit._readiness_gate_helpers import make_account, ready_registry
+from tests.unit._rule_engine_helpers import StubTreasury
 
 KST = timezone(timedelta(hours=9))
 ACCT = "test"
@@ -532,3 +534,112 @@ async def test_t8_matches_daily_summary_and_excludes_buys_and_other_accounts(
 
     assert total == pytest.approx(-4_000.0)
     assert summary.realized_pnl == pytest.approx(total)
+
+
+# ── 한 주문의 평가는 KST 오늘을 한 번만 읽는다 ─────────────────────────────
+
+
+class _MidnightTreasury(StubTreasury):
+    """분모 조회 중에 시계가 2초 나아간다(자정 직전이면 자정을 넘긴다)."""
+
+    def __init__(self, manual: Any) -> None:
+        super().__init__(
+            summary={
+                "total_profit_loss": 0.0,
+                "total_evaluation": 1_000_000.0,
+                "ante_eval_amount": 0.0,
+            },
+            budget=1_000_000.0,
+            prev_snapshot={"snapshot_date": "2026-01-01", "total_asset": 1_000_000.0},
+        )
+        self._manual = manual
+        self.before_dates: list[str] = []
+
+    async def get_prev_day_snapshot(self, before_date: str) -> dict[str, Any] | None:
+        self.before_dates.append(before_date)
+        self._manual.advance(2.0)
+        return await super().get_prev_day_snapshot(before_date)
+
+
+class _DateRecordingTradeService:
+    def __init__(self, realized: float = 0.0) -> None:
+        self.realized = realized
+        self.starts: list[datetime] = []
+
+    async def get_positions(self, bot_id: str, *args: Any, **kwargs: Any) -> list:
+        return []
+
+    async def get_realized_pnl(
+        self, *, account_id: str, start: datetime, end: datetime
+    ) -> float:
+        self.starts.append(start)
+        return self.realized
+
+
+def _stub_engine(treasury: Any, trade_service: Any) -> EventBus:
+    bus = EventBus()
+    RuleEngine(
+        eventbus=bus,
+        account_id=ACCT,
+        treasury=treasury,
+        trade_service=trade_service,
+        account=make_account(
+            ACCT, broker_type="test", trading_mode=TradingMode.VIRTUAL
+        ),
+        runtime_readiness=ready_registry(
+            ACCT, broker_type="test", trading_mode=TradingMode.VIRTUAL
+        ),
+    ).start()
+    return bus
+
+
+@pytest.mark.parametrize(
+    "manual_clock", [datetime(2026, 1, 2, 14, 59, 59, tzinfo=UTC)], indirect=True
+)
+async def test_one_kst_date_per_evaluation_across_midnight(manual_clock: Any) -> None:
+    treasury = _MidnightTreasury(manual_clock)
+    trade_service = _DateRecordingTradeService()
+    bus = _stub_engine(treasury, trade_service)
+
+    await bus.publish(_order("buy", 10_000.0))
+    manual_clock.advance(24 * 3600.0 - 2.0)
+    await bus.publish(
+        OrderModifyEvent(
+            account_id=ACCT,
+            bot_id=BOT,
+            strategy_id="s1",
+            order_id="o-1",
+            symbol=SYMBOL,
+            side="buy",
+            quantity=1.0,
+            price=9_000.0,
+        )
+    )
+
+    assert treasury.before_dates == [TODAY_KST, "2026-01-03"]
+    assert [s.date().isoformat() for s in trade_service.starts] == [
+        TODAY_KST,
+        "2026-01-03",
+    ]
+
+
+# ── 유한하지 않은 실현 손익은 조회 실패와 같다 ─────────────────────────────
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+async def test_non_finite_realized_pnl_is_query_failure(
+    manual_clock: Any, value: float
+) -> None:
+    bus = _stub_engine(
+        _MidnightTreasury(manual_clock), _DateRecordingTradeService(realized=value)
+    )
+    rejected: list[OrderRejectedEvent] = []
+    validated: list[OrderValidatedEvent] = []
+    bus.subscribe(OrderRejectedEvent, rejected.append)
+    bus.subscribe(OrderValidatedEvent, validated.append)
+
+    await bus.publish(_order("buy", 10_000.0))
+    await bus.publish(_order("sell", 10_000.0))
+
+    assert [e.reason for e in rejected] == ["account_not_ready: positions_unavailable"]
+    assert [e.side for e in validated] == ["sell"]

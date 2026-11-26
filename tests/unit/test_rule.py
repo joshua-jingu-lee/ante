@@ -1114,7 +1114,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for invalid side")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for invalid side")
 
@@ -1184,7 +1184,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for invalid side")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for invalid side")
 
@@ -1254,7 +1254,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for invalid order_type")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for invalid order_type"
@@ -1326,7 +1326,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for invalid order_type")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for invalid order_type"
@@ -1396,7 +1396,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for invalid payload")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for invalid payload"
@@ -1456,7 +1456,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for invalid payload")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for invalid payload"
@@ -1519,7 +1519,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for invalid KRX symbol")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for invalid KRX symbol"
@@ -1583,7 +1583,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for invalid KRX symbol")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for invalid KRX symbol"
@@ -1666,7 +1666,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for invalid KRX symbol")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for invalid KRX symbol"
@@ -1767,7 +1767,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for invalid KRX symbol")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for invalid KRX symbol"
@@ -1824,7 +1824,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for limit order without price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for limit order without price"
@@ -1888,7 +1888,7 @@ class TestRuleEngineEventBus:
                 "evaluate must not run for stop_limit order without price"
             )
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for stop_limit order without price"
@@ -2014,7 +2014,7 @@ class TestRuleEngineEventBus:
                 "evaluate must not run for stop order without stop_price"
             )
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for stop order without stop_price"
@@ -2079,7 +2079,7 @@ class TestRuleEngineEventBus:
                 "evaluate must not run for stop_limit order without stop_price"
             )
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for stop_limit order "
@@ -2236,7 +2236,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run when price gate fires")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run when price gate fires"
@@ -2296,7 +2296,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for NaN quantity")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for NaN quantity")
 
@@ -2364,7 +2364,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for inf quantity")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for inf quantity")
 
@@ -2426,7 +2426,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for non-number quantity")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for non-number quantity"
@@ -2528,7 +2528,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for overflow int quantity")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for overflow int quantity"
@@ -2600,7 +2600,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for NaN price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for NaN price")
 
@@ -2668,7 +2668,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for inf price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for inf price")
 
@@ -2734,7 +2734,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for non-number price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for non-number price"
@@ -2900,7 +2900,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for negative price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for negative price")
 
@@ -2970,7 +2970,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for negative stop_limit price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for negative stop_limit price"
@@ -3078,7 +3078,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for zero price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for zero price")
 
@@ -3151,7 +3151,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for zero stop_limit price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for zero stop_limit price"
@@ -3251,7 +3251,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for zero price/negative qty")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for zero price/negative qty"
@@ -3311,7 +3311,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for negative price/quantity")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for negative price/quantity"
@@ -3379,7 +3379,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for negative stop_price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for negative stop_price"
@@ -3455,7 +3455,7 @@ class TestRuleEngineEventBus:
                 "evaluate must not run for negative stop_limit stop_price"
             )
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for negative stop_limit stop_price"
@@ -3523,7 +3523,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for NaN stop_price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for NaN stop_price")
 
@@ -3585,7 +3585,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for inf stop_price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for inf stop_price")
 
@@ -3651,7 +3651,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for non-number stop_price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for non-number stop_price"
@@ -3767,7 +3767,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for zero stop_price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for zero stop_price"
@@ -3843,7 +3843,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for zero stop_limit stop_price")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for zero stop_limit stop_price"
@@ -3953,7 +3953,7 @@ class TestRuleEngineEventBus:
                 "evaluate must not run for zero stop_price + negative quantity"
             )
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for "
@@ -4026,7 +4026,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for negative quantity")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for negative quantity"
@@ -4135,7 +4135,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for zero quantity")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for zero quantity")
 
@@ -4210,7 +4210,7 @@ class TestRuleEngineEventBus:
             evaluate_calls.append(context)
             raise AssertionError("evaluate must not run for zero quantity")
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError("_query_treasury_data must not run for zero quantity")
 
@@ -4360,7 +4360,7 @@ class TestRuleEngineEventBus:
                 "evaluate must not run for cross-field invalid payload"
             )
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             treasury_calls.append(bot_id)
             raise AssertionError(
                 "_query_treasury_data must not run for cross-field invalid payload"
@@ -4653,7 +4653,7 @@ class TestRuleEngineEventBus:
         eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
         eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
 
-        async def _spy_query_treasury(bot_id: str = ""):
+        async def _spy_query_treasury(bot_id: str = "", today: object = None):
             raise RuntimeError("synthetic preflight failure")
 
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
