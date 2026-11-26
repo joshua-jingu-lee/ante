@@ -2309,6 +2309,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -2377,6 +2378,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -2441,6 +2443,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -2543,6 +2546,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         # 10**400은 float(...) 변환 시 OverflowError를 안정적으로 재현한다.
         overflow_quantity = 10**400
@@ -2613,6 +2617,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -2681,6 +2686,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -2749,6 +2755,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -2913,6 +2920,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -2986,6 +2994,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -3091,6 +3100,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -3166,6 +3176,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -3394,6 +3405,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -3471,6 +3483,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -3536,6 +3549,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -3598,6 +3612,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -3666,6 +3681,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -3782,6 +3798,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -3859,6 +3876,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -3970,6 +3988,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -4041,6 +4060,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",
@@ -4148,6 +4168,7 @@ class TestRuleEngineEventBus:
         monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
         monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
         monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+        monkeypatch.setattr(engine, "_query_order_symbol_position", _spy_unrealized)
 
         order = OrderRequestEvent(
             account_id="domestic",

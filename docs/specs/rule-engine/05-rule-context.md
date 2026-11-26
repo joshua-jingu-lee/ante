@@ -23,7 +23,7 @@ RuleEngine이 OrderRequestEvent와 Account 상태를 조합하여 생성하는 �
 | `currency` | `str` | `"KRW"` | 통화 코드 |
 | **시장/포지션 정보** | | | |
 | `current_price` | `float` | `0.0` | 현재 시장가 |
-| `current_position` | `float` | `0.0` | 현재 포지션 수량 |
+| `current_position` | `float` | `0.0` | 주문 종목의 봇 보유 수량. 미실현 손익 계산과 같은 `TradeService.get_positions` 결과에서 채운다. TradeService가 주입되지 않았거나 조회가 실패하면 `0.0`(실패 시 매수는 [07 #3047](07-rule-engine-core.md)에 따라 거부). 주문 정정 평가에서는 채우지 않는다 |
 | `available_balance` | `float` | `0.0` | 가용 잔고 |
 | `bot_allocated_budget` | `float` | `0.0` | 봇 할당 예산 (Treasury에서 주입). PositionSizeRule, UnrealizedLossLimitRule의 분모 |
 | **계좌 정보** | | | |
