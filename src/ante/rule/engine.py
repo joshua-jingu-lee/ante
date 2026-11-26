@@ -519,25 +519,36 @@ class RuleEngine:
         logger.warning("당일 실현 손익 조회 실패: %s", self._account_id)
         return None
 
-    async def _calculate_bot_unrealized_pnl(
+    async def _query_order_symbol_position(
         self, bot_id: str, current_price: float, order_symbol: str
-    ) -> float | None:
-        """미실현 손익 합계를, 포지션 조회 예외면 ``None``을 돌려준다."""
+    ) -> tuple[float, float] | None:
+        """주문 종목의 (미실현 손익, 보유 수량)을, 조회 예외면 ``None``을 돌려준다."""
         if self._trade_service is None:
-            return 0.0
+            return 0.0, 0.0
 
         try:
             positions = await self._trade_service.get_positions(
                 bot_id, account_id=self._account_id
             )
             total = 0.0
+            quantity = 0.0
             for pos in positions:
                 if pos.symbol == order_symbol:
                     total += (current_price - pos.avg_entry_price) * pos.quantity
-            return total
+                    quantity += pos.quantity
+            return total, quantity
         except Exception:
             logger.warning("미실현 손익 계산 실패: bot=%s", bot_id)
             return None
+
+    async def _calculate_bot_unrealized_pnl(
+        self, bot_id: str, current_price: float, order_symbol: str
+    ) -> float | None:
+        """미실현 손익 합계를, 포지션 조회 예외면 ``None``을 돌려준다."""
+        position = await self._query_order_symbol_position(
+            bot_id, current_price, order_symbol
+        )
+        return None if position is None else position[0]
 
     @staticmethod
     def _unrecovered_buy_age_seconds(submitted_at: str | None) -> float | None:
@@ -982,14 +993,15 @@ class RuleEngine:
             )
 
             current_price = event.price or 0.0
-            unrealized_pnl = await self._calculate_bot_unrealized_pnl(
+            position = await self._query_order_symbol_position(
                 bot_id=event.bot_id,
                 current_price=current_price,
                 order_symbol=event.symbol,
             )
-            if unrealized_pnl is None:
-                unrealized_pnl = 0.0
+            if position is None:
+                position = (0.0, 0.0)
                 input_failure = input_failure or "positions_unavailable"
+            unrealized_pnl, current_position = position
             daily_pnl = await self._query_daily_realized_pnl(today)
             if daily_pnl is None:
                 daily_pnl = 0.0
@@ -1023,6 +1035,7 @@ class RuleEngine:
                 order_type=event.order_type,
                 price=event.price,
                 current_price=current_price,
+                current_position=current_position,
                 account_status=account_status,
                 currency=currency,
                 unrealized_pnl=unrealized_pnl,
