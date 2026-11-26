@@ -60,18 +60,15 @@ class FakeStreamClient:
     async def unsubscribe(self, symbol: str) -> None:
         self._subscribed.discard(symbol)
 
+    subscribe_execution_calls = 0
+
     async def subscribe_execution(self) -> None:
-        pass
+        self.subscribe_execution_calls += 1
 
     async def fire_price(self, symbol: str, price: float) -> None:
         """테스트에서 시세 콜백 수동 호출."""
         for cb in self._price_callbacks:
             await cb(symbol, price)
-
-    async def fire_execution(self, execution: dict) -> None:
-        """테스트에서 체결 콜백 수동 호출."""
-        for cb in self._execution_callbacks:
-            await cb(execution)
 
 
 @pytest.fixture
@@ -240,7 +237,7 @@ async def test_execution_callback_invalidates_cache(
             "quantity": 10.0,
             "price": 70000.0,
         }
-        await stream_client.fire_execution(execution)
+        await integration._on_execution(execution)
 
         assert cache.get("acc-001:balance") is None
         assert cache.get("acc-001:positions") is None
@@ -270,7 +267,7 @@ async def test_execution_callback_routes_to_fill_applier(
             "quantity": 10.0,
             "price": 70000.0,
         }
-        await stream_client.fire_execution(execution)
+        await integration._on_execution(execution)
 
         assert len(fill_applier.calls) == 1
         call = fill_applier.calls[0]
@@ -279,6 +276,75 @@ async def test_execution_callback_routes_to_fill_applier(
         assert call["increment"] == 10.0
         assert call["avg_price"] == 70000.0
         assert call["submitted_date"]  # KST 영업일.
+    finally:
+        await integration.stop()
+
+
+# ── 체결 통보 끄기 (#2804) ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_start_does_not_register_or_subscribe_execution(
+    integration: StreamIntegration,
+    stream_client: FakeStreamClient,
+) -> None:
+    """#2804: start()는 체결 통보 처리기를 등록하지 않고 구독도 보내지 않는다."""
+    await integration.start()
+    try:
+        assert stream_client._execution_callbacks == []
+        assert stream_client.subscribe_execution_calls == 0
+        assert len(stream_client._price_callbacks) == 1
+    finally:
+        await integration.stop()
+
+
+@pytest.mark.asyncio
+async def test_execution_messages_reach_no_handler_after_start(
+    cache: ResponseCache,
+    eventbus: EventBus,
+    stop_order_manager: StopOrderManager,
+    gateway_mock: MagicMock,
+    bot_manager_mock: MagicMock,
+    fill_applier: FakeFillApplier,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2804: KIS가 H0STCNI0를 보내도 FillApplier와 캐시 무효화에 닿지 않는다."""
+    from ante.broker.kis_stream import KISStreamClient
+
+    client = KISStreamClient(
+        websocket_url="ws://example.invalid:31000",
+        app_key="ak",
+        app_secret="as",
+        approval_key="k",
+        account_id="acc-001",
+    )
+    monkeypatch.setattr(client, "connect", AsyncMock())
+    integration = StreamIntegration(
+        stream_client=client,
+        cache=cache,
+        eventbus=eventbus,
+        account_id="acc-001",
+        stop_order_manager=stop_order_manager,
+        gateway=gateway_mock,
+        bot_manager=bot_manager_mock,
+        fill_applier=fill_applier,  # type: ignore[arg-type]
+        sync_interval=60.0,
+    )
+    await integration.start()
+    try:
+        cache.set("acc-001:balance", {"total": 1000000}, ttl=30)
+        cache.set("acc-001:price:005930", 70000.0, ttl=5)
+        fields = "005930^0000012345^0^0^02^10^70000^0^0^0^0"
+        await client._handle_message(f"0|H0STCNI0|001|{fields}")
+        await client._handle_message(
+            '{"header": {"tr_id": "H0STCNI0"}, "body": {"output": '
+            '{"pdno": "005930", "odno": "0000012345", "sll_buy_dvsn_cd": "02", '
+            '"ccld_qty": "10", "ccld_pric": "70000"}}}'
+        )
+
+        assert fill_applier.calls == []
+        assert cache.get("acc-001:balance") == {"total": 1000000}
+        assert cache.get("acc-001:price:005930") == 70000.0
     finally:
         await integration.stop()
 
@@ -670,7 +736,7 @@ async def test_execution_uses_lifecycle_account_id_when_payload_missing(
     await integration.start()
     try:
         # broker payload에 account_id 없음 → integration._account_id="acc-001" 사용
-        await stream_client.fire_execution(
+        await integration._on_execution(
             {
                 "symbol": "005930",
                 "order_id": "ord-1",
@@ -696,7 +762,7 @@ async def test_execution_payload_account_id_overrides_lifecycle(
     """broker payload의 account_id가 lifecycle account_id를 오버라이드한다 (#1946)."""
     await integration.start()
     try:
-        await stream_client.fire_execution(
+        await integration._on_execution(
             {
                 "symbol": "005930",
                 "order_id": "ord-2",
@@ -854,7 +920,7 @@ async def test_execution_callback_does_not_publish_order_filled_directly(
     eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
     await integration.start()
     try:
-        await stream_client.fire_execution(
+        await integration._on_execution(
             {
                 "symbol": "005930",
                 "order_id": "ord-1",

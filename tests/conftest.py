@@ -574,6 +574,50 @@ def _reset_kis_token_state():
     _reset_token_cache()
 
 
+class KISStreamExternalGuard:
+    """KIS 스트림의 실제 외부 접속 호출을 기록한다 (#2804).
+
+    원본 메서드는 ``original_get_approval_key``·``original_connect_and_recv``로
+    노출한다. 외부 대역(aiohttp·websockets)과 함께 원본을 부를 테스트만 쓴다.
+    """
+
+    def __init__(self, original_get_approval_key, original_connect_and_recv):
+        self.original_get_approval_key = original_get_approval_key
+        self.original_connect_and_recv = original_connect_and_recv
+        self.calls: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def kis_stream_external_guard(monkeypatch):
+    """실제 접속키 발급·웹소켓 연결이 불리면 teardown에서 실패시킨다 (#2804).
+
+    호출부의 ``except Exception``이 예외를 삼키므로 예외가 아니라 호출 기록으로
+    판정한다. 판정의 근거는 접속키 발급이다(``connect()``가 바로 기다린다).
+    연결 루프는 태스크로 떠 teardown 전에 돌지 않을 수 있어 보조 기록이다.
+    """
+    from ante.broker.kis_stream import KISStreamClient
+
+    guard = KISStreamExternalGuard(
+        KISStreamClient._get_approval_key, KISStreamClient._connect_and_recv
+    )
+
+    async def _blocked_approval_key(self):
+        guard.calls.append(f"_get_approval_key({self._url})")
+        raise RuntimeError("테스트에서 실제 KIS 접속키 발급이 불렸다 (#2804)")
+
+    async def _blocked_connect_and_recv(self):
+        guard.calls.append(f"_connect_and_recv({self._url})")
+        raise RuntimeError("테스트에서 실제 KIS 웹소켓 연결이 불렸다 (#2804)")
+
+    monkeypatch.setattr(KISStreamClient, "_get_approval_key", _blocked_approval_key)
+    monkeypatch.setattr(KISStreamClient, "_connect_and_recv", _blocked_connect_and_recv)
+    yield guard
+    if guard.calls:
+        pytest.fail(
+            "실제 KIS 스트림 외부 접속이 시도됐다 (#2804): " + ", ".join(guard.calls)
+        )
+
+
 CLOCK_LEAK_MESSAGE = (
     "테스트가 바꾼 시계를 되돌리지 않았다 (#2768). "
     "manual_clock 픽스처나 use_clock으로 바꾼다."
