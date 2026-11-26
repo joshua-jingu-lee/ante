@@ -147,7 +147,9 @@ async def test_every_active_account_is_suspended_before_any_subscriber_returns(
         service.suspend_all(reason="킬 스위치", suspended_by="admin")
     )
     entered_wait = asyncio.create_task(entered.wait())
-    await asyncio.wait({task, entered_wait}, return_when=asyncio.FIRST_COMPLETED)
+    await asyncio.wait(
+        {task, entered_wait}, timeout=5, return_when=asyncio.FIRST_COMPLETED
+    )
     entered_wait.cancel()
     assert entered.is_set(), "정지 이벤트 구독자에 들어오지 않았다"
 
@@ -238,4 +240,125 @@ async def test_mixed_accounts_report_pre_call_status_and_retry_only_unpersisted(
     assert raised == []
     for account_id in ("active", "persisted", "unpersisted"):
         assert await _db_status(db, account_id) == AccountStatus.SUSPENDED
+    assert service.has_unpersisted_suspensions() is False
+
+
+def _record_suspend_calls(monkeypatch, service: AccountService) -> list[str]:
+    called: list[str] = []
+    real_suspend = service.suspend
+
+    async def suspend(account_id: str, reason: str, suspended_by: str) -> None:
+        called.append(account_id)
+        await real_suspend(account_id, reason, suspended_by)
+
+    monkeypatch.setattr(service, "suspend", suspend)
+    return called
+
+
+def _assert_changed_rows_were_suspended(
+    results: list[dict[str, Any]], called: list[str], events: list[str]
+) -> None:
+    changed = {r["account_id"] for r in results if r["changed"]}
+    assert changed <= set(called)
+    assert changed <= set(events)
+
+
+@pytest.mark.asyncio
+async def test_activation_in_flight_does_not_drop_the_kill_switch_write(
+    service, db, eventbus, monkeypatch
+):
+    for account_id in ("aaa", "bbb"):
+        await service.create(_make_account(account_id))
+    await service.suspend("bbb", reason="준비", suspended_by="admin")
+
+    real_execute = service._db.execute
+    activate_writing = asyncio.Event()
+    activate_release = asyncio.Event()
+
+    async def execute(sql: str, params: tuple[Any, ...] = ()) -> None:
+        if (
+            "SET status" in " ".join(sql.split())
+            and params[0] == AccountStatus.ACTIVE
+            and params[-1] == "bbb"
+        ):
+            activate_writing.set()
+            await activate_release.wait()
+        await real_execute(sql, params)
+
+    monkeypatch.setattr(service._db, "execute", execute)
+    called = _record_suspend_calls(monkeypatch, service)
+
+    sub_entered = asyncio.Event()
+    sub_release = asyncio.Event()
+    events: list[str] = []
+
+    async def blocking_subscriber(event: AccountSuspendedEvent) -> None:
+        events.append(event.account_id)
+        if event.account_id == "aaa":
+            sub_entered.set()
+            await sub_release.wait()
+
+    eventbus.subscribe(AccountSuspendedEvent, blocking_subscriber)
+
+    activating = asyncio.create_task(service.activate("bbb", activated_by="admin"))
+    await asyncio.wait_for(activate_writing.wait(), timeout=5)
+    halting = asyncio.create_task(
+        service.suspend_all(reason="킬 스위치", suspended_by="admin")
+    )
+    await asyncio.wait_for(sub_entered.wait(), timeout=5)
+    activate_release.set()
+    await asyncio.wait_for(activating, timeout=5)
+    assert service._accounts["bbb"].status == AccountStatus.SUSPENDED
+    sub_release.set()
+    results = await asyncio.wait_for(halting, timeout=5)
+
+    assert [(r["account_id"], r["previous_status"], r["changed"]) for r in results] == [
+        ("aaa", "active", True),
+        ("bbb", "active", True),
+    ]
+    assert called == ["aaa", "bbb"]
+    assert events == ["aaa", "bbb"]
+    assert await _db_status(db, "bbb") == AccountStatus.SUSPENDED
+    assert service.has_unpersisted_suspensions() is False
+    _assert_changed_rows_were_suspended(results, called, events)
+
+
+@pytest.mark.parametrize("overlap", ["activate", "suspend", "delete"])
+@pytest.mark.asyncio
+async def test_changed_rows_were_suspended_in_this_call_under_overlaps(
+    service, db, eventbus, monkeypatch, overlap
+):
+    for account_id in ("aaa", "bbb"):
+        await service.create(_make_account(account_id))
+    called = _record_suspend_calls(monkeypatch, service)
+    events: list[str] = []
+    done_overlap = False
+
+    async def overlapping_subscriber(event: AccountSuspendedEvent) -> None:
+        nonlocal done_overlap
+        events.append(event.account_id)
+        if event.account_id != "aaa" or done_overlap:
+            return
+        done_overlap = True
+        if overlap == "activate":
+            await service.activate("bbb", activated_by="admin")
+        elif overlap == "suspend":
+            await service.suspend("bbb", reason="개별", suspended_by="admin")
+        else:
+            await service.delete("bbb", deleted_by="admin")
+
+    eventbus.subscribe(AccountSuspendedEvent, overlapping_subscriber)
+
+    results = await asyncio.wait_for(
+        service.suspend_all(reason="킬 스위치", suspended_by="admin"), timeout=5
+    )
+
+    _assert_changed_rows_were_suspended(results, called, events)
+    if overlap == "delete":
+        assert [r["account_id"] for r in results] == ["aaa"]
+        assert await _db_status(db, "bbb") == AccountStatus.DELETED
+    else:
+        assert [r["account_id"] for r in results] == ["aaa", "bbb"]
+        assert service._accounts["bbb"].status == AccountStatus.SUSPENDED
+        assert await _db_status(db, "bbb") == AccountStatus.SUSPENDED
     assert service.has_unpersisted_suspensions() is False

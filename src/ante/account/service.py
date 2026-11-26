@@ -821,6 +821,10 @@ class AccountService:
         results: list[dict[str, Any]] = []
         failed: list[str] = []
         for account_id, account, previous in candidates:
+            if account.status == AccountStatus.DELETED:
+                continue
+            if previous == AccountStatus.ACTIVE:
+                self._unpersisted_suspensions.add(account_id)
             if (
                 account.status == AccountStatus.ACTIVE
                 or account_id in self._unpersisted_suspensions
