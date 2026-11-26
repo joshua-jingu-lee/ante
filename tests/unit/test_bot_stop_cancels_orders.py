@@ -889,6 +889,13 @@ def _cancel_ids(rig: Rig) -> list[str]:
     return sorted(e.order_id for e in rig.events("cancel"))
 
 
+def test_open_order_statuses_match_tracker_definition() -> None:
+    from ante.bot.manager import _OPEN_ORDER_STATUSES
+    from ante.trade.order_tracker import OPEN_STATUSES
+
+    assert _OPEN_ORDER_STATUSES == {str(s) for s in OPEN_STATUSES}
+
+
 def test_order_cancel_event_is_built_only_in_request_cancel() -> None:
     import ast
 
@@ -918,8 +925,8 @@ def test_order_cancel_event_is_built_only_in_request_cancel() -> None:
 async def test_suspend_returns_before_broker_and_expires_stops_at_once(
     rig: Rig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    bot = await _running(rig)
     await _bot_in(rig, OTHER, "error")
+    bot = await _running(rig)
     await rig.seed("ord-run")
     await rig.seed("ord-err", bot_id=OTHER)
     run_stop = await rig.register_stop(BOT)
@@ -952,11 +959,11 @@ async def test_suspend_returns_before_broker_and_expires_stops_at_once(
 async def test_suspend_cleans_every_bot_state_and_orphans_only_in_account(
     rig: Rig,
 ) -> None:
-    await _bot_in(rig, "bot-run", "running")
     await _bot_in(rig, "bot-err", "error")
     await _bot_in(rig, "bot-stp", "stopped")
     await _bot_in(rig, "bot-new", "created")
     await _bot_in(rig, "bot-far", "error", account_id=ACCT2)
+    await _bot_in(rig, "bot-run", "running")
     stops = {}
     for bot_id in ("bot-run", "bot-err", "bot-stp", "bot-new"):
         await rig.seed(f"ord-{bot_id}", bot_id=bot_id)
@@ -1182,8 +1189,15 @@ async def test_skipped_only_still_sends_result(rig: Rig) -> None:
 async def test_overlapping_suspend_reruns_once_in_the_same_task(rig: Rig) -> None:
     await _bot_in(rig, BOT, "error")
     await rig.seed("ord-1")
-    rig.broker.result = False
-    rig.broker.gate = asyncio.Event()
+    gate = asyncio.Event()
+    results = [False, True]
+
+    async def _fail_then_cancel(broker_order_id: str) -> bool:
+        rig.broker.calls.append(broker_order_id)
+        await gate.wait()
+        return results.pop(0)
+
+    rig.broker.cancel_order = _fail_then_cancel  # type: ignore[method-assign]
     await rig.bus.publish(_suspend())
     [task] = rig.manager._suspension_cleanups.values()
     await _wait_calls(rig)
@@ -1192,8 +1206,7 @@ async def test_overlapping_suspend_reruns_once_in_the_same_task(rig: Rig) -> Non
     await rig.bus.publish(_suspend())
 
     assert list(rig.manager._suspension_cleanups.values()) == [task]
-    rig.broker.result = True
-    rig.broker.gate.set()
+    gate.set()
     await _drain_cleanups(rig)
 
     assert [e.order_id for e in rig.events("cancel")] == ["ord-1", "ord-1"]
