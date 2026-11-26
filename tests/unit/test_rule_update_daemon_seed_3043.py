@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -72,14 +73,17 @@ async def _dispatch(world: _World, config: Any, args: dict[str, Any]) -> dict[st
         config=config,
     )
     socket_dir = tempfile.mkdtemp(prefix="ipc3043", dir="/tmp")
-    server = IPCServer(str(Path(socket_dir) / "t.sock"), svc_registry, cmd_registry)
-    await server.start()
     try:
-        return await server._dispatch(
-            {"id": "1", "command": "rule.update", "args": args, "actor": "bob"}
-        )
+        server = IPCServer(str(Path(socket_dir) / "t.sock"), svc_registry, cmd_registry)
+        await server.start()
+        try:
+            return await server._dispatch(
+                {"id": "1", "command": "rule.update", "args": args, "actor": "bob"}
+            )
+        finally:
+            await server.stop()
     finally:
-        await server.stop()
+        shutil.rmtree(socket_dir, ignore_errors=True)
 
 
 async def _ipc(

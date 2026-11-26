@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -101,13 +102,16 @@ async def client(world: _World):
         config=None,
     )
     socket_dir = tempfile.mkdtemp(prefix="ipc3058", dir="/tmp")
-    socket_path = str(Path(socket_dir) / "t.sock")
-    server = IPCServer(socket_path, svc_registry, cmd_registry)
-    await server.start()
     try:
-        yield IPCClient(socket_path, timeout=10)
+        socket_path = str(Path(socket_dir) / "t.sock")
+        server = IPCServer(socket_path, svc_registry, cmd_registry)
+        await server.start()
+        try:
+            yield IPCClient(socket_path, timeout=10)
+        finally:
+            await server.stop()
     finally:
-        await server.stop()
+        shutil.rmtree(socket_dir, ignore_errors=True)
 
 
 def _send(
