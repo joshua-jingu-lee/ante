@@ -79,6 +79,8 @@ def _kis_account(account_id: str, *, mode: TradingMode = TradingMode.LIVE) -> Ac
 class _FakeBroker:
     """BrokerAdapter 더블. 연결·주문·해제를 기록한다."""
 
+    websocket_url: str | None = None
+
     def __init__(self, account_id: str, factory: _BrokerFactory) -> None:
         self.account_id = account_id
         self.account_no = "1234567890"
@@ -921,6 +923,70 @@ async def test_ipc_server_listens_on_overridden_socket_path(
     response = await client.send("bot.positions", {"bot_id": "missing"})
 
     assert response["error"]["code"] == "BOT_NOT_FOUND"
+
+
+# ── _init_gateway 의 스트림 연동 (#2804) ──────────────────────────────────────
+
+
+class _RecordingStreamClient:
+    """KISStreamClient 더블. 생성 인자와 해제를 기록하고 외부에 접속하지 않는다."""
+
+    instances: list[_RecordingStreamClient] = []
+
+    def __init__(self, websocket_url: str, *args: Any, **kwargs: Any) -> None:
+        self.websocket_url = websocket_url
+        self.account_id = kwargs.get("account_id", "")
+        self.disconnected = False
+        _RecordingStreamClient.instances.append(self)
+
+    is_connected = False
+    subscribed_symbols: set[str] = set()
+
+    def on_price(self, callback: Any) -> None:
+        return None
+
+    def on_execution(self, callback: Any) -> None:
+        return None
+
+    async def connect(self) -> None:
+        return None
+
+    async def disconnect(self) -> None:
+        self.disconnected = True
+
+    async def subscribe_execution(self) -> None:
+        return None
+
+    async def subscribe(self, symbol: str) -> bool:
+        return True
+
+    async def unsubscribe(self, symbol: str) -> None:
+        return None
+
+
+async def test_live_account_stream_is_registered_and_closed_on_shutdown(
+    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LIVE kis-domestic 계좌는 어댑터의 URL로 스트림이 등록되고 종료가 해제한다.
+
+    가상 계좌에는 스트림이 없다."""
+    import ante.broker.kis_stream as kis_stream_mod
+
+    url = "ws://ops.koreainvestment.com:31000"
+    _RecordingStreamClient.instances = []
+    monkeypatch.setattr(kis_stream_mod, "KISStreamClient", _RecordingStreamClient)
+    monkeypatch.setattr(_FakeBroker, "websocket_url", url)
+    asm = await assemble(
+        [_kis_account("live-a"), _kis_account("virt-a", mode=TradingMode.VIRTUAL)]
+    )
+
+    assert list(asm.s.stream_integrations) == ["live-a"]
+    clients = _RecordingStreamClient.instances
+    assert [(c.account_id, c.websocket_url) for c in clients] == [("live-a", url)]
+
+    await _shutdown_in_test(asm)
+
+    assert _RecordingStreamClient.instances[0].disconnected
 
 
 # ── _init_gateway 의 기동 순서와 readiness ────────────────────────────────────

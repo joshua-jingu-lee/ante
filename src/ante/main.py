@@ -716,43 +716,47 @@ async def _init_gateway(s: Services) -> None:
         logger.info("Broker 연결 완료: %d/%d개 계좌", connected_count, len(accounts))
 
     for account in accounts:
-        if account.broker_type == "kis":
-            if _broker_not_ready_live(s, account):
-                logger.info(
-                    "StreamIntegration 초기화 skip: account=%s — broker not_ready"
-                    "(self-healing 위임)",
-                    account.account_id,
-                )
-                continue
-            try:
-                await s.account_service.get_broker(account.account_id)
-                broker_config = {**account.credentials, **account.broker_config}
-                await _init_stream_integration(
-                    s,
-                    broker_config,
-                    stop_order_manager,
-                    account_id=account.account_id,
-                )
-            except Exception:
-                logger.warning(
-                    "StreamIntegration 초기화 실패: account=%s",
-                    account.account_id,
-                    exc_info=True,
-                )
-                from ante.eventbus.events import NotificationEvent
+        if _broker_ready_exempt(account):
+            continue
+        if _broker_not_ready_live(s, account):
+            logger.info(
+                "StreamIntegration 초기화 skip: account=%s — broker not_ready"
+                "(self-healing 위임)",
+                account.account_id,
+            )
+            continue
+        broker = await s.account_service.get_cached_broker(account.account_id)
+        if broker is None or broker.websocket_url is None:
+            continue
+        try:
+            broker_config = {**account.credentials, **account.broker_config}
+            await _init_stream_integration(
+                s,
+                broker_config,
+                stop_order_manager,
+                account_id=account.account_id,
+                websocket_url=broker.websocket_url,
+            )
+        except Exception:
+            logger.warning(
+                "StreamIntegration 초기화 실패: account=%s",
+                account.account_id,
+                exc_info=True,
+            )
+            from ante.eventbus.events import NotificationEvent
 
-                if s.eventbus is not None:
-                    await s.eventbus.publish(
-                        NotificationEvent(
-                            level="error",
-                            title="실시간 시세 연결 실패",
-                            message=(
-                                f"계좌 {account.account_id} StreamIntegration 초기화에"
-                                " 실패했습니다. 실시간 시세가 수신되지 않습니다."
-                            ),
-                            category="system",
-                        )
+            if s.eventbus is not None:
+                await s.eventbus.publish(
+                    NotificationEvent(
+                        level="error",
+                        title="실시간 시세 연결 실패",
+                        message=(
+                            f"계좌 {account.account_id} StreamIntegration 초기화에"
+                            " 실패했습니다. 실시간 시세가 수신되지 않습니다."
+                        ),
+                        category="system",
                     )
+                )
 
     if connected_count:
         await _sync_instruments(s, accounts)
@@ -1244,6 +1248,7 @@ async def _init_stream_integration(
     stop_order_manager: Any,
     *,
     account_id: str,
+    websocket_url: str,
 ) -> None:
     """StreamIntegration 시작. 성공하면 stream_integrations[account_id] 에 등록한다."""
     assert s.eventbus is not None
@@ -1254,15 +1259,8 @@ async def _init_stream_integration(
     from ante.broker.kis_stream import KISStreamClient
     from ante.gateway.stream_integration import StreamIntegration
 
-    is_paper = broker_config.get("is_paper", True)
-    ws_url = (
-        "ws://ops.koreainvestment.com:21000"
-        if is_paper
-        else "ws://ops.koreainvestment.com:31000"
-    )
-
     stream_client = KISStreamClient(
-        websocket_url=ws_url,
+        websocket_url=websocket_url,
         app_key=broker_config.get("app_key", ""),
         app_secret=broker_config.get("app_secret", ""),
         eventbus=s.eventbus,
@@ -1280,20 +1278,13 @@ async def _init_stream_integration(
         fill_applier=s.fill_applier,
     )
 
-    try:
-        await integration.start()
-        s.stream_integrations[account_id] = integration
-        logger.info(
-            "StreamIntegration 시작 완료 (account=%s, paper=%s)",
-            account_id,
-            is_paper,
-        )
-    except Exception:
-        logger.warning(
-            "StreamIntegration 시작 실패 — REST 전용 모드로 운영 (account=%s)",
-            account_id,
-            exc_info=True,
-        )
+    await integration.start()
+    s.stream_integrations[account_id] = integration
+    logger.info(
+        "StreamIntegration 시작 완료 (account=%s, url=%s)",
+        account_id,
+        websocket_url,
+    )
 
 
 async def _sync_instruments(s: Services, accounts: list[Any]) -> None:
