@@ -176,7 +176,7 @@ KISBaseAdapter를 상속하여 국내주식 전용 로직을 구현한다. 기�
 
 ### KIS 주문 유형 매핑
 
-KISDomesticAdapter는 `order_type` 문자열을 KIS ORD_DVSN 코드로 매핑한다. `stop`/`stop_limit`이 전달되면 `ValueError`를 발생시킨다 (상위 계층에서 변환 후 호출해야 함).
+KISDomesticAdapter는 `order_type` 문자열을 KIS ORD_DVSN 코드로 매핑한다. `stop`/`stop_limit`이 전달되면 `ValueError`를 발생시킨다 (상위 계층에서 변환 후 호출해야 함). 표에 없는 값(대소문자가 다른 값·문자열이 아닌 값 포함)은 증권사 요청 전에 `BrokerError`로 거부한다(#3082). 주문 접수에서는 `stop`/`stop_limit`의 `ValueError`가 먼저다.
 
 | order_type | ORD_DVSN | 설명 |
 |------------|----------|------|

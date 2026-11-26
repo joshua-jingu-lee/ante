@@ -25,6 +25,7 @@ from ante.broker.exceptions import (
     ORDER_OUTCOME_UNKNOWN,
     APIError,
     AuthenticationError,
+    BrokerError,
     CircuitOpenError,
     ModifyOrgnoUnavailableError,
     OrderNotFoundError,
@@ -994,6 +995,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         tr_id = _PSBL_ORDER_TR_ID_PAPER if self.is_paper else _PSBL_ORDER_TR_ID_LIVE
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-order"
 
+        ord_dvsn = self._map_order_type(order_type)
         unit_price = price
         if unit_price is None:
             unit_price = await self.get_current_price(symbol)
@@ -1003,7 +1005,7 @@ class KISDomesticAdapter(KISBaseAdapter):
             "ACNT_PRDT_CD": self.account_no[8:10],
             "PDNO": self.normalize_symbol(symbol),
             "ORD_UNPR": str(int(unit_price)),
-            "ORD_DVSN": self._map_order_type(order_type),
+            "ORD_DVSN": ord_dvsn,
             "CMA_EVLU_AMT_ICLD_YN": "N",
             "OVRS_ICLD_YN": "N",
         }
@@ -1105,7 +1107,9 @@ class KISDomesticAdapter(KISBaseAdapter):
             "best": "03",
             "priority": "04",
         }
-        return mapping.get(order_type, "01")
+        if not isinstance(order_type, str) or order_type not in mapping:
+            raise BrokerError(f"지원하지 않는 주문 유형: {order_type!r}")
+        return mapping[order_type]
 
     def _map_order_status(self, status_code: str) -> str:
         """KIS 주문 상태 코드 매핑."""
