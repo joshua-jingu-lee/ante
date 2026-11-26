@@ -488,14 +488,15 @@ def test_config_set_invalid_value(mode: str) -> None:
     assert not (Path(_DATA) / ".feed" / ".env").exists()
 
 
-def test_config_set_unencodable_value_preserves_env() -> None:
+@_MODES
+def test_config_set_unencodable_value_preserves_env(mode: str) -> None:
     _init()
     env_path = Path(_DATA) / ".feed" / ".env"
     before = b"ANTE_DATAGOKR_API_KEY=aaa111\nANTE_DART_API_KEY=bbb222\n"
     env_path.write_bytes(before)
     env_path.chmod(0o600)
     result = _invoke(
-        "json",
+        mode,
         [
             "feed",
             "config",
@@ -506,12 +507,13 @@ def test_config_set_unencodable_value_preserves_env() -> None:
             _DATA,
         ],
     )
-    assert result.exit_code == 1, (result.stdout, result.stderr)
-    assert json.loads(result.stdout)["code"] == "CONFIG_INVALID_VALUE"
+    _check(
+        mode, result, "CONFIG_INVALID_VALUE", "API 키 값을 UTF-8로 인코딩할 수 없습니다"
+    )
     assert env_path.read_bytes() == before
     assert sorted(p.name for p in env_path.parent.glob(".env*")) == [".env"]
-    for secret in ("aaa111", "bbb222"):
-        assert secret not in result.stdout + result.stderr
+    for trace in ("aaa111", "bbb222", "codec", "\\udcff", "\udcff", "position"):
+        assert trace not in result.stdout + result.stderr
 
 
 _NON_UTF8_ENV = b"ANTE_DART_API_KEY=fake-sec\xff\xfe-tail\n"

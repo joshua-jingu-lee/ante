@@ -404,12 +404,17 @@ async def test_assign_strategy_cancels_before_restart(rig: Rig) -> None:
     assert await rig.status("ord-1") == "cancelled"
 
 
-@pytest.mark.parametrize("state", ["running", "stopped", "error", "running-failing"])
+@pytest.mark.parametrize(
+    "state",
+    ["running", "stopped", "error", "running-failing", "created", "created-failing"],
+)
 async def test_delete_bot_cancels_before_liquidation(rig: Rig, state: str) -> None:
-    if state == "running-failing":
+    if state.endswith("-failing"):
         rig.broker.result = False
     if state == "error":
         await _errored(rig)
+    elif state.startswith("created"):
+        await rig.make_bot()
     else:
         await _running(rig)
     if state == "stopped":
@@ -424,12 +429,28 @@ async def test_delete_bot_cancels_before_liquidation(rig: Rig, state: str) -> No
 
     names = rig.names()
     assert names.count("cancel") == 1
-    if state == "running-failing":
+    if state.endswith("-failing"):
         assert names.index("cancel_failed") < names.index("request")
         assert await rig.status("ord-1") == "open"
     else:
         assert names.index("cancelled") < names.index("request")
         assert await rig.status("ord-1") == "cancelled"
+    assert BOT not in rig.manager._bots
+
+
+async def test_delete_created_bot_without_orders_cleans_nothing(rig: Rig) -> None:
+    await rig.make_bot()
+    rig.log.clear()
+
+    await rig.manager.delete_bot(BOT)
+
+    assert rig.events("cancel") == []
+    assert rig.events("stop_expired") == []
+    assert rig.events("notify") == []
+    assert BOT not in rig.manager._last_cleanup
+    row = await rig.db.fetch_one("SELECT status FROM bots WHERE bot_id = ?", (BOT,))
+    assert row is not None
+    assert row["status"] == "deleted"
 
 
 async def test_self_stop_completes_broker_cancel(rig: Rig) -> None:
@@ -1127,8 +1148,11 @@ async def test_suspend_during_manual_stop_cancel_skips_in_flight_order(
     assert sweep.level == "warning"
 
 
-async def test_delete_during_suspend_cleanup_skips_in_flight_order(rig: Rig) -> None:
-    await _bot_in(rig, BOT, "stopped")
+@pytest.mark.parametrize("state", ["stopped", "created"])
+async def test_delete_during_suspend_cleanup_skips_in_flight_order(
+    rig: Rig, state: str
+) -> None:
+    await _bot_in(rig, BOT, state)
     await rig.seed("ord-1")
     rig.broker.gate = asyncio.Event()
     await rig.bus.publish(_suspend())

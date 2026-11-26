@@ -589,6 +589,7 @@ async def test_record_fill_keeps_terminal_status_and_time(db, tracker, status, c
         ("2000-01-01 00:00:00", "ord-1"),
     )
     caplog.set_level("WARNING", logger="ante.trade.order_tracker")
+    caplog.clear()
     result = await tracker.record_fill("ord-1", 10.0, 1234.0)
     assert (result.delta, result.confirmed_cumulative, result.new_status) == (
         10.0,
