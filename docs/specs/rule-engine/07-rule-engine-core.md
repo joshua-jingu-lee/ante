@@ -139,3 +139,25 @@ OrderRequestEvent preflight 도메인 검증(`side`/`order_type`/`symbol`/`price
 - **사유 토큰은 둘뿐**: 어느 조회가 실패했는지는 사유에 담지 않고 warning 로그로 남긴다. 알림의 중복 묶음 키가 장애 동안 바뀌지 않게 하기 위해서다.
 - **매도·정정은 불변**: `side == "sell"`(청산 매도·스탑 매도 트리거 포함)과 `OrderModifyEvent`는 실패한 값을 `0.0`으로 채워 룰을 평가한다.
 - **실패가 아닌 것**: 조회가 성공했지만 값이 없는 경우(오늘 이전 스냅샷 없음, 봇 예산 없음)와 TradeService 미주입은 지금처럼 `0.0`으로 채우며 거부 사유가 아니다. 오늘 이전 스냅샷이 없거나 그 `total_asset`이 0 이하·비유한이면 일일 손실 판정은 건너뛰고, 계좌에 켜진 `DailyLossLimitRule`이 있을 때만 주문마다 warning 로그(계좌·스냅샷 날짜·값)를 남긴다. 대체 분모는 #2621에서 정한다.
+
+### 시장가 매수 시세 (#3097)
+
+> 소스: `RuleEngine._on_order_request`, `RuleEngine.set_market_price_resolver`, `RuleEngine.aclose` (`src/ante/rule/engine.py`)
+
+`side == "buy"`이고 `order_type == "market"`인 주문은 평가 입력의 현재가를 주입된 시세 조회로 채운다. 운영 조립은 계좌마다 Treasury가 시장가 예약에 쓰는 것과 같은 게이트웨이 현재가 조회(`APIGateway.get_current_price(symbol, account_id=)`)를 `RuleEngineManager.set_market_price_resolver(account_id, resolver)`로 넣는다.
+
+- **조회하지 않는 주문**: 매도(청산·손절·스탑 매도 발동 포함), 지정가·`stop_limit`, `stop` 등록, 정정은 조회하지 않고 [05](05-rule-context.md)의 `current_price` 행대로 채운다. `stop` 매수는 등록 때 조회하지 않고, 발동 때 나가는 시장가 주문이 다시 평가될 때 조회한다.
+- **판정 순서**: Treasury 조회가 실패하지 않았을 때만 시세를 조회하고, 그다음 포지션·실현 손익을 조회한다. #3047의 실패가 하나라도 있으면 그 거부(`account_not_ready: <토큰>`과 알림)가 이긴다. 그렇지 않고 시세 조회가 실패했으면 룰 평가 없이 `market_buy_quote_unavailable: <상세>`로 거부하고 알림은 내지 않는다.
+- **사유**: Treasury가 같은 실패에 쓰는 접두와 같다. 이 사유는 `account_not_ready:` 토큰이 아니다. 거부되면 `OrderValidatedEvent`가 나가지 않아 Treasury는 조회하지 않으므로, 사유는 전략에 한 번만 보인다.
+
+| 실패 | 상세 |
+|---|---|
+| 시세 조회 미주입 | `resolver not configured` |
+| 엔진이 닫힌 뒤 | `engine closed` |
+| 시간 초과 | `timeout` |
+| 예외 | 예외의 문자열. 비면 예외 타입 이름 |
+| 수가 아닌 값·`bool`·0 이하·비유한 값 | `non-finite or non-positive quote <값의 repr>` |
+
+- **시간 제한**: 한 번의 조회를 기다리는 시간은 조회가 시작된 때부터 10초다. 넘으면 그 주문은 `timeout`으로 거부되지만 조회는 취소하지 않는다(취소가 증권사 토큰 발급 요청 도중에 걸리면 재발급 대기로 같은 앱 키의 매도까지 막힐 수 있다). 조회는 뒤에서 끝나 게이트웨이 캐시를 채운다.
+- **같은 종목의 진행 중 조회**: 엔진은 종목마다 진행 중인 조회를 하나만 두고, 그동안 같은 종목의 주문은 그 조회에 합류해 남은 시간만 기다린다. 끝난 조회의 결과는 재사용하지 않는다(다음 주문은 새로 조회하고, 보통 캐시에 적중한다). 아무도 기다리지 않는 조회가 예외로 끝나면 warning 로그를 남긴다.
+- **종료**: `RuleEngineManager.aclose()`가 모든 엔진의 `aclose()`를 부른다. 엔진은 닫힘 상태가 된 뒤 진행 중인 조회를 취소하고 끝나기를 기다린다. 그 뒤의 시장가 매수는 조회 없이 거부된다. 서버 종료 경로는 실시간 스트림을 멈춘 뒤, 브로커 연결을 끊기 전에 이를 부른다.
