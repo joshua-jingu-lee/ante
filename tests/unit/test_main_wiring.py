@@ -989,6 +989,56 @@ async def test_live_account_stream_is_registered_and_closed_on_shutdown(
     assert _RecordingStreamClient.instances[0].disconnected
 
 
+async def test_assembled_stream_does_not_poll_gateway_after_disconnect(
+    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """조립된 스트림 연동은 끊김 뒤에도 REST 폴링을 시작하지 않는다 (#2804).
+
+    폴링은 주문과 같은 계좌별 호출 한도를 써서 주문을 늦추므로 켜지 않는다."""
+    import ante.broker.kis_stream as kis_stream_mod
+    from ante.eventbus.events import StreamDisconnectedEvent
+
+    _RecordingStreamClient.instances = []
+    monkeypatch.setattr(kis_stream_mod, "KISStreamClient", _RecordingStreamClient)
+    monkeypatch.setattr(
+        _FakeBroker, "websocket_url", "ws://ops.koreainvestment.com:31000"
+    )
+    asm = await assemble([_kis_account("live-a")])
+    s = asm.s
+    assert s.api_gateway is not None
+    price_calls: list[str] = []
+
+    async def _price(symbol: str, *, account_id: str) -> float:
+        price_calls.append(symbol)
+        return 100.0
+
+    monkeypatch.setattr(s.api_gateway, "get_current_price", _price)
+    await s.eventbus.publish(
+        OrderApprovedEvent(
+            account_id="live-a",
+            order_id="stop-1",
+            bot_id="bot-1",
+            strategy_id="strategy-1",
+            symbol="005930",
+            side="sell",
+            quantity=1.0,
+            order_type="stop",
+            stop_price=50.0,
+        )
+    )
+    integration = s.stream_integrations["live-a"]
+
+    await s.eventbus.publish(
+        StreamDisconnectedEvent(account_id="live-a", broker="kis", reason="test")
+    )
+    for _ in range(20):
+        await asyncio.sleep(0)
+
+    assert price_calls == []
+    assert integration._fallback_task is None
+    assert not integration.is_fallback_active
+
+
 # ── _init_gateway 의 기동 순서와 readiness ────────────────────────────────────
 
 

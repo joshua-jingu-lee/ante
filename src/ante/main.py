@@ -1273,7 +1273,6 @@ async def _init_stream_integration(
         eventbus=s.eventbus,
         account_id=account_id,
         stop_order_manager=stop_order_manager,
-        gateway=s.api_gateway,
         bot_manager=s.bot_manager,
         fill_applier=s.fill_applier,
     )
