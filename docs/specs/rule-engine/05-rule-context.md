@@ -31,7 +31,8 @@ RuleEngine이 OrderRequestEvent와 Account 상태를 조합하여 생성하는 �
 | `trading_hours_start` | `str` | `"09:00"` | 거래 시작 시각 (Account에서 주입). TradingHoursRule 사용 |
 | `trading_hours_end` | `str` | `"15:30"` | 거래 종료 시각 (Account에서 주입). TradingHoursRule 사용 |
 | `timezone` | `str` | `"Asia/Seoul"` | 거래소 시간대 (Account에서 주입). TradingHoursRule 사용 |
-| `daily_pnl` | `float` | `0.0` | 일일 손익 |
+| `daily_pnl` | `float` | `0.0` | 계좌의 당일(KST) 실현 손익 합. DailyLossLimitRule의 분자 ([06-rule-catalog.md](06-rule-catalog.md) 「용어 산식」) |
+| `prev_day_total_asset` | `float` | `0.0` | KST 오늘 이전의 가장 최근 일별 스냅샷의 `total_asset`. DailyLossLimitRule의 분모 |
 | `total_pnl` | `float` | `0.0` | 총 손익 |
 | **확장** | | | |
 | `metadata` | `dict[str, Any]` | `{}` | 추가 메타데이터 (`unrealized_pnl`, `allocated_budget`, `recent_trade_count`, `current_time` 등) |

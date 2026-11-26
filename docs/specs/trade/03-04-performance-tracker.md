@@ -74,6 +74,7 @@
 |--------|---------|--------|------|
 | `calculate` | `account_id: str`, `bot_id: str \| None`, `strategy_id: str \| None`, `from_date: datetime \| None`, `to_date: datetime \| None`, `allocated_budgets: Mapping[str, float] \| None` | `PerformanceMetrics` | 성과 지표 계산. account_id 필수, bot_id·strategy_id는 선택 필터. allocated_budgets는 봇별 현재 할당 예산(MDD의 시작 자본) |
 | `get_daily_summary` | `bot_id: str \| None`, `start_date: str \| None`, `end_date: str \| None` | `list[DailySummary]` | 일별 성과 집계. 날짜는 YYYY-MM-DD 형식 |
+| `get_realized_pnl` | `account_id: str`, `start: datetime`, `end: datetime` (키워드 전용, tz-aware) | `float` | 계좌의 `[start, end)` 체결 매도 실현 손익(`position_history` 매도 행 `pnl`) 합. naive datetime은 `ValueError`, 테이블이 없으면 `0.0` |
 | `get_monthly_summary` | `bot_id: str \| None`, `year: int \| None` | `list[MonthlySummary]` | 월별 성과 집계 |
 | `get_weekly_summary` | `bot_id: str \| None` | `list[WeeklySummary]` | 주별 성과 집계. ISO 주 단위(월요일 시작) |
 
