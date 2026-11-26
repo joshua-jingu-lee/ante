@@ -110,7 +110,7 @@ fundamental/flow/event는 **데이터 유형 > 거래소 > 심볼 > 시간 파�
 | `is_initialized` | — | bool | `config.toml` 존재 여부로 활성화 상태 확인 |
 | `init` | — | list[str] | 피드 디렉토리 초기화 (config.toml, checkpoints/, reports/ 생성). 생성된 경로 목록 반환 |
 | `load_api_keys` | — | dict[str, str \| None] | API 키 로드 (환경변수 > .env 파일 우선순위) |
-| `set_api_key` | key: str, value: str | Path | .env에 키 저장, 퍼미션 0600 설정 |
+| `set_api_key` | key: str, value: str | Path | .env에 키 저장(0600 임시 파일 + 원자 교체) |
 | `list_api_keys` | — | list[dict[str, str]] | 마스킹된 키 목록 (앞3 + *** + 뒤3) |
 | `check_api_keys` | — | list[dict[str, str \| bool]] | 키 존재 여부 확인 (유효성 검증은 스텁) |
 
