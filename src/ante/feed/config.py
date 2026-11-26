@@ -134,7 +134,10 @@ class FeedConfig:
         env_values[key] = value
 
         lines = [f"{k}={v}\n" for k, v in env_values.items()]
-        data = "".join(lines).encode("utf-8")
+        try:
+            data = "".join(lines).encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValueError("API 키 값을 UTF-8로 인코딩할 수 없습니다") from None
         fd, tmp = tempfile.mkstemp(prefix=".env.", dir=self._feed_dir)
         try:
             with os.fdopen(fd, "wb") as f:

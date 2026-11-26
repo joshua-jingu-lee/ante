@@ -507,8 +507,11 @@ class TestSetApiKeyAtomicWrite:
 
     def test_unencodable_value_preserves_file(self, cfg: FeedConfig) -> None:
         before = _seed(cfg)
-        with pytest.raises(UnicodeEncodeError):
+        with pytest.raises(ValueError) as exc_info:
             cfg.set_api_key("ANTE_DART_API_KEY", "x\udcffy")
+        assert str(exc_info.value) == "API 키 값을 UTF-8로 인코딩할 수 없습니다"
+        assert not isinstance(exc_info.value, UnicodeEncodeError)
+        assert exc_info.value.__suppress_context__ is True
         assert cfg.env_path.read_bytes() == before
         assert _leftovers(cfg) == []
 
