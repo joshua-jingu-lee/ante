@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import stat
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -443,3 +447,175 @@ class TestNonUtf8EnvFile:
         cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "가나다abc")
         expected = "ANTE_DATAGOKR_API_KEY=가나다abc\n".encode()
         assert cfg.env_path.read_bytes() == expected
+
+
+_TWO_KEYS = b"ANTE_DATAGOKR_API_KEY=aaa111\nANTE_DART_API_KEY=bbb222\n"
+
+
+@pytest.fixture
+def zero_umask() -> Iterator[None]:
+    """umask를 0으로 두어 생성 권한이 umask에 기대지 않게 한다."""
+    previous = os.umask(0)
+    try:
+        yield
+    finally:
+        os.umask(previous)
+
+
+def _seed(cfg: FeedConfig, mode: int = 0o600) -> bytes:
+    cfg.feed_dir.mkdir(parents=True, exist_ok=True)
+    cfg.env_path.write_bytes(_TWO_KEYS)
+    cfg.env_path.chmod(mode)
+    return _TWO_KEYS
+
+
+def _leftovers(cfg: FeedConfig) -> list[str]:
+    return sorted(p.name for p in cfg.feed_dir.iterdir() if p.name != ".env")
+
+
+def _in_feed_dir(cfg: FeedConfig, path: Any) -> bool:
+    return Path(path).resolve().parent == cfg.feed_dir.resolve()
+
+
+class _FailingWriter:
+    """첫 몇 바이트를 쓴 뒤 ENOSPC를 내는 파일 대역."""
+
+    def __init__(self, real: Any) -> None:
+        self._real = real
+
+    def __enter__(self) -> _FailingWriter:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._real.close()
+
+    def fileno(self) -> int:
+        return int(self._real.fileno())
+
+    def write(self, data: bytes) -> int:
+        self._real.write(data[:5])
+        self._real.flush()
+        raise OSError(28, "No space left on device")
+
+    def close(self) -> None:
+        self._real.close()
+
+
+@pytest.mark.usefixtures("zero_umask")
+class TestSetApiKeyAtomicWrite:
+    """#3076: .env는 0600 임시 파일에 쓰고 원자 교체한다."""
+
+    def test_unencodable_value_preserves_file(self, cfg: FeedConfig) -> None:
+        before = _seed(cfg)
+        with pytest.raises(UnicodeEncodeError):
+            cfg.set_api_key("ANTE_DART_API_KEY", "x\udcffy")
+        assert cfg.env_path.read_bytes() == before
+        assert _leftovers(cfg) == []
+
+    def test_replace_failure_preserves_file(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        before = _seed(cfg)
+        real_replace = os.replace
+
+        def failing_replace(src: Any, dst: Any, *args: Any, **kwargs: Any) -> None:
+            if _in_feed_dir(cfg, dst):
+                raise OSError(5, "Input/output error")
+            real_replace(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "replace", failing_replace)
+        with pytest.raises(OSError, match="Input/output error"):
+            cfg.set_api_key("ANTE_DART_API_KEY", "newkey")
+        assert cfg.env_path.read_bytes() == before
+        assert _leftovers(cfg) == []
+
+    def test_write_failure_preserves_file(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        before = _seed(cfg)
+        real_fdopen = os.fdopen
+        hits: list[int] = []
+
+        def failing_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+            real = real_fdopen(fd, *args, **kwargs)
+            ino = os.fstat(fd).st_ino
+            if any(p.stat().st_ino == ino for p in cfg.feed_dir.iterdir()):
+                hits.append(fd)
+                return _FailingWriter(real)
+            return real
+
+        monkeypatch.setattr(os, "fdopen", failing_fdopen)
+        with pytest.raises(OSError, match="No space left on device"):
+            cfg.set_api_key("ANTE_DART_API_KEY", "newkey")
+        assert len(hits) == 1
+        assert cfg.env_path.read_bytes() == before
+        assert _leftovers(cfg) == []
+
+    def test_fdopen_failure_leaves_no_temp_file(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        before = _seed(cfg)
+        real_fdopen = os.fdopen
+
+        def failing_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+            ino = os.fstat(fd).st_ino
+            if any(p.stat().st_ino == ino for p in cfg.feed_dir.iterdir()):
+                os.close(fd)
+                raise OSError(24, "Too many open files")
+            return real_fdopen(fd, *args, **kwargs)
+
+        monkeypatch.setattr(os, "fdopen", failing_fdopen)
+        with pytest.raises(OSError, match="Too many open files"):
+            cfg.set_api_key("ANTE_DART_API_KEY", "newkey")
+        assert cfg.env_path.read_bytes() == before
+        assert _leftovers(cfg) == []
+
+    def test_new_file_bytes_only_reach_0600_file(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_mkstemp = tempfile.mkstemp
+        real_replace = os.replace
+        created: list[int] = []
+        replaced: list[tuple[int, int, bytes]] = []
+
+        def watching_mkstemp(*args: Any, **kwargs: Any) -> Any:
+            fd, name = real_mkstemp(*args, **kwargs)
+            if _in_feed_dir(cfg, name):
+                st = os.fstat(fd)
+                assert stat.S_IMODE(st.st_mode) == 0o600
+                assert st.st_size == 0
+                created.append(st.st_ino)
+            return fd, name
+
+        def watching_replace(src: Any, dst: Any, *args: Any, **kwargs: Any) -> None:
+            if _in_feed_dir(cfg, dst):
+                st = os.lstat(src)
+                replaced.append(
+                    (stat.S_IMODE(st.st_mode), st.st_ino, Path(src).read_bytes())
+                )
+            real_replace(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(tempfile, "mkstemp", watching_mkstemp)
+        monkeypatch.setattr(os, "replace", watching_replace)
+        cfg.set_api_key("ANTE_DART_API_KEY", "secret")
+        assert len(created) == 1
+        assert replaced == [(0o600, created[0], b"ANTE_DART_API_KEY=secret\n")]
+        assert stat.S_IMODE(cfg.env_path.stat().st_mode) == 0o600
+        assert _leftovers(cfg) == []
+
+    def test_loose_existing_file_is_not_written_in_place(
+        self, cfg: FeedConfig, tmp_path: Path
+    ) -> None:
+        before = _seed(cfg, 0o644)
+        old_link = tmp_path / "old_env_link"
+        os.link(cfg.env_path, old_link)
+        old_ino = cfg.env_path.stat().st_ino
+        cfg.set_api_key("ANTE_DART_API_KEY", "newkey")
+        st = cfg.env_path.stat()
+        assert stat.S_IMODE(st.st_mode) == 0o600
+        assert st.st_ino != old_ino
+        assert cfg.env_path.read_bytes() == (
+            b"ANTE_DATAGOKR_API_KEY=aaa111\nANTE_DART_API_KEY=newkey\n"
+        )
+        assert old_link.read_bytes() == before
+        assert _leftovers(cfg) == []

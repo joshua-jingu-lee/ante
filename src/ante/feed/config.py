@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import stat
+import tempfile
 from pathlib import Path
 
 FEED_DIR = ".feed"
@@ -116,7 +116,7 @@ class FeedConfig:
         return result
 
     def set_api_key(self, key: str, value: str) -> Path:
-        """API 키를 .env 파일에 저장한다. 파일 퍼미션을 0600으로 설정한다.
+        """API 키를 .env 파일에 저장한다. 0600 임시 파일에 쓰고 원자 교체한다.
 
         Raises:
             ValueError: value에 개행 문자(`\\n` 또는 `\\r`)가 포함된 경우.
@@ -134,8 +134,16 @@ class FeedConfig:
         env_values[key] = value
 
         lines = [f"{k}={v}\n" for k, v in env_values.items()]
-        self.env_path.write_text("".join(lines), encoding="utf-8")
-        self.env_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        data = "".join(lines).encode("utf-8")
+        fd, tmp = tempfile.mkstemp(prefix=".env.", dir=self._feed_dir)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+                os.fchmod(f.fileno(), 0o600)
+            os.replace(tmp, self.env_path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
         return self.env_path
 
