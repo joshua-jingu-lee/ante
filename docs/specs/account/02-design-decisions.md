@@ -200,7 +200,7 @@ self-healing backoff 주기 / 최대 시도 / startup 타임아웃은 config로 
 
 두 축은 **직교**한다.
 
-- `AccountStatus.SUSPENDED`: user-initiated kill-switch([05-eventbus-integration.md](05-eventbus-integration.md), BotManager가 소속 봇 중지).
+- `AccountStatus.SUSPENDED`: user-initiated kill-switch([05-eventbus-integration.md](05-eventbus-integration.md), BotManager가 실행 중인 소속 봇을 중지하고 그 계좌의 스탑 주문 만료·열린 주문 취소를 한다).
 - runtime readiness: service-health 자동축. readiness `not_ready`는 봇을 stop하지 않고 active-order만 gate한다.
 
 active-trading 차단 효과는 **일관**한다(둘 중 하나라도 막으면 거부). 단 readiness는 `AccountStatus`를 변경하지 **않는다**(SUSPENDED 자동 전이 금지 — user 결정 침해 방지). `RuleContext.account_status` dead field는 readiness gate와 별개로 유지하며, 정리(제거 vs 유지)는 별 PR로 권고한다(open question; [rule-engine/05-rule-context.md](../rule-engine/05-rule-context.md) caveat 참조).

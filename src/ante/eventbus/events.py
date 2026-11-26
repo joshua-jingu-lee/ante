@@ -700,6 +700,7 @@ class StopOrderExpiredEvent(Event):
     - ``"session_ended"``: ``check_session_expiry()`` 의 세션 종료 만료.
     - ``"manager_stopped"``: ``StopOrderManager.stop()`` 의 일괄 만료.
     - ``"bot_stopped"``: 봇 정지의 ``expire_for_bot()`` 만료.
+    - ``"account_suspended"``: 계좌 정지의 ``expire_for_bot()`` 만료.
     """
 
     _requires_account_id: ClassVar[bool] = True
