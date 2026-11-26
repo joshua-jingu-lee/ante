@@ -7,7 +7,8 @@
 ### 실시간 시세 스트리밍 (`realtime_price_stream`)
 
 오픈 시점에는 실시간 가격 스트리밍을 필수 범위로 포함하지 않았다. 이후
-`KISStreamClient`가 추가되어 실시간 시세 스트리밍과 REST 폴백을 지원한다
+`KISStreamClient`가 추가되어 실시간 시세 스트리밍을 지원한다. 끊긴 동안의 REST 폴백은
+지금 꺼져 있다
 ([api-gateway](../api-gateway/api-gateway.md), `gateway/stream_integration.py`).
 
 ### 체결 통보 (`realtime_order_stream`) — 정정 (#1946)
