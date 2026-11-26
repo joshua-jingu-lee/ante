@@ -33,8 +33,11 @@ Account 모듈의 `trading_hours_end` + 여유 시간(30분)을 기준으로 한
 |--------|--------------------|-----------|-----------|
 | kis-domestic | 15:30 | Asia/Seoul | 16:00 KST |
 | kis-overseas | 16:00 | America/New_York | 16:30 ET |
+| test·mock | 23:59 | Asia/Seoul | 다음 날 00:29 KST |
 
 현재 `DailyReportScheduler`가 하드코딩된 16:00 KST에 실행되고 있으나, Account의 거래시간 정보를 참조하도록 개선하여 계좌별로 적절한 스냅샷 시각을 결정해야 한다.
+
+`snapshot_date`는 보고 날짜, 곧 마감 시각의 날짜다. 스냅샷 시각이 자정을 넘어도 전날 행에 쓴다.
 
 ```
 DailyReportScheduler (Trade, account.trading_hours_end + 30min)
