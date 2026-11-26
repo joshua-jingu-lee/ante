@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ante.broker.base import BrokerAdapter
+from ante.broker.exceptions import BrokerError
 from ante.broker.kis import KISAdapter, KISBaseAdapter, KISDomesticAdapter
 from ante.broker.mock import MockBrokerAdapter
 from ante.broker.models import CommissionInfo
@@ -201,7 +202,8 @@ class TestKISDomesticAdapterMapping:
         adapter = KISDomesticAdapter(KIS_CONFIG)
         assert adapter._map_order_type("market") == "01"
         assert adapter._map_order_type("limit") == "00"
-        assert adapter._map_order_type("unknown") == "01"
+        with pytest.raises(BrokerError):
+            adapter._map_order_type("unknown")
 
     def test_map_order_status(self):
         adapter = KISDomesticAdapter(KIS_CONFIG)

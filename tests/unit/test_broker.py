@@ -197,7 +197,8 @@ class TestKISAdapterMapping:
         adapter = KISAdapter(KIS_CONFIG)
         assert adapter._map_order_type("market") == "01"
         assert adapter._map_order_type("limit") == "00"
-        assert adapter._map_order_type("unknown") == "01"
+        with pytest.raises(BrokerError):
+            adapter._map_order_type("unknown")
 
     def test_map_order_status(self):
         """주문 상태 코드 매핑."""
