@@ -94,6 +94,14 @@ class TradeService:
             account_id=account_id,
         )
 
+    async def get_realized_pnl(
+        self, *, account_id: str, start: datetime, end: datetime
+    ) -> float:
+        """계좌의 ``[start, end)`` 체결 매도 실현 손익 합."""
+        return await self._performance.get_realized_pnl(
+            account_id=account_id, start=start, end=end
+        )
+
     async def get_performance(
         self,
         account_id: str,

@@ -5891,14 +5891,9 @@ class TestRuleEngineTreasuryIntegration:
             "total_evaluation": 100000000.0,
             "ante_eval_amount": 20000000.0,
         }
-        treasury.get_daily_snapshot = AsyncMock(
+        treasury.get_prev_day_snapshot = AsyncMock(
             return_value={
                 "total_asset": 99000000.0,
-            }
-        )
-        treasury.get_latest_snapshot = AsyncMock(
-            return_value={
-                "daily_pnl": -300000.0,
             }
         )
         return treasury
@@ -5914,7 +5909,24 @@ class TestRuleEngineTreasuryIntegration:
         assert data["total_asset"] == 100000000.0
         assert data["total_exposure"] == 20000000.0
         assert data["prev_day_total_asset"] == 99000000.0
-        assert data["daily_pnl"] == -300000.0
+
+    async def test_query_daily_realized_pnl(self, manual_clock):
+        """당일 손익은 TradeService의 KST 하루 실현 손익이다. Refs #2622."""
+        from datetime import datetime, timedelta
+        from unittest.mock import MagicMock
+
+        trade_service = MagicMock()
+        trade_service.get_realized_pnl = AsyncMock(return_value=-300000.0)
+        engine = RuleEngine(
+            eventbus=EventBus(), trade_service=trade_service, account_id="acc-test"
+        )
+        assert await engine._query_daily_realized_pnl() == -300000.0
+        kwargs = trade_service.get_realized_pnl.await_args.kwargs
+        assert kwargs["account_id"] == "acc-test"
+        assert kwargs["start"].utcoffset() == timedelta(hours=9)
+        assert kwargs["start"].time() == datetime.min.time()
+        assert kwargs["end"] - kwargs["start"] == timedelta(days=1)
+        assert kwargs["start"].date().isoformat() == "2026-01-02"
 
     async def test_query_treasury_data_none(self):
         """Treasury가 None이면 기본값과 실패 표시를 반환."""
@@ -5926,8 +5938,9 @@ class TestRuleEngineTreasuryIntegration:
     async def test_query_treasury_data_exception(self, mock_treasury):
         """Treasury 조회 실패 시 기본값 fallback."""
         mock_treasury.get_summary.side_effect = Exception("DB error")
-        mock_treasury.get_daily_snapshot = AsyncMock(side_effect=Exception("DB error"))
-        mock_treasury.get_latest_snapshot = AsyncMock(side_effect=Exception("DB error"))
+        mock_treasury.get_prev_day_snapshot = AsyncMock(
+            side_effect=Exception("DB error")
+        )
         engine = RuleEngine(
             eventbus=EventBus(), treasury=mock_treasury, account_id="acc-test"
         )

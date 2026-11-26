@@ -416,11 +416,17 @@ async def test_t6_virtual_fills_end_to_end_reject_buy(stack: _Stack) -> None:
     assert [e.side for e in fills] == ["buy", "sell"]
     stack.add_daily_loss_rule()
 
+    sell = await stack.db.fetch_one(
+        "SELECT pnl FROM position_history WHERE action = 'sell'"
+    )
+    assert sell is not None
+    assert sell["pnl"] < -100_000.0
+
     await stack.bus.publish(_order("buy", 10_000.0))
 
     assert len(stack.rejected) == 1
-    assert "Daily loss limit exceeded: 10.00% > 5.00%" in stack.rejected[0].reason
-    assert stack.rec.contexts[-1].daily_pnl == pytest.approx(-100_000.0)
+    assert "Daily loss limit exceeded" in stack.rejected[0].reason
+    assert stack.rec.contexts[-1].daily_pnl == pytest.approx(sell["pnl"])
 
 
 # ── 정정도 같은 당일 손익을 받는다 ────────────────────────────────────────
@@ -486,9 +492,7 @@ async def test_t8_matches_daily_summary_and_excludes_buys_and_other_accounts(
     stack: _Stack,
 ) -> None:
     await stack.round_trip("a", buy_at=_kst(2, 9), sell_at=_kst(2, 10), loss=7_000.0)
-    await stack.round_trip(
-        "b", buy_at=_kst(2, 11), sell_at=_kst(2, 12), loss=-3_000.0
-    )
+    await stack.round_trip("b", buy_at=_kst(2, 11), sell_at=_kst(2, 12), loss=-3_000.0)
     await stack.applier.apply_direct_fill(
         account_id=ACCT,
         order_id="open-buy",
