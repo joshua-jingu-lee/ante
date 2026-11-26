@@ -542,7 +542,7 @@ async def test_t8_matches_daily_summary_and_excludes_buys_and_other_accounts(
 class _MidnightTreasury(StubTreasury):
     """분모 조회 중에 시계가 2초 나아간다(자정 직전이면 자정을 넘긴다)."""
 
-    def __init__(self, manual: Any) -> None:
+    def __init__(self, manual: Any, total_asset: Any = 1_000_000.0) -> None:
         super().__init__(
             summary={
                 "total_profit_loss": 0.0,
@@ -550,7 +550,7 @@ class _MidnightTreasury(StubTreasury):
                 "ante_eval_amount": 0.0,
             },
             budget=1_000_000.0,
-            prev_snapshot={"snapshot_date": "2026-01-01", "total_asset": 1_000_000.0},
+            prev_snapshot={"snapshot_date": "2026-01-01", "total_asset": total_asset},
         )
         self._manual = manual
         self.before_dates: list[str] = []
@@ -562,7 +562,7 @@ class _MidnightTreasury(StubTreasury):
 
 
 class _DateRecordingTradeService:
-    def __init__(self, realized: float = 0.0) -> None:
+    def __init__(self, realized: Any = 0.0) -> None:
         self.realized = realized
         self.starts: list[datetime] = []
 
@@ -571,14 +571,14 @@ class _DateRecordingTradeService:
 
     async def get_realized_pnl(
         self, *, account_id: str, start: datetime, end: datetime
-    ) -> float:
+    ) -> Any:
         self.starts.append(start)
         return self.realized
 
 
-def _stub_engine(treasury: Any, trade_service: Any) -> EventBus:
+def _stub_engine(treasury: Any, trade_service: Any, *rules: Rule) -> EventBus:
     bus = EventBus()
-    RuleEngine(
+    engine = RuleEngine(
         eventbus=bus,
         account_id=ACCT,
         treasury=treasury,
@@ -589,8 +589,24 @@ def _stub_engine(treasury: Any, trade_service: Any) -> EventBus:
         runtime_readiness=ready_registry(
             ACCT, broker_type="test", trading_mode=TradingMode.VIRTUAL
         ),
-    ).start()
+    )
+    for rule in rules:
+        engine.add_account_rule(rule)
+    engine.start()
     return bus
+
+
+def _modify(side: str = "buy") -> OrderModifyEvent:
+    return OrderModifyEvent(
+        account_id=ACCT,
+        bot_id=BOT,
+        strategy_id="s1",
+        order_id=f"o-{side}",
+        symbol=SYMBOL,
+        side=side,
+        quantity=1.0,
+        price=9_000.0,
+    )
 
 
 @pytest.mark.parametrize(
@@ -623,23 +639,70 @@ async def test_one_kst_date_per_evaluation_across_midnight(manual_clock: Any) ->
     ]
 
 
-# ── 유한하지 않은 실현 손익은 조회 실패와 같다 ─────────────────────────────
+# ── 수가 아니거나 유한하지 않은 실현 손익은 조회 실패와 같다 ───────────────
+# bool은 int의 하위형이라 수로 통과한다(덜 바꾸는 쪽).
 
 
-@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, None, "x"])
 async def test_non_finite_realized_pnl_is_query_failure(
-    manual_clock: Any, value: float
+    manual_clock: Any, value: Any
 ) -> None:
+    rec = _Recorder()
     bus = _stub_engine(
-        _MidnightTreasury(manual_clock), _DateRecordingTradeService(realized=value)
+        _MidnightTreasury(manual_clock),
+        _DateRecordingTradeService(realized=value),
+        rec,
     )
     rejected: list[OrderRejectedEvent] = []
     validated: list[OrderValidatedEvent] = []
+    modify_rejected: list[OrderModifyRejectedEvent] = []
     bus.subscribe(OrderRejectedEvent, rejected.append)
     bus.subscribe(OrderValidatedEvent, validated.append)
+    bus.subscribe(OrderModifyRejectedEvent, modify_rejected.append)
 
     await bus.publish(_order("buy", 10_000.0))
     await bus.publish(_order("sell", 10_000.0))
+    for side in ("buy", "sell"):
+        await bus.publish(_modify(side))
 
     assert [e.reason for e in rejected] == ["account_not_ready: positions_unavailable"]
     assert [e.side for e in validated] == ["sell"]
+    assert modify_rejected == []
+    assert [(c.side, c.daily_pnl) for c in rec.contexts] == [
+        ("sell", 0.0),
+        ("buy", 0.0),
+        ("sell", 0.0),
+    ]
+
+
+# ── 수가 아니거나 유한하지 않은 분모는 스냅샷 없음과 같다 ──────────────────
+
+
+@pytest.mark.parametrize("total_asset", [None, "x", math.nan, math.inf, True])
+async def test_non_numeric_denominator_skips_judgment(
+    manual_clock: Any, caplog: pytest.LogCaptureFixture, total_asset: Any
+) -> None:
+    rec = _Recorder()
+    bus = _stub_engine(
+        _MidnightTreasury(manual_clock, total_asset=total_asset),
+        _DateRecordingTradeService(realized=-100_000.0),
+        rec,
+        DailyLossLimitRule("dl", {"max_daily_loss_percent": 0.05}),
+    )
+    rejected: list[OrderRejectedEvent] = []
+    validated: list[OrderValidatedEvent] = []
+    modify_rejected: list[OrderModifyRejectedEvent] = []
+    bus.subscribe(OrderRejectedEvent, rejected.append)
+    bus.subscribe(OrderValidatedEvent, validated.append)
+    bus.subscribe(OrderModifyRejectedEvent, modify_rejected.append)
+    caplog.set_level(logging.WARNING, logger=ENGINE_LOGGER)
+
+    for side in ("buy", "sell"):
+        await bus.publish(_order(side, 10_000.0))
+        await bus.publish(_modify(side))
+
+    assert rejected == []
+    assert modify_rejected == []
+    assert [e.side for e in validated] == ["buy", "sell"]
+    assert {c.prev_day_total_asset for c in rec.contexts} == {0.0}
+    assert len(_skip_warnings(caplog)) == 4

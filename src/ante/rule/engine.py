@@ -474,8 +474,9 @@ class RuleEngine:
             failure = "treasury_unavailable"
             logger.warning("Treasury 전일 스냅샷 조회 실패: %s", self._account_id)
         else:
-            if snapshot is not None:
-                result["prev_day_total_asset"] = snapshot.get("total_asset", 0.0)
+            total_asset = None if snapshot is None else snapshot.get("total_asset")
+            if _is_finite_quantity(total_asset):
+                result["prev_day_total_asset"] = float(total_asset)
             self._warn_if_daily_loss_skipped(snapshot)
 
         return result, failure
@@ -501,7 +502,7 @@ class RuleEngine:
     async def _query_daily_realized_pnl(
         self, today: date | None = None
     ) -> float | None:
-        """KST 하루의 계좌 실현 손익을, 조회 예외·비유한 값이면 ``None``을 돌려준다."""
+        """KST 하루의 계좌 실현 손익. 조회 예외·비수·비유한 값이면 ``None``."""
         if self._trade_service is None:
             return 0.0
         start = datetime.combine(today or clock.now(_KST).date(), time(), tzinfo=_KST)
@@ -513,8 +514,8 @@ class RuleEngine:
             )
         except Exception:
             value = math.nan
-        if math.isfinite(value):
-            return value
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            return float(value)
         logger.warning("당일 실현 손익 조회 실패: %s", self._account_id)
         return None
 
