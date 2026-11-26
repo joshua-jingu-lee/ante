@@ -1183,6 +1183,7 @@ async def test_init_gateway_get_broker_egw00133_retry_then_ready(
 
     connected_broker = AsyncMock()
     connected_broker.connect = AsyncMock()
+    connected_broker.websocket_url = None
     state = {"fails": 1}
 
     async def _get_broker(account_id: str) -> Any:
