@@ -463,7 +463,7 @@ reconfig 는 1.0 범위 외이다.
 | `APIGateway.get_ohlcv/get_current_price/get_positions/get_account_balance/submit_order/cancel_order` | `account_id: str` (kw-only) + `require_account_id` | broker routing 진입점 (#1217 → #1242 SPLIT-3) |
 | `StreamIntegration.__init__` | `account_id: str` (kw-only) + `require_account_id` | account-scoped 캐시 키 / stop_order trigger 격리 (#1217 → #1242 SPLIT-3) |
 | `LiveDataProvider.__init__` | `account_id: str` (kw-only) + `require_account_id`, 내부 `_gateway.get_*` 호출 시 `account_id=self._account_id` 전달 | 봇 단위 인스턴스화 (`context_factory` 가 `BotConfig.account_id` 로 생성, strategy 인터페이스는 closure 방식으로 무변경) (#1217 → #1242 SPLIT-3) |
-| `s.stream_integrations: dict[str, StreamIntegration]` | KIS 활성 계좌마다 인스턴스 등록, shutdown 에서 dict 순회 정리 | multi-account lifecycle pool, leak 방지 (#1217 → #1242 SPLIT-3) |
+| `s.stream_integrations: dict[str, StreamIntegration]` | 기동 connect에 성공한 비면제 계좌 가운데 어댑터가 `websocket_url`을 내는 계좌마다, 그 URL로 인스턴스 등록, shutdown 에서 dict 순회 정리 | multi-account lifecycle pool, leak 방지 (#1217 → #1242 SPLIT-3) |
 | `s.reconcile_schedulers: dict[str, ReconcileScheduler]` | 활성 broker 가 있는 모든 계좌에 dispatch | multi-broker pool, 첫 broker 선택 가드 제거 (#1217 → #1242 SPLIT-3) |
 | `StopOrderManager.on_price_update` | `account_id: str` (kw-only) + `require_account_id`, `active_for_symbol` 에 `o.account_id == account_id` 필터 | cross-account trigger 차단 (#1217 → #1242 SPLIT-3) |
 | `StopOrder.__post_init__` | `require_account_id(self.account_id)` | trigger payload 정합 (#1217 → #1242 SPLIT-3) |

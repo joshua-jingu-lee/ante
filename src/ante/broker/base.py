@@ -25,6 +25,7 @@ class BrokerAdapter(ABC):
     broker_id: str = "unknown"
     broker_name: str = "Unknown Broker"
     broker_short_name: str = "UNK"
+    websocket_url: str | None = None
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config

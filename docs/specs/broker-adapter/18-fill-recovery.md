@@ -22,6 +22,8 @@ ante가 제출한 주문은 (모의투자·실전투자, 스트림 유무와 무
 체결 반영은 **여러 경로를 가진 단일 멱등 수렴 모델**이다.
 
 - **빠른 경로 (fast path)**: 실시간 체결 통보 스트림 (`H0STCNI0`). 저지연. 선택적.
+  현재 구독하지 않는다 — `StreamIntegration.start`는 `H0STCNI0`를 구독하지 않고
+  처리기도 등록하지 않는다. 다시 여는 조건(파싱·증분과 누적의 멱등)은 #2561.
 - **백스톱 경로 (backstop)**: REST `get_order_history` 폴. **체결기준 원장이
   당일 반영되는 환경에서 정합성 보증.** 항상.
 - **잔고-역도출 fallback (position-derived bounded fallback)**: 백스톱이 당일
@@ -68,7 +70,7 @@ position-derived fallback(§11)은 **buy-only**(§11/§11.3 명시 한정)이고
 OrderApproved → submit_order → place_order(broker_order_id)
   → OrderSubmittedEvent → OrderTracker.open(order_id, broker_order_id, …)
 
-빠른경로 : H0STCNI0 → StreamIntegration._on_execution ─┐
+빠른경로 : H0STCNI0 → StreamIntegration._on_execution ─┐ (현재 꺼짐)
 백스톱   : FillReconcileScheduler (open·감시 대상 있을 때만, ├→ FillApplier.apply_cumulative(
            get_order_history 1콜/사이클)              ─┘     account_id, broker_order_id,
                                                               observed_cumulative, avg_price,
@@ -383,9 +385,9 @@ broker-wide 로 차단된다(cross-concern 결합). 이를 끊기 위해 두 nor
 - 모의 계좌의 당일 지연 반영(§2.1)은 당일의 감시가 덮는다. 실전 `TTTC0081R`의
   당일 반영과, 실전 이력이 취소된 원주문의 체결 누적을 돌려주는지는 확인하지
   못했다(§11.6). 돌려주지 않으면 그 경로에서는 효과가 없을 뿐이다.
-- 실시간 체결 통보(§2 빠른 경로)도 같은 조회를 지나므로 종결된 행에 닿는다.
-  이 처리기는 체결 여부를 거르지 않고 필드 위치를 가정한다. 이 스펙 시점의
-  구독은 HTS ID 없이 이뤄지고(§9) 통보 본문을 복호화하지 않아, 통보가 체결로
+- 실시간 체결 통보(§2 빠른 경로, 현재 꺼짐)가 다시 켜지면 같은 조회를 지나므로 종결된 행에 닿는다.
+  이 처리기는 체결 여부를 거르지 않고 필드 위치를 가정한다. 켜지더라도
+  구독에 HTS ID가 없고(§9) 통보 본문을 복호화하지 않아, 통보가 체결로
   반영되는 경로가 확인되지 않았다. 그래서 「스트림에서 복구된다」를 근거로
   삼지 않는다.
 - 재조정과의 이중 가산: 브로커 잔고에 늦은 체결이 보이는데 ante가 아직 반영하기

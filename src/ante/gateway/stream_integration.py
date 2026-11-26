@@ -27,7 +27,7 @@ class StreamIntegration:
     """KISStreamClient ↔ APIGateway 실시간 시세 연동 관리자.
 
     - 시세 콜백: cache.set + stop_order.on_price_update
-    - 체결 콜백: 캐시 무효화 + 이벤트 발행
+    - 체결 통보: 구독하지 않고 처리기도 등록하지 않는다(체결은 백스톱 폴)
     - 활성 봇 종목 구독/해제 메커니즘
     - 스트림 해제 시 REST 폴백
     """
@@ -84,7 +84,6 @@ class StreamIntegration:
         self._running = True
 
         self._stream.on_price(self._on_price)
-        self._stream.on_execution(self._on_execution)
 
         from ante.eventbus.events import StreamConnectedEvent, StreamDisconnectedEvent
 
@@ -97,7 +96,6 @@ class StreamIntegration:
         self._eventbus.subscribe(BotStoppedEvent, self._on_bot_changed)
 
         await self._stream.connect()
-        await self._stream.subscribe_execution()
 
         self._sync_task = asyncio.create_task(
             self._subscription_sync_loop(),

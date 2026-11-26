@@ -86,6 +86,69 @@ class TestApprovalKeyUrlInference:
         assert rest_url == "https://openapi.koreainvestment.com:9443"
 
 
+class TestApprovalKeyTimeout:
+    """접속키 발급의 시간 제한 (#2804)."""
+
+    async def test_session_has_auth_timeout(
+        self,
+        eventbus: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        kis_stream_external_guard,
+    ) -> None:
+        """접속키 요청 세션은 total=DEFAULT_TIMEOUT_AUTH 시간 제한을 갖는다."""
+        import aiohttp
+
+        from ante.broker.kis import DEFAULT_TIMEOUT_AUTH
+
+        created: list[dict] = []
+        posted: list[str] = []
+
+        class _Resp:
+            status = 200
+
+            async def json(self) -> dict:
+                return {"approval_key": "approval-x"}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc) -> None:
+                return None
+
+        class _Session:
+            def __init__(self, **kwargs) -> None:
+                created.append(kwargs)
+
+            def post(self, url: str, **kwargs):
+                posted.append(url)
+                return _Resp()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc) -> None:
+                return None
+
+        monkeypatch.setattr(aiohttp, "ClientSession", _Session)
+        client = KISStreamClient(
+            websocket_url="ws://ops.koreainvestment.com:31000",
+            app_key="key",
+            app_secret="secret",
+            eventbus=eventbus,
+        )
+
+        key = await kis_stream_external_guard.original_get_approval_key(client)
+
+        assert key == "approval-x"
+        assert len(created) == 1
+        timeout = created[0]["timeout"]
+        assert isinstance(timeout, aiohttp.ClientTimeout)
+        assert timeout.total == DEFAULT_TIMEOUT_AUTH
+        assert posted == [
+            "https://openapivts.koreainvestment.com:29443/oauth2/Approval"
+        ]
+
+
 class TestSubscription:
     """구독 관련 테스트."""
 

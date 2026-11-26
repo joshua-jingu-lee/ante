@@ -13,7 +13,7 @@ Bot → OrderRequestEvent (market/limit)
   → APIGateway rate limit → BrokerAdapter.place_order()
   → KIS API 주문 접수 → 주문번호 반환 → OrderSubmittedEvent → OrderTracker.open(…)
   → 체결 확인 → OrderFilledEvent
-        - 빠른 경로: 실시간 체결 통보 스트림 (선택적, 저지연)
+        - 빠른 경로: 실시간 체결 통보 스트림 (선택적 — 현재 꺼짐, 18 §2)
         - 백스톱  : REST get_order_history 폴 (정합성 보증, 항상)
         둘 다 단일 멱등 choke point(FillApplier)로 수렴 → 포지션 정확히 1회 반영
   → Treasury 자금 정산 + Trade 포지션 업데이트
