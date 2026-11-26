@@ -21,10 +21,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import shutil
 import tempfile
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -40,6 +42,7 @@ import ante.trade as trade_mod
 from ante.account import Account, AccountService, TradingMode
 from ante.account.readiness import ReadinessFlag
 from ante.config import Config
+from ante.core import clock
 from ante.db.migrations import run_migrations
 from ante.eventbus.events import (
     BotStoppedEvent,
@@ -54,7 +57,9 @@ from ante.eventbus.events import (
 )
 from ante.ipc.client import IPCClient
 from ante.trade.fill_outbox import FillOutboxPublisher
+from tests.conftest import ManualClock
 
+_KST = timezone(timedelta(hours=9))
 _CREDS = {"app_key": "k", "app_secret": "s", "account_no": "1234567890"}
 
 
@@ -205,6 +210,7 @@ async def assemble(
         connect_errors: dict[str, BaseException] | None = None,
         fill_succeeds: dict[str, bool] | None = None,
         before_gateway: Callable[[_Assembly], Any] | None = None,
+        before_seed: Callable[[AccountService], Awaitable[None]] | None = None,
     ) -> _Assembly:
         config_dir = Path(tempfile.mkdtemp(prefix="aw", dir="/tmp"))
         cfg_static: dict[str, Any] = {
@@ -250,6 +256,8 @@ async def assemble(
         await run_migrations(s.db, data_path=config_dir / "data")
         seed = AccountService(db=s.db, eventbus=s.eventbus)
         await seed.initialize()
+        if before_seed is not None:
+            await before_seed(seed)
         for account in accounts:
             await seed.create(account)
         await main_module._init_services(s)
@@ -325,8 +333,8 @@ async def _force_close(s: main_module.Services) -> None:
         await _best_effort(scheduler.stop)
     if s.fill_outbox_publisher is not None:
         await _best_effort(s.fill_outbox_publisher.stop)
-    if s.daily_report_scheduler is not None:
-        await _best_effort(s.daily_report_scheduler.stop)
+    for report_scheduler in s.daily_report_schedulers.values():
+        await _best_effort(report_scheduler.stop)
     if s.treasury_manager is not None:
         for treasury in s.treasury_manager.list_all():
             await _best_effort(treasury.stop_sync)
@@ -1380,3 +1388,202 @@ async def test_ipc_bot_status_enriches_positions(
     assert response["status"] == "ok", response
     positions = response["result"]["bot"]["positions"]
     assert [(p["symbol"], p["quantity"]) for p in positions] == [("005930", 10.0)]
+
+
+# ── 계좌마다 일일 보고 (#3089) ────────────────────────────────────────────────
+
+
+async def _seed_test_account(seed: AccountService) -> None:
+    await seed.create_default_test_account()
+
+
+async def _seed_suspended_test_account(seed: AccountService) -> None:
+    await seed.create_default_test_account()
+    await seed.suspend("test", reason="#3089", suspended_by="test")
+
+
+async def _snapshot_rows(s: main_module.Services) -> dict[str, int]:
+    rows = await s.db.fetch_all(
+        "SELECT account_id, COUNT(*) AS n FROM treasury_daily_snapshots"
+        " GROUP BY account_id"
+    )
+    return {r["account_id"]: r["n"] for r in rows}
+
+
+@pytest.mark.parametrize(
+    ("before_seed", "kis_a_suspended", "expected_order"),
+    [
+        (_seed_suspended_test_account, False, ["test", "kis-a", "kis-b"]),
+        (_seed_test_account, False, ["test", "kis-a", "kis-b"]),
+        (None, True, ["kis-a", "kis-b"]),
+    ],
+    ids=["test_first_suspended", "test_first_active", "kis_first_suspended"],
+)
+async def test_every_account_gets_its_own_daily_report_and_snapshot(
+    assemble: AssembleFn,
+    before_seed: Callable[[AccountService], Awaitable[None]] | None,
+    kis_a_suspended: bool,
+    expected_order: list[str],
+) -> None:
+    """삭제되지 않은 계좌마다 스케줄러가 하나씩 생기고, 보고 한 바퀴 뒤 계좌마다
+    스냅샷이 1행 생긴다. 첫 계좌가 test·정지 계좌여도 다른 계좌를 막지 않는다."""
+
+    async def _seed(seed: AccountService) -> None:
+        if before_seed is not None:
+            await before_seed(seed)
+
+    asm = await assemble(
+        [_kis_account("kis-a"), _kis_account("kis-b")], before_seed=_seed
+    )
+    s = asm.s
+    if kis_a_suspended:
+        await s.account_service.suspend("kis-a", reason="#3089", suspended_by="t")
+    assert [a.account_id for a in await s.account_service.list()] == expected_order
+
+    assert list(s.daily_report_schedulers) == expected_order
+    for account_id, scheduler in s.daily_report_schedulers.items():
+        assert scheduler._account_id == account_id
+        assert scheduler._task.get_name() == f"daily-report-scheduler:{account_id}"
+    assert await _snapshot_rows(s) == {}
+
+    for scheduler in s.daily_report_schedulers.values():
+        await scheduler.run_once(target_date=date(2026, 3, 19))
+
+    assert await _snapshot_rows(s) == dict.fromkeys(expected_order, 1)
+
+
+async def test_second_account_daily_loss_limit_judges_with_its_own_snapshot(
+    assemble: AssembleFn,
+) -> None:
+    """둘째 계좌의 일일 손실 한도가 그 계좌의 전일 스냅샷(일일 보고가 기록한 분모)으로
+    판정해 주문을 거부한다. 날짜는 규칙 엔진과 같은 기준(고정한 시계의 KST 오늘)이다."""
+    rules = [
+        {"type": "trading_hours", "enabled": False},
+        {"type": "daily_loss_limit", "max_daily_loss_percent": 0.05},
+    ]
+    asm = await assemble(
+        [_kis_account("kis-a"), _kis_account("kis-b")],
+        static={"accounts": {"kis-a": {"rules": rules}, "kis-b": {"rules": rules}}},
+    )
+    s = asm.s
+    await _fund(s, "kis-b", "bot-1")
+    manual = ManualClock(datetime(2026, 3, 20, 3, 0, tzinfo=UTC))
+    with clock.use_clock(manual):
+        yesterday = clock.now(_KST).date() - timedelta(days=1)
+        for scheduler in s.daily_report_schedulers.values():
+            await scheduler.run_once(target_date=yesterday)
+        await s.db.execute(
+            "INSERT INTO position_history (bot_id, symbol, action, quantity, price,"
+            " pnl, timestamp, account_id) VALUES (?, ?, 'sell', ?, ?, ?, ?, ?)",
+            (
+                "bot-1",
+                "005930",
+                10.0,
+                100.0,
+                -1_000_000.0,
+                clock.now(UTC).isoformat(),
+                "kis-b",
+            ),
+        )
+        cap = _capture(s, OrderRejectedEvent, OrderSubmittedEvent)
+
+        await s.eventbus.publish(_request("kis-b"))
+
+    assert cap.of(OrderSubmittedEvent) == []
+    (rejected,) = cap.of(OrderRejectedEvent)
+    assert rejected.account_id == "kis-b"
+    assert "Daily loss limit" in rejected.reason
+
+
+async def test_shutdown_stops_every_daily_report_scheduler_even_if_one_fails(
+    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """실제 ``_shutdown`` 이 모든 계좌의 스케줄러를 멈춘다. 한 스케줄러의 종료가
+    예외여도 나머지는 멈춘다."""
+    asm = await assemble([_kis_account("kis-a"), _kis_account("kis-b")])
+    schedulers = dict(asm.s.daily_report_schedulers)
+    first = schedulers["kis-a"]
+    real_stop = first.stop
+
+    async def _failing_stop() -> None:
+        await real_stop()
+        raise RuntimeError("stop failed (#3089)")
+
+    monkeypatch.setattr(first, "stop", _failing_stop)
+
+    await _shutdown_in_test(asm)
+
+    assert list(schedulers) == ["kis-a", "kis-b"]
+    assert [sch._task for sch in schedulers.values()] == [None, None]
+    assert asm.s.daily_report_schedulers == {}
+
+
+async def test_one_account_report_failure_does_not_block_other_accounts(
+    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """한 계좌의 보고가 예외로 끝나도 다른 계좌의 보고·스냅샷은 생긴다."""
+    asm = await assemble([_kis_account("kis-a"), _kis_account("kis-b")])
+    s = asm.s
+
+    async def _broken(snapshot_date: str) -> dict[str, Any] | None:
+        raise RuntimeError("snapshot read failed (#3089)")
+
+    monkeypatch.setattr(s.treasury_manager.get("kis-a"), "get_daily_snapshot", _broken)
+    results: dict[str, Any] = {}
+    for account_id, scheduler in s.daily_report_schedulers.items():
+        try:
+            results[account_id] = await scheduler.run_once(
+                target_date=date(2026, 3, 19)
+            )
+        except RuntimeError as exc:
+            results[account_id] = str(exc)
+
+    assert results == {"kis-a": "snapshot read failed (#3089)", "kis-b": False}
+    assert await _snapshot_rows(s) == {"kis-b": 1}
+
+
+async def test_broken_trading_hours_end_skips_only_that_account(
+    assemble: AssembleFn, caplog: pytest.LogCaptureFixture
+) -> None:
+    """한 계좌의 거래 시간 종료가 깨져 있으면 조립은 예외 없이 끝나고, 그 계좌만
+    스케줄러 없이 넘어간다. 건너뛴 계좌 ID 는 ERROR 로그에 남는다."""
+    broken = _kis_account("kis-a")
+    broken.trading_hours_end = "broken"
+    with caplog.at_level(logging.ERROR, logger="ante.main"):
+        asm = await assemble([broken, _kis_account("kis-b")])
+
+    assert list(asm.s.daily_report_schedulers) == ["kis-b"]
+    errors = [
+        r
+        for r in caplog.records
+        if r.name == "ante.main" and r.levelno >= logging.ERROR
+    ]
+    assert any("kis-a" in r.getMessage() for r in errors), [
+        r.getMessage() for r in errors
+    ]
+
+
+async def test_daily_report_scheduler_assembly_with_no_accounts() -> None:
+    """삭제되지 않은 계좌가 없으면 스케줄러는 0개이고 예외가 없다(서비스 직접 구성 —
+    ``assemble`` 은 첫 부팅 경로가 test 계좌를 만들어 0개를 만들 수 없다)."""
+    from ante.core import Database
+    from ante.eventbus import EventBus
+
+    with tempfile.TemporaryDirectory(prefix="aw", dir="/tmp") as tmp:
+        db = Database(str(Path(tmp) / "t.db"))
+        await db.connect()
+        try:
+            bus = EventBus()
+            accounts = AccountService(db=db, eventbus=bus)
+            await accounts.initialize()
+            s = main_module.Services(
+                db=db, eventbus=bus, config=Config(static={}, secrets={})
+            )
+            s.account_service = accounts
+
+            await main_module._init_daily_report_scheduler(s)
+
+            assert await accounts.list() == []
+            assert s.daily_report_schedulers == {}
+        finally:
+            await db.close()

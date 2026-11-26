@@ -105,12 +105,13 @@ class DailyReportScheduler:
             return
 
         logger.info(
-            "DailyReportScheduler start (report_time: %s KST)",
+            "DailyReportScheduler start (account: %s, report_time: %s KST)",
+            self._account_id,
             self._report_time.strftime("%H:%M"),
         )
         self._task = asyncio.create_task(
             self._loop(),
-            name="daily-report-scheduler",
+            name=f"daily-report-scheduler:{self._account_id}",
         )
 
     async def stop(self) -> None:
@@ -219,6 +220,7 @@ class DailyReportScheduler:
 
         pnl_formatted = format_currency(realized_pnl, self._currency)
         message = (
+            f"계좌 `{self._account_id}`\n"
             f"거래: {total_count}건 (매수 {buy_count} / 매도 {sell_count})\n"
             f"실현 손익: {pnl_formatted}\n"
             f"보유 포지션: {position_count}종목"

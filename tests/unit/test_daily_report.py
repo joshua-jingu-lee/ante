@@ -389,6 +389,51 @@ class TestNotificationEvent:
         assert "매도 5" in event.message
         assert "+1,250,000원" in event.message
         assert "4종목" in event.message
+        assert event.title == "일일 성과 요약 (2026-03-19)"
+        assert event.message == (
+            "계좌 `acc-1`\n"
+            "거래: 12건 (매수 7 / 매도 5)\n"
+            "실현 손익: +1,250,000원\n"
+            "보유 포지션: 4종목"
+        )
+
+    async def test_same_numbers_on_two_accounts_both_pass_notification_dedup(
+        self, performance_tracker, trade_recorder, position_history, eventbus
+    ):
+        """거래 수·손익·포지션 수가 같은 두 계좌의 알림이 실제 NotificationService 의
+        중복 제거(수준+본문, 60초)를 둘 다 통과한다 — 본문 첫 줄의 계좌가 가른다."""
+        from ante.notification.base import NotificationAdapter
+        from ante.notification.service import NotificationService
+
+        class _Recording(NotificationAdapter):
+            def __init__(self) -> None:
+                self.sent: list[tuple[str, str]] = []
+
+            async def send(self, level, message):
+                self.sent.append(("", message))
+                return True
+
+            async def send_rich(self, level, title, body, metadata=None):
+                self.sent.append((title, body))
+                return True
+
+        trade_recorder.get_trades.return_value = [_make_trade("buy")]
+        adapter = _Recording()
+        NotificationService(adapter=adapter, eventbus=eventbus).subscribe()
+        for account_id in ("kis-a", "kis-b"):
+            await DailyReportScheduler(
+                performance_tracker=performance_tracker,
+                trade_recorder=trade_recorder,
+                position_history=position_history,
+                eventbus=eventbus,
+                account_id=account_id,
+            ).run_once(target_date=date(2026, 3, 19))
+
+        assert [body.split("\n")[0] for _, body in adapter.sent] == [
+            "계좌 `kis-a`",
+            "계좌 `kis-b`",
+        ]
+        assert {title for title, _ in adapter.sent} == {"일일 성과 요약 (2026-03-19)"}
 
     async def test_negative_pnl_format(
         self,

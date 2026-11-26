@@ -47,13 +47,14 @@ Trade 모듈이 발행하는 `NotificationEvent` 목록. 분산 구조([#489](ht
 
 ### 일일 성과 요약 (NotificationEvent)
 
-**트리거**: `DailyReportScheduler` 실행 시, 당일 거래가 **1건 이상**일 때만 발행. 거래 0건이면 발행하지 않음 (기존 동작 유지).
+**트리거**: 계좌마다(`DailyReportScheduler`는 삭제되지 않은 계좌마다 하나) 그 계좌의 스케줄러 실행 시, 그 계좌의 당일 거래가 **1건 이상**일 때만 발행. 거래 0건이면 발행하지 않음 (기존 동작 유지).
 **데이터 수집**:
-- `PerformanceTracker.get_daily_summary(bot_id, today, today)` — 봇별 당일 요약
-- `PositionHistory.get_all_positions()` — 보유 포지션 현황
+- `PerformanceTracker.get_daily_summary(start_date=today, end_date=today, account_id=<계좌>)` — 그 계좌의 당일 요약
+- `PositionHistory.get_all_positions(account_id=<계좌>)` — 그 계좌의 보유 포지션 현황
 
 ```
 📊 일일 성과 요약 (2026-03-19)
+계좌 `kis-main`
 거래: 12건 (매수 7 / 매도 5)
 실현 손익: +1,250,000원
 보유 포지션: 4종목
@@ -67,7 +68,7 @@ Trade 모듈이 발행하는 `NotificationEvent` 목록. 분산 구조([#489](ht
 
 #### 실행 시각
 
-Account 모듈의 `trading_hours_end` + 30분을 실행 시각으로 사용한다. 스케줄러 생성 시 Account 정보를 주입받아 계산한다.
+Account 모듈의 `trading_hours_end` + 30분을 실행 시각으로 사용한다. 스케줄러는 계좌마다 하나이며, 생성 시 그 계좌의 Account 정보를 주입받아 계산한다.
 
 | 프리셋 | `trading_hours_end` | timezone | 실행 시각 |
 |--------|--------------------|-----------|-----------|
