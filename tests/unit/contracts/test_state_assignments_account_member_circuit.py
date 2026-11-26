@@ -23,7 +23,11 @@
 **호출 자리**: ``_transition_status`` 를 부르는 곳마다 (감싸는 함수, 위치 인자
 목록)이 리터럴 표와 같아야 한다. 호출은 ``status = _transition_status(...)``
 문이고, 같은 메서드에서 ``SET status`` 를 쓰는 ``self._db.execute`` 보다 앞에
-있으며, 그 ``execute`` 의 인자 튜플 첫 원소는 이름 ``status`` 다.
+있으며, 그 ``execute`` 의 인자 튜플 첫 원소는 이름 ``status`` 다. 계좌의
+``suspend_all`` 만 예외다(#3077): UPDATE가 없고, 전이 호출 바로 다음 문이
+미기록 표시 ``self._unpersisted_suspensions.add(account_id)`` 이며, 둘 다 유일한
+``self.suspend(...)`` 호출보다 앞이고, 함수의 첫 ``await`` 는 전이를 감싼 루프보다
+뒤다(메모리≠DB는 반드시 표시되고, 차단은 어느 구독자보다 먼저 끝난다).
 
 **기존 검사**: 호출보다 앞 줄의 ``raise``·``return``·``self._assert_*`` 호출이
 메서드마다 리터럴 목록과 같다(기존 검사를 표 검사로 대체하지 않는다).
@@ -196,6 +200,7 @@ def test_no_setattr_of_status(path):
                 ("activate", ("account", "AccountStatus.ACTIVE")),
                 ("delete", ("account", "AccountStatus.DELETED")),
                 ("suspend", ("account", "AccountStatus.SUSPENDED")),
+                ("suspend_all", ("account", "AccountStatus.SUSPENDED")),
             ],
         ),
         (
@@ -244,8 +249,17 @@ def _status_update(method: ast.AsyncFunctionDef) -> ast.Call:
     return found[0]
 
 
-@_FILES
-def test_transition_precedes_the_status_update_and_feeds_it(path):
+@pytest.mark.parametrize(
+    ("path", "with_update", "without_update"),
+    [
+        (_ACCOUNT, ["activate", "delete", "suspend"], ["suspend_all"]),
+        (_MEMBER, ["reactivate", "revoke", "suspend"], []),
+    ],
+    ids=["account", "member"],
+)
+def test_transition_precedes_the_status_update_and_feeds_it(
+    path, with_update, without_update
+):
     tree = _parse(path)
     methods = {
         node.name: node
@@ -254,8 +268,8 @@ def test_transition_precedes_the_status_update_and_feeds_it(path):
     }
     owner = _enclosing_functions(tree)
     callers = sorted(owner[id(call)] for call in _transition_calls(tree))
-    assert len(callers) == 3
-    for name in callers:
+    assert callers == sorted(with_update + without_update)
+    for name in with_update:
         method = methods[name]
         assigns = [
             node
@@ -271,6 +285,50 @@ def test_transition_precedes_the_status_update_and_feeds_it(path):
         params = update.args[1]
         assert isinstance(params, ast.Tuple), name
         assert ast.unparse(params.elts[0]) == "status", name
+
+
+def test_suspend_all_marks_unpersisted_right_after_transition_before_any_await():
+    method = _async_methods(_parse(_ACCOUNT))["suspend_all"]
+    reason = "#3077: 전체 정지는 await 전에 전 계좌를 정지·미기록 표시한다"
+    parent_of = {
+        id(child): node
+        for node in ast.walk(method)
+        for child in ast.iter_child_nodes(node)
+    }
+    (call,) = [
+        node
+        for node in ast.walk(method)
+        if isinstance(node, ast.Call) and _callee_name(node) == _TRANSITION_FUNC
+    ]
+    transition = parent_of[id(call)]
+    assert isinstance(transition, ast.Expr), reason
+    block = parent_of[id(transition)]
+    body = block.body
+    index = next(i for i, stmt in enumerate(body) if stmt is transition)
+    assert index + 1 < len(body), reason
+    mark = body[index + 1]
+    assert ast.unparse(mark) == "self._unpersisted_suspensions.add(account_id)", reason
+    (suspend_call,) = [
+        node
+        for node in ast.walk(method)
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "self.suspend"
+    ]
+    assert transition.lineno < mark.lineno < suspend_call.lineno, reason
+    assert not any(
+        isinstance(node, ast.Call)
+        and _callee_name(node) == "execute"
+        and "SET status" in ast.unparse(node)
+        for node in ast.walk(method)
+    ), reason
+    loop: ast.AST = block
+    while not isinstance(loop, ast.For):
+        loop = parent_of[id(loop)]
+    first_await = min(
+        node.lineno
+        for node in ast.walk(method)
+        if isinstance(node, ast.Await | ast.AsyncFor | ast.AsyncWith)
+    )
+    assert first_await > (loop.end_lineno or 0), reason
 
 
 def _async_methods(tree: ast.Module) -> dict[str, ast.AsyncFunctionDef]:
@@ -413,6 +471,7 @@ def _guards_before_transition(method: ast.AsyncFunctionDef) -> list[str]:
                     "raise AccountDeletedException",
                     "raise AccountAlreadySuspendedError",
                 ],
+                "suspend_all": [],
             },
         ),
         (

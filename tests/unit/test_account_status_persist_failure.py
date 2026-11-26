@@ -605,7 +605,7 @@ async def test_suspend_all_retry_failing_again_is_suspend_all_failed(
 
 
 @pytest.mark.asyncio
-async def test_suspend_all_does_not_trap_cancellation(service, monkeypatch):
+async def test_suspend_all_does_not_trap_cancellation(service, db, monkeypatch):
     await _three_active(service)
     real_execute = service._db.execute
 
@@ -621,7 +621,25 @@ async def test_suspend_all_does_not_trap_cancellation(service, monkeypatch):
         await service.suspend_all(reason="킬 스위치", suspended_by="admin")
 
     assert attempted == ["acct1", "acct2"]
-    assert service._accounts["acct3"].status == AccountStatus.ACTIVE
+    assert service._accounts["acct3"].status == AccountStatus.SUSPENDED
+    assert service.has_unpersisted_suspensions() is True
+    assert (await _db_status(db, "acct3"))[0] == AccountStatus.ACTIVE
+    monkeypatch.undo()
+
+    results = await service.suspend_all(reason="킬 스위치", suspended_by="admin")
+
+    assert results == [
+        {
+            "account_id": account_id,
+            "previous_status": "suspended",
+            "status": "suspended",
+            "changed": False,
+        }
+        for account_id in ("acct1", "acct2", "acct3")
+    ]
+    for account_id in ("acct2", "acct3"):
+        assert (await _db_status(db, account_id))[0] == AccountStatus.SUSPENDED
+    assert service.has_unpersisted_suspensions() is False
 
 
 def _kill_switch_server(service: AccountService, audit_log: AsyncMock) -> IPCServer:
