@@ -332,8 +332,8 @@ async def _force_close(s: main_module.Services) -> None:
         await _best_effort(scheduler.stop)
     if s.fill_outbox_publisher is not None:
         await _best_effort(s.fill_outbox_publisher.stop)
-    if s.daily_report_scheduler is not None:
-        await _best_effort(s.daily_report_scheduler.stop)
+    for report_scheduler in s.daily_report_schedulers.values():
+        await _best_effort(report_scheduler.stop)
     if s.treasury_manager is not None:
         for treasury in s.treasury_manager.list_all():
             await _best_effort(treasury.stop_sync)

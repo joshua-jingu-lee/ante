@@ -137,7 +137,7 @@ class Services:
         default_factory=RuntimeReadinessRegistry
     )
     readiness_self_healing_task: asyncio.Task | None = None  # type: ignore[type-arg]
-    daily_report_scheduler: Any = None
+    daily_report_schedulers: dict[str, Any] = field(default_factory=dict)
     data_provider: Any = None
     parquet_store: Any = None
     data_collector: Any = None
@@ -1201,45 +1201,46 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
 
 
 async def _init_daily_report_scheduler(s: Services) -> None:
-    """DailyReportScheduler 생성 및 시작 (Account 기반 실행 시각)."""
+    """삭제되지 않은 계좌마다 DailyReportScheduler를 만들어 시작한다."""
     from ante.trade.daily_report import (
         DailyReportScheduler,
         compute_report_time,
     )
 
     accounts = await s.account_service.list() if s.account_service else []
-    account = accounts[0] if accounts else None
-
-    report_time = compute_report_time(account.trading_hours_end) if account else None
-    account_id = account.account_id if account else ""
-    currency = account.currency if account else "KRW"
-
-    treasury = None
-    if s.treasury_manager and account_id:
+    for account in accounts:
+        account_id = account.account_id
+        treasury = None
+        if s.treasury_manager:
+            try:
+                treasury = s.treasury_manager.get(account_id)
+            except KeyError:
+                logger.warning("Treasury not found for account_id=%s", account_id)
         try:
-            treasury = s.treasury_manager.get(account_id)
-        except KeyError:
-            logger.warning("Treasury not found for account_id=%s", account_id)
-
-    kwargs: dict[str, Any] = {
-        "performance_tracker": s.performance_tracker,
-        "trade_recorder": s.trade_recorder,
-        "position_history": s.position_history,
-        "eventbus": s.eventbus,
-        "account_id": account_id,
-        "currency": currency,
-        "treasury": treasury,
-    }
-    if report_time is not None:
-        kwargs["report_time"] = report_time
-
-    s.daily_report_scheduler = DailyReportScheduler(**kwargs)
-    await s.daily_report_scheduler.start()
-    logger.info(
-        "DailyReportScheduler 시작 완료 (account=%s, currency=%s)",
-        account_id,
-        currency,
-    )
+            scheduler = DailyReportScheduler(
+                performance_tracker=s.performance_tracker,
+                trade_recorder=s.trade_recorder,
+                position_history=s.position_history,
+                eventbus=s.eventbus,
+                account_id=account_id,
+                report_time=compute_report_time(account.trading_hours_end),
+                currency=account.currency,
+                treasury=treasury,
+            )
+            await scheduler.start()
+        except Exception:
+            logger.exception(
+                "DailyReportScheduler 시작 실패 — 이 계좌의 일일 보고를 건너뛴다: "
+                "account=%s",
+                account_id,
+            )
+            continue
+        s.daily_report_schedulers[account_id] = scheduler
+        logger.info(
+            "DailyReportScheduler 시작 완료 (account=%s, currency=%s)",
+            account_id,
+            account.currency,
+        )
 
 
 async def _init_stream_integration(
@@ -1926,9 +1927,17 @@ async def _shutdown(s: Services) -> None:
         await s.signal_channel_registry.close_all("draining")
         logger.info("SignalChannelRegistry sweep 완료 — 모든 시그널 채널 종료")
 
-    if s.daily_report_scheduler:
-        await s.daily_report_scheduler.stop()
-        logger.info("DailyReportScheduler 종료")
+    for report_account_id, report_scheduler in list(s.daily_report_schedulers.items()):
+        try:
+            await report_scheduler.stop()
+            logger.info("DailyReportScheduler 종료: account=%s", report_account_id)
+        except Exception:
+            logger.warning(
+                "DailyReportScheduler 종료 실패: account=%s",
+                report_account_id,
+                exc_info=True,
+            )
+    s.daily_report_schedulers.clear()
 
     if (
         s.readiness_self_healing_task is not None
