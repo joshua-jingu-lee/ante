@@ -20,7 +20,7 @@
 |--------|---------|--------|------|
 | `initialize` | — | `None` | 스키마 생성 + exchange 컬럼 마이그레이션 |
 | `subscribe` | `eventbus: EventBus` | `None` | 이벤트 구독 등록. 시스템 초기화 시 호출 |
-| `get_trades` | `account_id: str \| None`, `bot_id: str \| None`, `strategy_id: str \| None`, `symbol: str \| None`, `status: TradeStatus \| None`, `from_date: datetime \| None`, `to_date: datetime \| None`, `limit: int = 100`, `offset: int = 0` | `list[TradeRecord]` | 거래 기록 조회. 다양한 필터 지원 |
+| `get_trades` | `account_id: str \| None`, `bot_id: str \| None`, `strategy_id: str \| None`, `symbol: str \| None`, `status: TradeStatus \| None`, `from_date: datetime \| None`, `to_date: datetime \| None`, `limit: int = 100`, `offset: int = 0` | `list[TradeRecord]` | 거래 기록 조회. 다양한 필터 지원. 시간대가 있는 `from_date`·`to_date`는 UTC로 바꿔 비교하고, 시간대가 없는 값은 그대로 비교한다 |
 | `save` | `record: TradeRecord` | `None` | 거래 기록 저장 (Reconciler용 public wrapper) |
 | `save_adjustment` | `bot_id: str`, `symbol: str`, `old_quantity: float`, `new_quantity: float`, `reason: str` | `None` | 대사 보정 이력 기록 |
 

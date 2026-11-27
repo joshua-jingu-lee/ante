@@ -48,8 +48,10 @@ Trade 모듈이 발행하는 `NotificationEvent` 목록. 분산 구조([#489](ht
 ### 일일 성과 요약 (NotificationEvent)
 
 **트리거**: 계좌마다(`DailyReportScheduler`는 삭제되지 않은 계좌마다 하나) 그 계좌의 스케줄러 실행 시, 그 계좌의 당일 거래가 **1건 이상**일 때만 발행. 거래 0건이면 발행하지 않음 (기존 동작 유지).
+보고의 거래 수·순매수 금액·실현 손익은 보고 날짜의 KST 00:00 이상 다음 날 KST 00:00 미만에 체결된 거래로 센다.
 **데이터 수집**:
-- `PerformanceTracker.get_daily_summary(start_date=today, end_date=today, account_id=<계좌>)` — 그 계좌의 당일 요약
+- `TradeRecorder.get_trades(account_id=<계좌>, status=FILLED, from_date=보고 날짜 KST 00:00, to_date=보고 날짜 KST 23:59:59.999999)` — 그 계좌의 당일 체결(거래 수·매수/매도 수·순매수 금액)
+- `PerformanceTracker.get_realized_pnl(account_id=<계좌>, start=보고 날짜 KST 00:00, end=다음 날 KST 00:00)` — 그 계좌의 당일 실현 손익
 - `PositionHistory.get_all_positions(account_id=<계좌>)` — 그 계좌의 보유 포지션 현황
 
 ```
