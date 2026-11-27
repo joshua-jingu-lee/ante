@@ -280,23 +280,39 @@ class TestExpireRaces:
         receiver = TelegramCommandReceiver(
             adapter=adapter, allowed_user_ids=[1], approval_service=svc
         )
-        callback = {"id": "cb", "from": {"id": 1}, "data": f"approve:{req.id}"}
-        first, expired = await _race(
-            svc,
-            lambda: receiver._handle_callback_query(callback),
-            svc.expire_stale,
-        )
-        assert first is None
-        assert expired == 1
-        assert executor.calls == 0
-        assert await _status(db, req.id) == "expired"
-        literal = (
-            f"ℹ️ 이미 처리된 결재입니다 (결재 '{req.id}' 상태 'expired' 에서 "
-            f"'approve' 작업을 수행할 수 없습니다.)\nID: {req.id}"
-        )
-        assert adapter.answer_callback_query.call_args.args == ("cb", literal)
-        await receiver._handle_callback_query(callback)
-        assert adapter.answer_callback_query.call_args.args == ("cb", literal)
+        receiver._reply = AsyncMock()  # type: ignore[method-assign]
+        callback = {
+            "id": "cb",
+            "from": {"id": 1},
+            "message": {"chat": {"id": 7}},
+            "data": f"approve:{req.id}",
+        }
+        try:
+            first, expired = await _race(
+                svc,
+                lambda: receiver._handle_callback_query(callback),
+                svc.expire_stale,
+            )
+            await receiver._jobs.join()
+            assert first is None
+            assert expired == 1
+            assert executor.calls == 0
+            assert await _status(db, req.id) == "expired"
+            literal = (
+                f"ℹ️ 이미 처리된 결재입니다 (결재 '{req.id}' 상태 'expired' 에서 "
+                f"'approve' 작업을 수행할 수 없습니다.)\nID: {req.id}"
+            )
+            assert adapter.answer_callback_query.call_args.args == (
+                "cb",
+                "⏳ 처리 중입니다",
+            )
+            assert receiver._reply.call_args.args == (7, literal)
+            await receiver._handle_callback_query(callback)
+            await receiver._jobs.join()
+            assert receiver._reply.call_args.args == (7, literal)
+            assert receiver._reply.await_count == 2
+        finally:
+            await receiver.stop()
 
     async def test_expire_loses_to_approve(
         self, svc, db, executor, resolved_events, caplog

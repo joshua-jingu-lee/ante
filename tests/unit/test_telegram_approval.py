@@ -6,6 +6,7 @@ NotificationService의 ApprovalEvent 구독을 검증한다.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -57,13 +58,15 @@ def approval_service():
 
 
 @pytest.fixture
-def receiver(adapter, approval_service):
+async def receiver(adapter, approval_service):
     """approval_service가 주입된 TelegramCommandReceiver."""
-    return TelegramCommandReceiver(
+    r = TelegramCommandReceiver(
         adapter=adapter,
         allowed_user_ids=[12345],
         approval_service=approval_service,
     )
+    yield r
+    await r.stop()
 
 
 # ── TelegramAdapter.send_with_buttons ─────────────
@@ -143,6 +146,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
 
         approval_service.approve.assert_called_once_with(
             "abc123", resolved_by="telegram", suppress_notification=True
@@ -163,6 +167,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
 
         reply_text = receiver._reply.call_args[0][1]
         assert "✅ 결재 승인 완료" in reply_text
@@ -186,6 +191,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
 
         reply_text = receiver._reply.call_args[0][1]
         assert "⚠️ 승인되었으나 실행 실패" in reply_text
@@ -203,6 +209,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
 
         approval_service.reject.assert_called_once_with(
             "abc123",
@@ -226,6 +233,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
 
         reply_text = receiver._reply.call_args[0][1]
         assert "❌ 결재 거절 완료" in reply_text
@@ -243,6 +251,7 @@ class TestCallbackQuery:
             }
         }
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         adapter.answer_callback_query.assert_called_once()
         assert "권한" in adapter.answer_callback_query.call_args[0][1]
 
@@ -257,6 +266,7 @@ class TestCallbackQuery:
             }
         }
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         adapter.answer_callback_query.assert_called_once()
         assert "잘못된" in adapter.answer_callback_query.call_args[0][1]
 
@@ -271,6 +281,7 @@ class TestCallbackQuery:
             }
         }
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         adapter.answer_callback_query.assert_called()
         assert "알 수 없는" in adapter.answer_callback_query.call_args[0][1]
 
@@ -289,6 +300,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         reply_text = receiver._reply.call_args[0][1]
         assert "이미 처리된 결재입니다" in reply_text
 
@@ -309,6 +321,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         reply_text = receiver._reply.call_args[0][1]
         assert "결재를 찾을 수 없습니다" in reply_text
         assert "ID: abc123" in reply_text
@@ -342,8 +355,63 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         receiver._reply.assert_called_once()
         assert "승인 완료" in receiver._reply.call_args[0][1]
+        adapter.answer_callback_query.assert_called_once_with("cb8", "⏳ 처리 중입니다")
+
+    async def test_processing_answer_failure_still_runs_approval(
+        self, receiver, adapter, approval_service
+    ):
+        """「처리 중」 응답이 예외를 내도 승인은 실행되고 결과 메시지 하나만 간다."""
+        adapter.answer_callback_query.side_effect = RuntimeError("telegram down")
+        update = {
+            "callback_query": {
+                "id": "cb9",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 100}},
+                "data": "approve:abc123",
+            }
+        }
+        receiver._reply = AsyncMock()
+        await receiver._handle_update(update)
+        await receiver._jobs.join()
+
+        approval_service.approve.assert_awaited_once()
+        receiver._reply.assert_awaited_once()
+        assert receiver._reply.call_args.args[0] == 100
+        assert "✅ 결재 승인 완료" in receiver._reply.call_args.args[1]
+
+    async def test_result_reply_failure_does_not_stop_worker(
+        self, receiver, approval_service
+    ):
+        """결과 회신이 예외를 내도 작업자는 살아 다음 작업을 처리하고 줄이 빈다."""
+        replies: list[tuple[int, str]] = []
+
+        async def _reply(chat_id, text):
+            replies.append((chat_id, text))
+            if chat_id == 100:
+                raise RuntimeError("reply failed")
+
+        receiver._reply = _reply
+        for update_id, chat_id in ((1, 100), (2, 200)):
+            await receiver._handle_update(
+                {
+                    "update_id": update_id,
+                    "callback_query": {
+                        "id": f"cb{update_id}",
+                        "from": {"id": 12345},
+                        "message": {"chat": {"id": chat_id}},
+                        "data": f"approve:id{update_id}",
+                    },
+                }
+            )
+        await asyncio.wait_for(receiver._jobs.join(), timeout=5)
+
+        assert approval_service.approve.await_count == 2
+        assert [cid for cid, _ in replies] == [100, 200]
+        assert receiver._worker is not None
+        assert not receiver._worker.done()
 
 
 # ── /approve, /reject 텍스트 명령 스펙아웃 회귀 (#2379) ──
