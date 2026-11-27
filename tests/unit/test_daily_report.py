@@ -19,7 +19,7 @@ from ante.trade.daily_report import (
     compute_report_time,
     format_currency,
 )
-from ante.trade.models import DailySummary, PositionSnapshot, TradeRecord, TradeStatus
+from ante.trade.models import PositionSnapshot, TradeRecord, TradeStatus
 
 KST = timezone(timedelta(hours=9))
 
@@ -30,7 +30,7 @@ KST = timezone(timedelta(hours=9))
 @pytest.fixture
 def performance_tracker():
     mock = AsyncMock()
-    mock.get_daily_summary = AsyncMock(return_value=[])
+    mock.get_realized_pnl = AsyncMock(return_value=0.0)
     return mock
 
 
@@ -203,14 +203,7 @@ class TestDailyReportEventAlwaysPublished:
         sell_trades = [_make_trade("sell") for _ in range(2)]
         trade_recorder.get_trades.return_value = buy_trades + sell_trades
 
-        performance_tracker.get_daily_summary.return_value = [
-            DailySummary(
-                date="2026-03-19",
-                realized_pnl=500000.0,
-                trade_count=5,
-                win_rate=0.6,
-            )
-        ]
+        performance_tracker.get_realized_pnl.return_value = 500000.0
         position_history.get_all_positions.return_value = [
             PositionSnapshot(
                 bot_id="bot-1",
@@ -354,14 +347,7 @@ class TestNotificationEvent:
         sell_trades = [_make_trade("sell") for _ in range(5)]
         trade_recorder.get_trades.return_value = buy_trades + sell_trades
 
-        performance_tracker.get_daily_summary.return_value = [
-            DailySummary(
-                date="2026-03-19",
-                realized_pnl=1250000.0,
-                trade_count=5,
-                win_rate=0.8,
-            )
-        ]
+        performance_tracker.get_realized_pnl.return_value = 1250000.0
 
         position_history.get_all_positions.return_value = [
             PositionSnapshot(
@@ -446,14 +432,7 @@ class TestNotificationEvent:
     ):
         """Negative PnL is displayed without explicit sign."""
         trade_recorder.get_trades.return_value = [_make_trade("sell")]
-        performance_tracker.get_daily_summary.return_value = [
-            DailySummary(
-                date="2026-03-19",
-                realized_pnl=-500000.0,
-                trade_count=1,
-                win_rate=0.0,
-            )
-        ]
+        performance_tracker.get_realized_pnl.return_value = -500000.0
         position_history.get_all_positions.return_value = []
 
         received: list[NotificationEvent] = []
@@ -463,7 +442,7 @@ class TestNotificationEvent:
 
         assert "-500,000원" in received[0].message
 
-    async def test_zero_pnl_when_no_daily_summary(
+    async def test_zero_pnl_when_no_realized_pnl(
         self,
         scheduler,
         trade_recorder,
@@ -473,7 +452,7 @@ class TestNotificationEvent:
     ):
         """No daily summary -> realized PnL shown as 0."""
         trade_recorder.get_trades.return_value = [_make_trade("buy")]
-        performance_tracker.get_daily_summary.return_value = []
+        performance_tracker.get_realized_pnl.return_value = 0.0
         position_history.get_all_positions.return_value = []
 
         received: list[NotificationEvent] = []
@@ -525,14 +504,7 @@ class TestCurrencyAwareNotification:
         )
 
         trade_recorder.get_trades.return_value = [_make_trade("buy")]
-        performance_tracker.get_daily_summary.return_value = [
-            DailySummary(
-                date="2026-03-19",
-                realized_pnl=1234.56,
-                trade_count=1,
-                win_rate=1.0,
-            )
-        ]
+        performance_tracker.get_realized_pnl.return_value = 1234.56
         position_history.get_all_positions.return_value = []
 
         received: list[NotificationEvent] = []
@@ -684,14 +656,14 @@ class TestCrossAccountFilter:
         """run_once 가 ``account_id=self._account_id`` 를 모든 집계 호출에
         명시 전달한다.
 
-        ``trade_recorder.get_trades``, ``performance_tracker.get_daily_summary``,
+        ``trade_recorder.get_trades``, ``performance_tracker.get_realized_pnl``,
         ``position_history.get_all_positions`` 호출에 자기 계좌만 명시되어야
         타 계좌의 거래/포지션이 DailyReportEvent 에 섞이지 않는다.
         """
         # trade_recorder/performance/position 모두 빈 리스트 반환 — 필터링
         # 자체가 호출 인자로 잘 전달되는지가 핵심 검증 포인트.
         trade_recorder.get_trades.return_value = [_make_trade("buy")]
-        performance_tracker.get_daily_summary.return_value = []
+        performance_tracker.get_realized_pnl.return_value = 0.0
         position_history.get_all_positions.return_value = []
 
         await scheduler.run_once(target_date=date(2026, 3, 19))
@@ -700,9 +672,13 @@ class TestCrossAccountFilter:
         get_trades_kwargs = trade_recorder.get_trades.await_args.kwargs
         assert get_trades_kwargs.get("account_id") == "acc-1"
 
-        # get_daily_summary: account_id 키워드로 자기 계좌가 명시 전달됨.
-        gds_kwargs = performance_tracker.get_daily_summary.await_args.kwargs
-        assert gds_kwargs.get("account_id") == "acc-1"
+        # get_realized_pnl: 자기 계좌와 보고 날짜의 KST 하루가 명시 전달됨.
+        pnl_kwargs = performance_tracker.get_realized_pnl.await_args.kwargs
+        assert pnl_kwargs == {
+            "account_id": "acc-1",
+            "start": datetime(2026, 3, 19, tzinfo=KST),
+            "end": datetime(2026, 3, 20, tzinfo=KST),
+        }
 
         # get_all_positions: account_id 키워드로 자기 계좌가 명시 전달됨.
         gap_kwargs = position_history.get_all_positions.await_args.kwargs

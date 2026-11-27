@@ -226,6 +226,52 @@ async def test_after_midnight_reports_miss_no_fill(stack: _Stack) -> None:
     assert set(first_ids) | set(second_ids) == sells
 
 
+async def _seed_edges(stack: _Stack) -> None:
+    await stack.fill("buy", "buy", _kst(11, 26, 10), BUY_PRICE, qty=10.0)
+    await stack.fill("x-prev-2359", "sell", _kst(11, 26, 23, 59), 1_002.0)
+    await stack.fill("in-0000", "sell", _kst(11, 27, 0), 1_010.0)
+    await stack.fill("in-2359", "sell", _kst(11, 27, 23, 59, 59, 999_999), 1_020.0)
+    await stack.fill("x-next-0000", "sell", _kst(11, 28, 0), 1_003.0)
+    await stack.fill("x-next-0830", "sell", _kst(11, 28, 8, 30), 1_004.0)
+
+
+_KST_FROM = datetime.combine(date(2026, 11, 27), time.min, tzinfo=KST)
+_KST_TO = datetime.combine(date(2026, 11, 27), time.max, tzinfo=KST)
+
+
+async def test_get_trades_kst_bounds_equal_utc_bounds(stack: _Stack) -> None:
+    await _seed_edges(stack)
+
+    async def ids(from_date: datetime, to_date: datetime) -> list[str]:
+        trades = await stack.recorder.get_trades(
+            account_id=ACCT, from_date=from_date, to_date=to_date
+        )
+        return sorted(t.order_id for t in trades if t.order_id)
+
+    kst = await ids(_KST_FROM, _KST_TO)
+    utc = await ids(_KST_FROM.astimezone(UTC), _KST_TO.astimezone(UTC))
+
+    assert kst == utc == ["in-0000", "in-2359"]
+
+
+async def test_calculate_kst_bounds_equal_utc_bounds(stack: _Stack) -> None:
+    await _seed_edges(stack)
+
+    kst = await stack.performance.calculate(
+        account_id=ACCT, from_date=_KST_FROM, to_date=_KST_TO
+    )
+    utc = await stack.performance.calculate(
+        account_id=ACCT,
+        from_date=_KST_FROM.astimezone(UTC),
+        to_date=_KST_TO.astimezone(UTC),
+    )
+    everything = await stack.performance.calculate(account_id=ACCT)
+
+    assert kst == utc
+    assert kst.total_trades == 2
+    assert everything.total_trades == 5
+
+
 # ── CLI 거래 목록의 날짜 인자는 결과가 그대로다 ─────────────────────────────
 
 _MASTER = Member(
