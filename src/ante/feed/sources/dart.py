@@ -15,7 +15,11 @@ from xml.etree import ElementTree
 
 import aiohttp
 
-from ante.feed.sources.base import RateLimiter, describe_source_error
+from ante.feed.sources.base import (
+    RateLimiter,
+    describe_source_error,
+    redact_source_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +290,8 @@ class DARTSource:
         status = str(data.get("status", "900"))
         message = str(data.get("message", ""))
         action = classify_error(status)
+        status = redact_source_text(status, self._api_key)
+        message = redact_source_text(message, self._api_key)
 
         if action == ErrorAction.CRITICAL:
             return False, f"인증 실패 (status={status}): {message}"
@@ -322,9 +328,12 @@ class DARTSource:
                                 data = json.loads(body)
                             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                                 body = body or str(exc)
-                            status, message = self._response_status(data, body[:200])
+                            detail = redact_source_text(body, self._api_key)[:200]
+                            status, message = self._response_status(data, detail)
 
                             action = classify_error(status)
+                            status = redact_source_text(status, self._api_key)
+                            message = redact_source_text(message, self._api_key)
 
                             if action == ErrorAction.CRITICAL:
                                 msg = f"DART 인증 에러 (status={status}): {message}"
@@ -440,6 +449,8 @@ class DARTSource:
 
             status, message = self._response_status(data, decode_error)
             action = classify_error(status)
+            status = redact_source_text(status, self._api_key)
+            message = redact_source_text(message, self._api_key)
 
             if action == ErrorAction.OK:
                 return self._extract_list(data)
@@ -501,7 +512,7 @@ class DARTSource:
                 timeout=REQUEST_TIMEOUT,
             )
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            return None, str(exc)[:200]
+            return None, redact_source_text(str(exc), self._api_key)[:200]
         return data, None
 
     @staticmethod
