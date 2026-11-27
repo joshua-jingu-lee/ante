@@ -43,9 +43,9 @@ def _key_forms(key: str) -> set[str]:
     return {key, quote(key, safe=""), quote(key, safe="/"), quote(key, safe="/?:@")}
 
 
-def _encoded_forms(key: str) -> set[str]:
-    """키의 원문이 아닌 인코딩 꼴."""
-    return _key_forms(key) - {key}
+def _url_forms(key: str) -> set[str]:
+    """주소에 실리는 꼴. 인코딩이 원문과 다르면 원문을 뺀다."""
+    return (_key_forms(key) - {key}) or {key}
 
 
 def _assert_no_key(text: str, where: str) -> None:
@@ -338,7 +338,7 @@ async def test_key_never_leaks(
     _assert_no_key(caplog.text, "로그")
 
     if _KEY_REACHES_SITE.get((behavior, entry), False):
-        assert any(any(f in raw for f in _encoded_forms(key)) for raw in raw_errors), (
+        assert any(any(f in raw for f in _url_forms(key)) for raw in raw_errors), (
             f"가리기 전 예외 문자열에 인코딩된 키가 없다: {raw_errors!r}"
         )
 
@@ -354,6 +354,7 @@ def test_matrix_size() -> None:
 class _CurrentStderr(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         sys.stderr.write(self.format(record) + "\n")
+        sys.stderr.flush()
 
 
 @pytest.fixture
