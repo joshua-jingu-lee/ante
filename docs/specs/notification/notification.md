@@ -56,7 +56,7 @@ NotificationEvent(
 
 구현: `src/ante/notification/base.py`, `src/ante/notification/telegram.py`
 
-TelegramAdapter와 TelegramCommandReceiver가 텔레그램으로 보내는 모든 HTTP 요청(sendMessage·answerCallbackQuery·getUpdates)은 전체 5초 제한을 쓰며, 넘으면 재시도 없이 실패로 끝난다. 알림 전송이면 그 알림은 전달되지 않고 False를 반환하며, 로그에 그 알림의 첫 줄(제목) 앞 80자가 남는다.
+TelegramAdapter와 TelegramCommandReceiver가 텔레그램으로 보내는 모든 HTTP 요청(sendMessage·answerCallbackQuery·getUpdates)은 전체 5초 제한을 쓰며, 넘으면 재시도 없이 실패로 끝난다. 알림 전송이면 텔레그램에 실제로 전달됐는지는 알 수 없고 실패로 보아 False를 반환하며, 로그에 보낸 본문의 첫 줄(제목 줄 — 이모지·강조 기호 포함) 앞 80자가 남는다.
 
 ### NotificationService — 발송 + 필터링 + 이력
 
