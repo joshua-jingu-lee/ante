@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1037,3 +1038,105 @@ async def test_subscription_sync_excludes_triggered_and_expired_stop_orders(
         assert stream_client.subscribed_symbols == {"005380"}
     finally:
         await integration.stop()
+
+
+# ── 실제 스트림 클라이언트의 여러 건 프레임 (#3106) ──────────
+
+
+@pytest.mark.parametrize(
+    "manual_clock", [datetime(2026, 11, 27, 1, 0, tzinfo=UTC)], indirect=True
+)
+async def test_multi_record_frame_triggers_sell_stop_through_real_stream(
+    manual_clock,
+    monkeypatch: pytest.MonkeyPatch,
+    kis_stream_external_guard,
+    cache: ResponseCache,
+    eventbus: EventBus,
+    stop_order_manager: StopOrderManager,
+    bot_manager_mock: MagicMock,
+) -> None:
+    """100 → 95 → 89가 묶인 한 프레임에서 매도 스탑(발동가 90)이 89로 한 번 발동한다."""
+    from ante.broker.kis_stream import KISStreamClient
+    from ante.eventbus.events import OrderRequestEvent, StopOrderTriggeredEvent
+    from tests.unit._kis_stream_helpers import (
+        FakeSocket,
+        FakeWebsockets,
+        price_frame,
+        price_record,
+    )
+
+    monkeypatch.setattr(
+        KISStreamClient,
+        "_connect_and_recv",
+        kis_stream_external_guard.original_connect_and_recv,
+    )
+    client = KISStreamClient(
+        websocket_url="ws://ops.koreainvestment.com:31000",
+        app_key="key",
+        app_secret="secret",
+        approval_key="approval",
+        eventbus=eventbus,
+        account_id="acc-001",
+    )
+    frame = price_frame(
+        price_record("005930", 100),
+        price_record("005930", 95),
+        price_record("005930", 89),
+    )
+    sock = FakeSocket([frame])
+    FakeWebsockets([sock], []).install(monkeypatch)
+
+    triggered: list[StopOrderTriggeredEvent] = []
+    requests: list[OrderRequestEvent] = []
+
+    async def _on_triggered(event: StopOrderTriggeredEvent) -> None:
+        triggered.append(event)
+
+    async def _on_request(event: OrderRequestEvent) -> None:
+        requests.append(event)
+
+    eventbus.subscribe(StopOrderTriggeredEvent, _on_triggered)
+    eventbus.subscribe(OrderRequestEvent, _on_request)
+
+    seen: list[float] = []
+    original_update = stop_order_manager.on_price_update
+
+    async def _spy(symbol: str, price: float, **kwargs: Any) -> None:
+        seen.append(price)
+        await original_update(symbol, price, **kwargs)
+
+    monkeypatch.setattr(stop_order_manager, "on_price_update", _spy)
+
+    await stop_order_manager.register(
+        order_id="ord-1",
+        bot_id="bot-1",
+        strategy_id="stg-1",
+        symbol="005930",
+        side="sell",
+        quantity=10.0,
+        order_type="stop",
+        stop_price=90.0,
+        account_id="acc-001",
+    )
+
+    integration = StreamIntegration(
+        stream_client=client,
+        cache=cache,
+        eventbus=eventbus,
+        account_id="acc-001",
+        stop_order_manager=stop_order_manager,
+        bot_manager=bot_manager_mock,
+        sync_interval=60.0,
+    )
+    await integration.start()
+    try:
+        await asyncio.wait_for(sock.drained.wait(), 2.0)
+    finally:
+        await integration.stop()
+
+    assert seen == [100.0, 95.0, 89.0]
+    assert [e.trigger_price for e in triggered] == [89.0]
+    assert len(requests) == 1
+    assert requests[0].side == "sell"
+    assert stop_order_manager.active_orders == []
+    assert cache.get("acc-001:price:005930") == 89.0

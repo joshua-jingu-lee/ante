@@ -24,6 +24,7 @@ RuleEngine이 OrderRequestEvent와 Account 상태를 조합하여 생성하는 �
 | **시장/포지션 정보** | | | |
 | `current_price` | `float` | `0.0` | 평가에 쓰는 현재가. 시장가 매수는 주입된 시세 조회의 값이다(게이트웨이 캐시·실시간 틱의 값이라 최대 5초 낡을 수 있다, [07 #3097](07-rule-engine-core.md)). 그 밖의 주문은 주문 가격이다(지정가·`stop_limit`은 지정가). 가격이 없는 주문(시장가 매도, `stop` 등록)은 `0.0`이다. 주문 정정 평가에서는 정정 가격이다 |
 | `current_position` | `float` | `0.0` | 주문 종목의 봇 보유 수량. 미실현 손익 계산과 같은 `TradeService.get_positions` 결과에서 채운다. TradeService가 주입되지 않았거나 조회가 실패하면 `0.0`(실패 시 매수는 [07 #3047](07-rule-engine-core.md)에 따라 거부). 주문 정정 평가에서는 채우지 않는다 |
+| `unrealized_pnl` | `float` | `0.0` | 봇의 미실현 손익. UnrealizedLossLimitRule의 분자. 켜진 UnrealizedLossLimitRule이 있는 계층(계좌 룰 또는 그 전략의 룰)의 매수이고 봇 할당 예산이 0보다 크면, 봇의 모든 보유 종목을 Treasury의 동기화 시세로 평가한 `Σ 보유 수량 × (시세 − 평단)`이다(시장가 매수의 주문 종목만 `current_price`, [07 #3102](07-rule-engine-core.md)). 그 밖의 주문은 주문 종목의 보유만 `current_price`로 평가하고 다른 종목은 0이다. 주문 정정 평가에서는 정정 가격으로 주문 종목만 평가한다 |
 | `available_balance` | `float` | `0.0` | 가용 잔고 |
 | `bot_allocated_budget` | `float` | `0.0` | 봇 할당 예산 (Treasury에서 주입). PositionSizeRule, UnrealizedLossLimitRule의 분모 |
 | **계좌 정보** | | | |

@@ -1,9 +1,12 @@
-"""가격 값의 공용 판정 — 의존 없는 순수 술어."""
+"""가격 값의 공용 판정과 동기화 시세 상태 어휘 — 의존 없는 순수 정의."""
 
 from __future__ import annotations
 
 import math
 from typing import TypeGuard
+
+SYNCED_PRICE_MISSING = "no synced price"
+SYNCED_PRICE_STALE = "synced price stale"
 
 
 def is_valid_price(value: object) -> TypeGuard[int | float]:
