@@ -60,8 +60,69 @@ def _assert_no_key(text: str, where: str) -> None:
 # ── 127.0.0.1 테스트 서버 (별도 스레드) ─────────────────────────
 
 
+_ECHO_CODES: dict[str, tuple[str, str]] = {
+    "limit": ("020", "22"),
+    "auth": ("010", "30"),
+    "skip": ("100", "10"),
+    "retry": ("800", "01"),
+    "retryonce": ("900", "99"),
+    "nodata": ("013", "013"),
+}
+_PLAIN_MSG = "SERVICE KEY IS NOT REGISTERED. check serviceKey crtfc_key (x)"
+_RECEIVED_KEYS: list[str] = []
+
+
+def _query_key(request: web.Request) -> str:
+    return request.query.get("crtfc_key") or request.query.get("serviceKey") or ""
+
+
+def _echo_payload(status: str, code: str, msg: str, total: Any = 0) -> Any:
+    return {
+        "status": status,
+        "message": msg,
+        "list": [],
+        "response": {
+            "header": {"resultCode": code, "resultMsg": msg},
+            "body": {"totalCount": total, "items": {}},
+        },
+    }
+
+
+def _echo_response(behavior: str, request: web.Request) -> web.StreamResponse | None:
+    url = str(request.url)
+    key = _query_key(request)
+    kind, _, arg = behavior.partition("-")
+    if kind == "echo":
+        dart_code, dg_code = _ECHO_CODES.get(arg, (url, url))
+        return web.json_response(_echo_payload(dart_code, dg_code, url))
+    if kind == "plain":
+        if arg == "total":
+            return web.json_response(_echo_payload("000", "00", "NORMAL", "abc"))
+        dart_code, dg_code = _ECHO_CODES[arg]
+        return web.json_response(_echo_payload(dart_code, dg_code, _PLAIN_MSG))
+    if kind == "ok":
+        return web.json_response(_echo_payload("000", "00", "NORMAL"))
+    if kind == "totalcount":
+        payload = _echo_payload(url, "00", url, url)
+        payload["response"]["body"]["items"] = {"item": url}
+        return web.json_response(payload)
+    if kind == "html":
+        return web.Response(text=f"<html>{url} {key}</html>", content_type="text/html")
+    if kind == "pad":
+        cut = key.index("FAKE") + 5
+        assert cut < len(key)
+        return web.Response(
+            text="x" * (200 - cut) + key + " " + url, content_type="text/html"
+        )
+    return None
+
+
 async def _handle(request: web.Request) -> web.StreamResponse:
     behavior = request.match_info["behavior"]
+    _RECEIVED_KEYS.append(_query_key(request))
+    echoed = _echo_response(behavior, request)
+    if echoed is not None:
+        return echoed
     if behavior in ("500", "503"):
         return web.json_response(
             {"status": "800", "message": "server error"}, status=int(behavior)
@@ -497,3 +558,211 @@ def test_cli_run_daily_has_no_key(
     _assert_no_key(result.stderr, "stderr")
     _assert_no_key(caplog.text, "로그")
     _assert_files_have_no_key(data_dir)
+
+
+# ── 서버가 응답에 요청 주소를 되돌려 주는 경우 (#3141) ─────────────────
+
+_ECHO_BEHAVIORS = (
+    "echo-limit",
+    "echo-auth",
+    "echo-skip",
+    "echo-retry",
+    "echo-retryonce",
+    "echo-nodata",
+    "echo-unknown",
+    "html",
+    "pad",
+    "totalcount",
+)
+_NON_JSON = ("html", "pad")
+_JSON_DECODING_ENTRIES = ("dart.fetch_financial", "dg.fetch_by_date")
+
+
+def _nothing_to_hide(behavior: str, entry: str) -> bool:
+    """서버 값이 어떤 문구에도 실리지 않는 칸."""
+    if entry.endswith("validate_credentials"):
+        return behavior != "echo-auth"
+    if behavior in _NON_JSON:
+        return entry in _JSON_DECODING_ENTRIES
+    return (behavior, entry) == ("echo-nodata", "dart.fetch_financial")
+
+
+_ECHO_CELLS = [
+    (b, e)
+    for b in _ECHO_BEHAVIORS
+    for e in _ENTRIES
+    if not (b in _NON_JSON and e.endswith("validate_credentials"))
+]
+
+
+@pytest.mark.parametrize("key", _KEYS)
+@pytest.mark.parametrize(("behavior", "entry"), _ECHO_CELLS)
+async def test_server_echo_never_leaks_key(
+    behavior: str,
+    entry: str,
+    key: str,
+    server: _ServerThread,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    _RECEIVED_KEYS.clear()
+    result: Any = None
+    raised: BaseException | None = None
+    try:
+        result = await _run_entry(entry, key, server.url(behavior), None)
+    except Exception as exc:
+        raised = exc
+
+    assert key in _RECEIVED_KEYS, (
+        f"서버가 키를 받지 못했다(빈 통과): {_RECEIVED_KEYS!r}"
+    )
+    _assert_no_key(caplog.text, "로그")
+    _assert_no_key(str(result), "반환값")
+    _assert_no_key(str(raised), "예외")
+    if _nothing_to_hide(behavior, entry):
+        return
+    shown = f"{caplog.text}\n{result}\n{raised}"
+    assert "***" in shown, f"가린 흔적이 없다(빈 통과): {shown!r}"
+
+
+def test_echo_matrix_size() -> None:
+    assert len(_ECHO_CELLS) == 46
+    assert len(_ECHO_CELLS) * len(_KEYS) == 138
+    assert sum(_nothing_to_hide(b, e) for b, e in _ECHO_CELLS) == 19
+
+
+async def test_total_count_error_keeps_type_and_prefix(server: _ServerThread) -> None:
+    dg = DataGoKrSource(
+        api_key=_KEY_SYMBOLS, max_retries=2, base_url=server.url("totalcount")
+    )
+    with pytest.raises(ValueError) as info:
+        await dg.fetch_by_date("2026-11-27")
+    assert type(info.value) is ValueError
+    text = str(info.value)
+    assert text.startswith("invalid literal for int() with base 10: 'http://")
+    assert "serviceKey=***" in text
+    assert info.value.__cause__ is None
+    assert info.value.__suppress_context__
+    _assert_no_key(text, "예외")
+
+
+_PLAIN_EXPECTED = (
+    ("plain-limit", "dart.fetch_financial", f"DART 일일 한도 초과: {_PLAIN_MSG}"),
+    ("plain-limit", "dart.fetch_corp_codes", f"DART 일일 한도 초과: {_PLAIN_MSG}"),
+    (
+        "plain-auth",
+        "dart.validate_credentials",
+        f"(False, '인증 실패 (status=010): {_PLAIN_MSG}')",
+    ),
+    ("plain-limit", "dg.fetch_by_date", f"일일 한도 초과: {_PLAIN_MSG}"),
+    (
+        "plain-auth",
+        "dg.validate_credentials",
+        f"(False, '인증 실패 (code=30): {_PLAIN_MSG}')",
+    ),
+    (
+        "plain-total",
+        "dg.fetch_by_date",
+        "invalid literal for int() with base 10: 'abc'",
+    ),
+)
+
+
+@pytest.mark.parametrize(("behavior", "entry", "expected"), _PLAIN_EXPECTED)
+async def test_message_without_key_is_unchanged_at_sites(
+    behavior: str, entry: str, expected: str, server: _ServerThread
+) -> None:
+    try:
+        shown = str(await _run_entry(entry, _KEY_ALNUM, server.url(behavior), None))
+    except Exception as exc:
+        shown = str(exc)
+    assert shown == expected
+
+
+@pytest.mark.parametrize(
+    ("behavior", "entry", "expected"),
+    [
+        ("ok", "dart.fetch_financial", "[]"),
+        ("ok", "dg.fetch_by_date", "[]"),
+        ("echo-auth", "dart.validate_credentials", "False"),
+        ("echo-auth", "dg.validate_credentials", "False"),
+    ],
+)
+async def test_short_key_classifies_on_original_code(
+    behavior: str, entry: str, expected: str, server: _ServerThread
+) -> None:
+    result = await _run_entry(entry, "0", server.url(behavior), None)
+    shown = str(result[0]) if isinstance(result, tuple) else str(result)
+    assert shown == expected
+
+
+def _use_behavior(
+    monkeypatch: pytest.MonkeyPatch, server: _ServerThread, behavior: str
+) -> None:
+    for cls in (DARTSource, DataGoKrSource):
+        monkeypatch.setitem(
+            cls.__init__.__kwdefaults__, "base_url", server.url(behavior)
+        )
+
+
+@pytest.mark.parametrize("behavior", ["echo-limit", "totalcount"])
+@pytest.mark.parametrize("fmt_args", [[], ["--format", "json"]])
+def test_cli_run_daily_echo_has_no_key(
+    behavior: str,
+    fmt_args: list[str],
+    cli_env: tuple[CliRunner, Path],
+    server: _ServerThread,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ante.cli.main import cli
+
+    caplog.set_level(logging.DEBUG)
+    runner, data_dir = cli_env
+    _use_behavior(monkeypatch, server, behavior)
+    _RECEIVED_KEYS.clear()
+    result = runner.invoke(
+        cli,
+        [*fmt_args, "feed", "run", "daily", "--data-path", str(data_dir)],
+    )
+    assert result.exit_code == 0, result.output
+    assert _KEY_SYMBOLS in _RECEIVED_KEYS
+    assert _KEY_ALNUM in _RECEIVED_KEYS
+    _assert_no_key(result.stdout, "stdout")
+    _assert_no_key(result.stderr, "stderr")
+    _assert_no_key(caplog.text, "로그")
+    _assert_files_have_no_key(data_dir)
+    reports = [p for p in (data_dir / ".feed" / "reports").rglob("*") if p.is_file()]
+    assert reports, "리포트 파일이 없다(빈 통과)"
+    saved = "".join(p.read_text(encoding="utf-8") for p in reports)
+    assert "***" in saved
+    if behavior == "totalcount":
+        assert "invalid literal for int() with base 10:" in saved
+
+
+@pytest.mark.parametrize("fmt_args", [[], ["--format", "json"]])
+def test_cli_config_check_echo_auth_has_no_key(
+    fmt_args: list[str],
+    cli_env: tuple[CliRunner, Path],
+    server: _ServerThread,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ante.cli.main import cli
+
+    caplog.set_level(logging.DEBUG)
+    runner, data_dir = cli_env
+    _use_behavior(monkeypatch, server, "echo-auth")
+    result = runner.invoke(
+        cli,
+        [*fmt_args, "feed", "config", "check", "--data-path", str(data_dir)],
+    )
+    assert "인증 실패" in result.stdout
+    if fmt_args:
+        keys = {k["key"]: k for k in json.loads(result.stdout)["keys"]}
+        for name in ("ANTE_DART_API_KEY", "ANTE_DATAGOKR_API_KEY"):
+            assert keys[name]["valid"] is False
+            assert "***" in keys[name]["detail"]
+    _assert_no_key(result.stdout, "stdout")
+    _assert_no_key(result.stderr, "stderr")
+    _assert_no_key(caplog.text, "로그")

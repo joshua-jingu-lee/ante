@@ -11,7 +11,11 @@ from typing import Any, cast
 
 import aiohttp
 
-from ante.feed.sources.base import RateLimiter, describe_source_error
+from ante.feed.sources.base import (
+    RateLimiter,
+    describe_source_error,
+    redact_source_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +226,8 @@ class DataGoKrSource:
 
         result_code, result_msg = self._extract_result_code(data)
         action = classify_error(result_code)
+        result_code = redact_source_text(result_code, self._api_key)
+        result_msg = redact_source_text(result_msg, self._api_key)
 
         if action == ErrorAction.CRITICAL:
             return False, f"인증 실패 (code={result_code}): {result_msg}"
@@ -275,9 +281,11 @@ class DataGoKrSource:
 
             result_code, result_msg = self._response_code(data, decode_error)
             action = classify_error(result_code)
+            result_code = redact_source_text(result_code, self._api_key)
+            result_msg = redact_source_text(result_msg, self._api_key)
 
             if action == ErrorAction.OK:
-                return self._extract_items(data)
+                return self._extract_page(data)
 
             if action == ErrorAction.DAILY_LIMIT:
                 msg = f"일일 한도 초과: {result_msg}"
@@ -354,6 +362,13 @@ class DataGoKrSource:
         result_code = str(header.get("resultCode", "99"))
         result_msg = str(header.get("resultMsg", "UNKNOWN"))
         return result_code, result_msg
+
+    def _extract_page(self, data: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+        """``_extract_items`` 의 변환 실패 문구에서 API 키를 가린다."""
+        try:
+            return self._extract_items(data)
+        except ValueError as exc:
+            raise ValueError(redact_source_text(str(exc), self._api_key)) from None
 
     @staticmethod
     def _extract_items(data: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:

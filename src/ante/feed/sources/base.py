@@ -22,21 +22,28 @@ _KST = timezone(timedelta(hours=9))
 _KEY_PARAM_PATTERN = re.compile(r"(?i)(crtfc_key|servicekey)(=|%3D)[^&'\"\s]*")
 
 
-def describe_source_error(exc: BaseException, api_key: str) -> str:
-    """예외를 종류 이름과 API 키를 가린 메시지로 바꾼다.
+def redact_source_text(text: str, api_key: str) -> str:
+    """문자열에서 API 키와 키를 싣는 쿼리 파라미터의 값을 가린다.
 
     키 값(원문과 URL 인코딩 꼴)을 직접 바꾸고, 키를 싣는 쿼리 파라미터
     (``crtfc_key``·``serviceKey``)의 값도 가린다. 키가 빈 문자열이면 직접
-    치환은 건너뛴다. 상태 코드·주소의 경로·나머지 쿼리는 남는다. 메시지가
-    비면 종류 이름만 돌려준다.
+    치환은 건너뛴다. 키가 없는 문자열은 그대로 돌려준다.
     """
-    message = str(exc)
     if api_key:
         forms = {api_key, quote(api_key, safe=""), quote(api_key, safe="/")}
         forms.add(quote(api_key, safe="/?:@"))
         for form in sorted(forms, key=len, reverse=True):
-            message = message.replace(form, "***")
-    message = _KEY_PARAM_PATTERN.sub(r"\1\2***", message)
+            text = text.replace(form, "***")
+    return _KEY_PARAM_PATTERN.sub(r"\1\2***", text)
+
+
+def describe_source_error(exc: BaseException, api_key: str) -> str:
+    """예외를 종류 이름과 API 키를 가린 메시지로 바꾼다.
+
+    가림은 ``redact_source_text`` 를 따른다. 상태 코드·주소의 경로·나머지
+    쿼리는 남는다. 메시지가 비면 종류 이름만 돌려준다.
+    """
+    message = redact_source_text(str(exc), api_key)
     name = type(exc).__name__
     return f"{name}: {message}" if message else name
 
