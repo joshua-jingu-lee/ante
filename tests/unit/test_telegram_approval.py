@@ -6,6 +6,7 @@ NotificationService의 ApprovalEvent 구독을 검증한다.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -380,6 +381,37 @@ class TestCallbackQuery:
         receiver._reply.assert_awaited_once()
         assert receiver._reply.call_args.args[0] == 100
         assert "✅ 결재 승인 완료" in receiver._reply.call_args.args[1]
+
+    async def test_result_reply_failure_does_not_stop_worker(
+        self, receiver, approval_service
+    ):
+        """결과 회신이 예외를 내도 작업자는 살아 다음 작업을 처리하고 줄이 빈다."""
+        replies: list[tuple[int, str]] = []
+
+        async def _reply(chat_id, text):
+            replies.append((chat_id, text))
+            if chat_id == 100:
+                raise RuntimeError("reply failed")
+
+        receiver._reply = _reply
+        for update_id, chat_id in ((1, 100), (2, 200)):
+            await receiver._handle_update(
+                {
+                    "update_id": update_id,
+                    "callback_query": {
+                        "id": f"cb{update_id}",
+                        "from": {"id": 12345},
+                        "message": {"chat": {"id": chat_id}},
+                        "data": f"approve:id{update_id}",
+                    },
+                }
+            )
+        await asyncio.wait_for(receiver._jobs.join(), timeout=5)
+
+        assert approval_service.approve.await_count == 2
+        assert [cid for cid, _ in replies] == [100, 200]
+        assert receiver._worker is not None
+        assert not receiver._worker.done()
 
 
 # ── /approve, /reject 텍스트 명령 스펙아웃 회귀 (#2379) ──
