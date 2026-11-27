@@ -21,6 +21,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _stored_form(value: datetime) -> str:
+    """aware 경계는 저장값처럼 UTC isoformat으로, naive는 그대로 isoformat."""
+    if value.tzinfo is None:
+        return value.isoformat()
+    return value.astimezone(UTC).isoformat()
+
+
 TRADE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS trades (
     trade_id       TEXT PRIMARY KEY,
@@ -374,10 +382,10 @@ class TradeRecorder:
             params.append(status.value)
         if from_date:
             conditions.append("timestamp >= ?")
-            params.append(from_date.isoformat())
+            params.append(_stored_form(from_date))
         if to_date:
             conditions.append("timestamp <= ?")
-            params.append(to_date.isoformat())
+            params.append(_stored_form(to_date))
 
         where = " AND ".join(conditions)
         query = f"""SELECT * FROM trades

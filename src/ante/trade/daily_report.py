@@ -207,12 +207,12 @@ class DailyReportScheduler:
             )
             return False
 
-        summaries = await self._performance.get_daily_summary(
-            start_date=today_str,
-            end_date=today_str,
+        day_start = datetime.combine(today, time.min, tzinfo=KST)
+        realized_pnl = await self._performance.get_realized_pnl(
             account_id=self._account_id,
+            start=day_start,
+            end=day_start + timedelta(days=1),
         )
-        realized_pnl = summaries[0].realized_pnl if summaries else 0.0
 
         all_positions = await self._positions.get_all_positions(
             account_id=self._account_id

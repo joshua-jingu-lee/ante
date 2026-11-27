@@ -25,6 +25,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _stored_form(value: datetime) -> str:
+    """aware 경계는 저장값처럼 UTC isoformat으로, naive는 그대로 isoformat."""
+    if value.tzinfo is None:
+        return value.isoformat()
+    return value.astimezone(UTC).isoformat()
+
+
 _COND_STATUS_FILLED = "t.status = ?"
 _COND_SIDE_SELL = "t.side = 'sell'"
 _COND_BOT_ID = "t.bot_id = ?"
@@ -437,10 +445,10 @@ class PerformanceTracker:
             params.append(strategy_id)
         if from_date:
             conditions.append("timestamp >= ?")
-            params.append(from_date.isoformat())
+            params.append(_stored_form(from_date))
         if to_date:
             conditions.append("timestamp <= ?")
-            params.append(to_date.isoformat())
+            params.append(_stored_form(to_date))
 
         where = " AND ".join(conditions)
         query = f"SELECT * FROM trades WHERE {where} ORDER BY timestamp ASC"
