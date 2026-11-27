@@ -161,3 +161,30 @@ OrderRequestEvent preflight 도메인 검증(`side`/`order_type`/`symbol`/`price
 - **시간 제한**: 한 번의 조회를 기다리는 시간은 조회가 시작된 때부터 10초다. 넘으면 그 주문은 `timeout`으로 거부되지만 조회는 취소하지 않는다(취소가 증권사 토큰 발급 요청 도중에 걸리면 재발급 대기로 같은 앱 키의 매도까지 막힐 수 있다). 조회는 뒤에서 끝나 게이트웨이 캐시를 채운다.
 - **같은 종목의 진행 중 조회**: 엔진은 종목마다 진행 중인 조회를 하나만 두고, 그동안 같은 종목의 주문은 그 조회에 합류해 남은 시간만 기다린다. 끝난 조회의 결과는 재사용하지 않는다(다음 주문은 새로 조회하고, 보통 캐시에 적중한다). 아무도 기다리지 않는 조회가 예외로 끝나면 warning 로그를 남긴다.
 - **종료**: `RuleEngineManager.aclose()`가 모든 엔진의 `aclose()`를 부른다. 엔진은 닫힘 상태가 된 뒤 진행 중인 조회를 취소하고 끝나기를 기다린다. 그 뒤의 시장가 매수는 조회 없이 거부된다. 서버 종료 경로는 실시간 스트림을 멈춘 뒤, 브로커 연결을 끊기 전에 이를 부른다.
+
+### 보유 종목 시세 (#3102)
+
+> 소스: `RuleEngine._on_order_request` (`src/ante/rule/engine.py`), `Treasury.get_synced_price`·`Treasury.get_last_sync_coverage` (`src/ante/treasury/treasury.py`)
+
+매수의 평가 입력 `unrealized_pnl`([05](05-rule-context.md))은 다음이 모두 맞을 때 봇의 모든 보유 종목을 Treasury의 동기화 시세로 평가한다. 하나라도 아니면 주문 종목의 보유만 `current_price`로 평가하고, 이 판정은 Treasury를 읽지 않는다.
+
+- `side == "buy"`이고, #3047의 실패와 시세 조회(#3097)의 실패가 없다.
+- 봇 할당 예산이 0보다 크다.
+- 계좌 룰 또는 그 전략의 룰에 켜진 `UnrealizedLossLimitRule`이 있다.
+
+주문 평가 경로는 이 판정을 위해 증권사·게이트웨이를 부르지 않는다. 시장가 매수의 주문 종목만 #3097이 방금 조회한 시세를 쓰고, 그 밖의 종목(지정가 매수의 주문 종목 포함)은 `get_synced_price`의 값을 쓴다. 보유 종목은 종목 코드의 정렬 순서로 판정한다.
+
+| `get_synced_price` | 조건 | 귀결 |
+|---|---|---|
+| 값 | — | 그 값으로 계산 |
+| `SYNCED_PRICE_STALE` | — | 매수 거부 |
+| `SYNCED_PRICE_MISSING` | 그 종목이 방금 바뀜(아래) | 평단(그 종목의 미실현 0) |
+| `SYNCED_PRICE_MISSING` | 그 밖 | 매수 거부 |
+
+- **방금 바뀜**: `get_last_sync_coverage()`가 `(진입 시각, 다룬 종목)`을 내주고, 그 종목이 다룬 종목에 없고, 포지션의 `updated_at`이 진입 시각보다 뒤(`>`)이고 지금(`clock.now(UTC)`)보다 뒤가 아닐 때만 참이다.
+- **시계**: `updated_at`은 SQLite `datetime('now')`가 찍은 UTC 문자열이다. `datetime.fromisoformat`으로 읽고 시간대가 없으면 UTC로 본다. 빈 값·읽지 못하는 값·미래의 값이면 방금 바뀐 것이 아니다. 초 단위로 내려가므로 진입과 같은 초에 바뀐 포지션은 거부 쪽으로 틀린다.
+- **실패**: 하나라도 거부 칸이면 룰 평가 없이 `holding_quote_unavailable: <종목>: <상세>`로 거부한다. 종목은 정렬 순서에서 첫 실패이고, 상세는 `SYNCED_PRICE_STALE` 또는 `SYNCED_PRICE_MISSING`의 값이다. 값이 유한한 양수가 아니면 그 종목은 `SYNCED_PRICE_MISSING`이다. 알림은 내지 않는다. Treasury의 두 조회가 예외를 내면 그 매수는 preflight 오류의 거부(`OrderRequest preflight error (see logs)`)가 된다.
+- **판정 순서**: 최근 체결 주문 수(#3099) 뒤에 판정한다. #3047의 거부가 이기고, 그다음 `market_buy_quote_unavailable`, 그다음 이 거부다.
+- **사유**: `account_not_ready:` 토큰이 아니고 `market_buy_quote_unavailable`과도 다르다. 거부되면 `OrderValidatedEvent`가 나가지 않으므로 사유는 전략에 한 번만 보인다.
+- **평단으로 치는 창**: 마지막으로 성공한 동기화가 내부 포지션을 읽은 뒤에 처음 생긴 포지션은 다음 성공한 동기화가 그 종목을 다룰 때까지 평단이다. 동기화가 실패하면 직전 성공의 진입에서 `2 × 동기화 주기`까지다.
+- **재시작 직후**: 성공한 동기화가 없으므로, 첫 동기화가 성공할 때까지 이 판정을 타는 매수는 동기화 시세가 필요한 보유 종목(시장가 매수의 주문 종목을 뺀 보유)이 하나라도 있으면 거부된다.

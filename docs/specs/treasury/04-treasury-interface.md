@@ -36,6 +36,7 @@
 | `sync_balance` | balance_data: dict[str, float] | `None` | 브로커 잔고 데이터로 Treasury 상태 동기화 |
 | `start_sync` | broker: BrokerAdapter \| None, position_history: PositionHistory, interval_seconds=300, trading_mode="live", price_resolver=None | `None` | 자산 평가 주기적 동기화 시작. Live는 브로커 기반, Virtual은 Trade DB 기반. 받은 `interval_seconds`를 동기화 시세의 낡음 판정에 쓰도록 보관한다 |
 | `get_synced_price` | symbol: str | tuple[float \| None, str \| None] | 잔고 동기화가 받은 그 종목의 현재가를 동기 조회(인메모리). 신선하면 `(현재가, None)`, 아니면 `(None, 상세)`다. 상세는 `SYNCED_PRICE_MISSING`(`"no synced price"`) 또는 `SYNCED_PRICE_STALE`(`"synced price stale"`)이다 (#3103) |
+| `get_last_sync_coverage` | — | tuple[datetime, frozenset[str]] \| None | 이 프로세스에서 마지막으로 성공한 잔고 동기화의 진입 벽시계 시각(`clock.now(UTC)`)과 그 동기화가 다룬 종목을 동기 조회(인메모리). 성공한 동기화가 없거나, 그 진입에서 `2 × interval_seconds`가 지났거나, 보관한 주기가 불량이면 `None`이다 (#3102) |
 | `stop_sync` | — | `None` | 잔고 동기화 중지 |
 | `update_commission_rates` | buy_commission_rate: float, sell_commission_rate: float | `None` | 수수료율 재주입. 1.0 런타임 DynamicConfig 경로가 아니며, Account cold-path 재초기화/테스트 보조 경로에서만 사용 |
 | `release_budget` | bot_id: str | float | 봇 예산 전액 환수. 반환값은 환수된 금액 |
@@ -153,6 +154,13 @@ external_*      = 0
 - 낡음: 받은 뒤 `2 × interval_seconds`를 넘은 값은 `SYNCED_PRICE_STALE`이다. 동기화 루프는 동기화가 끝난 뒤에 자므로, 성공이 이어져도 간격은 주기보다 길다.
 - `start_sync`가 불린 적이 없거나 보관한 주기가 위 값의 검사를 지나지 못하면 늘 `SYNCED_PRICE_MISSING`이다.
 - 평가액·요약·`BalanceSyncedEvent`의 계산은 이 표와 무관하다.
+
+**성공한 동기화의 범위 (#3102)**: 동기화는 진입할 때 단조 시각(`clock.monotonic()`)과 벽시계 시각(`clock.now(UTC)`)을 잡고, 위 정리 바로 뒤에 그 둘과 다룬 종목의 집합을 메모리에 보관한다. `get_last_sync_coverage`가 이것을 내주고, 규칙 엔진이 방금 바뀐 보유 종목을 가르는 데 쓴다([rule-engine/07](../rule-engine/07-rule-engine-core.md) 「보유 종목 시세 (#3102)」).
+
+- 다룬 종목: Live는 `get_positions()` 응답의 전 종목과 그 동기화가 읽은 계좌 내부 포지션의 종목의 합집합, Virtual은 내부 포지션의 종목이다. 내부에는 있고 응답에는 없는 종목도 다룬 종목이다.
+- 낡음: 진입 단조 시각에서 `2 × interval_seconds`가 지나면 `None`이다. 벽시계 시각은 포지션의 `updated_at`과 비교하는 데만 쓴다.
+- 정리 전에 실패한 동기화는 시세를 기록했어도 범위를 바꾸지 않는다. 옛 범위가 낡음으로 닫히므로 막는 쪽으로 틀린다. 동기화의 소요 시간이 주기에 가까워지면 범위가 갱신되기 전에 낡아 같은 쪽으로 틀린다.
+- `start_sync`(루프를 새로 띄울 때)와 `stop_sync`는 범위를 지운다. 범위는 DB에 저장하지 않으며, 복원되는 `last_synced_at`과 무관하다.
 
 알려진 한계는 [09-virtual-asset-sync.md](09-virtual-asset-sync.md#동기화-시세의-알려진-한계-3103)에 둔다.
 

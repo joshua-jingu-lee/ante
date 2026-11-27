@@ -59,3 +59,7 @@
 매도 시장가는 보유 포지션 기반이므로 reserve 대상이 아니며 본 약속과 무관하다.
 
 상세 invariant 는 [`treasury/04-treasury-interface.md`](../treasury/04-treasury-interface.md) 의 "시장가 매수 quote resolver invariant" 섹션을 참조한다.
+
+### 보유 종목 시세가 없을 때의 매수 거부 (#3102)
+
+봇의 미실현 손실 한도(`UnrealizedLossLimitRule`)가 켜져 있고 봇 할당 예산이 0보다 크면, 매수(지정가·시장가 공통)는 봇의 모든 보유 종목을 잔고 동기화의 시세로 평가한다. 그 시세가 없거나 낡은 보유 종목이 있으면(마지막으로 성공한 동기화 뒤에 바뀐 포지션은 빼고) 룰 평가 없이 `OrderRejectedEvent(reason="holding_quote_unavailable: <종목>: <상세>")`가 한 번 발행되고 알림은 없다. `market_buy_quote_unavailable`과는 다른 사유라, 시장가가 그 사유로 거부된 뒤 지정가로 다시 낸 주문이 받는 거부는 이 사유일 수 있다. 판정은 [`rule-engine/07-rule-engine-core.md`](../rule-engine/07-rule-engine-core.md) 「보유 종목 시세 (#3102)」가 SSOT다.
