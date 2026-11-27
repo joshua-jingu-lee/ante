@@ -7,7 +7,7 @@ NotificationService는 NotificationEvent 단일 구독으로 동작한다.
 
 import asyncio
 import inspect
-from datetime import time
+from datetime import datetime, time
 
 import pytest
 
@@ -16,6 +16,12 @@ from ante.eventbus.events import NotificationEvent
 from ante.notification.base import NotificationAdapter, NotificationLevel
 from ante.notification.service import NotificationService
 from ante.notification.telegram import LEVEL_EMOJI, TelegramAdapter
+
+
+def _local(hour: int, minute: int) -> datetime:
+    """실행 머신의 로컬 시간대로 그 시각을 aware 값으로 만든다."""
+    return datetime(2026, 1, 2, hour, minute).astimezone()
+
 
 # ── NotificationLevel ────────────────────────────────
 
@@ -296,7 +302,8 @@ class TestNotificationService:
         )
         assert len(adapter.sent_rich) == 1
 
-    async def test_quiet_hours_blocks(self, adapter, eventbus):
+    @pytest.mark.parametrize("manual_clock", [_local(12, 0)], indirect=True)
+    async def test_quiet_hours_blocks(self, adapter, eventbus, manual_clock):
         """quiet_hours 동안 비긴급 알림 차단."""
         svc = NotificationService(
             adapter=adapter,
@@ -314,7 +321,8 @@ class TestNotificationService:
         )
         assert len(adapter.sent_rich) == 0
 
-    async def test_quiet_hours_allows_critical(self, adapter, eventbus):
+    @pytest.mark.parametrize("manual_clock", [_local(12, 0)], indirect=True)
+    async def test_quiet_hours_allows_critical(self, adapter, eventbus, manual_clock):
         """quiet_hours 중에도 CRITICAL은 발송."""
         svc = NotificationService(
             adapter=adapter,
@@ -331,6 +339,39 @@ class TestNotificationService:
             )
         )
         assert len(adapter.sent_rich) == 1
+
+    @pytest.mark.parametrize(
+        ("manual_clock", "quiet_start", "quiet_end", "expected_sent"),
+        [
+            (_local(12, 0), time(0, 0), time(23, 59), 0),
+            (_local(20, 0), time(9, 0), time(18, 0), 1),
+            (_local(23, 30), time(22, 0), time(7, 0), 0),
+            (_local(3, 0), time(22, 0), time(7, 0), 0),
+            (_local(12, 0), time(22, 0), time(7, 0), 1),
+        ],
+        indirect=["manual_clock"],
+        ids=[
+            "day-window-inside",
+            "day-window-outside",
+            "overnight-before-midnight",
+            "overnight-after-midnight",
+            "overnight-outside",
+        ],
+    )
+    async def test_quiet_hours_window(
+        self, adapter, eventbus, manual_clock, quiet_start, quiet_end, expected_sent
+    ):
+        """무음 창 안의 INFO는 막히고 창 밖은 나간다(자정을 넘는 창 포함)."""
+        svc = NotificationService(
+            adapter=adapter,
+            eventbus=eventbus,
+            quiet_start=quiet_start,
+            quiet_end=quiet_end,
+        )
+        svc.subscribe()
+
+        await eventbus.publish(NotificationEvent(level="info", title="무음 판정"))
+        assert len(adapter.sent_rich) == expected_sent
 
     async def test_subscribe_registers_events(self, adapter, eventbus):
         """subscribe()는 NotificationEvent + ConfigChangedEvent를 구독한다."""
