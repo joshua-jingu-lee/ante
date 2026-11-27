@@ -561,9 +561,8 @@ class TestPingPong:
         monkeypatch,
         eventbus: MagicMock,
     ) -> None:
-        first = FakeSocket(
-            [PINGPONG], block_at_end=False, pong_error=ConnectionError("closed")
-        )
+        # 첫 소켓은 대본 뒤에도 닫히지 않는다: 재접속은 pong 예외로만 생긴다
+        first = FakeSocket([PINGPONG], pong_error=ConnectionError("closed"))
         second = FakeSocket([])
         ws = FakeWebsockets([first, second], loop_log)
         ws.install(monkeypatch)
