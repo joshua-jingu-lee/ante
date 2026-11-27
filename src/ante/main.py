@@ -145,6 +145,8 @@ class Services:
     report_store: Any = None
     approval_service: Any = None
     notification_service: Any = None
+    notification_chat_id: str = ""
+    notification_telegram_enabled: bool = False
     telegram_receiver: Any = None
     ipc_server: Any = None
     approval_expire_task: asyncio.Task | None = None  # type: ignore[type-arg]
@@ -1660,8 +1662,8 @@ async def _stop_session_expiry_loop(
             logger.exception("스탑 주문 세션 만료 스케줄러 오류")
 
 
-async def _init_notification(s: Services) -> None:
-    """NotificationService·TelegramCommandReceiver 초기화(시크릿 누락·공란이면 skip)."""
+async def _init_notification_service(s: Services) -> None:
+    """NotificationService를 만들어 쌓기 모드로 구독한다(시크릿 누락·공란이면 skip)."""
     assert s.eventbus is not None
     assert s.dynamic_config is not None
 
@@ -1722,14 +1724,23 @@ async def _init_notification(s: Services) -> None:
         quiet_end=quiet_end,
         telegram_enabled=telegram_enabled_bool,
     )
-    s.notification_service.subscribe()
+    s.notification_service.subscribe(defer=True)
+    s.notification_chat_id = telegram_chat_id
+    s.notification_telegram_enabled = telegram_enabled_bool
     logger.info(
         "NotificationService 초기화 완료 (Telegram, enabled=%s)", telegram_enabled_bool
     )
 
+
+async def _init_telegram_receiver(s: Services) -> None:
+    """TelegramCommandReceiver를 알림 서비스와 같은 어댑터로 시작한다."""
+    if s.notification_service is None:
+        return
+
     from ante.notification import TelegramCommandReceiver
 
-    chat_id_str = telegram_chat_id
+    telegram_enabled_bool = s.notification_telegram_enabled
+    chat_id_str = s.notification_chat_id
     chat_id: int | None = None
     if chat_id_str:
         try:
@@ -1741,7 +1752,7 @@ async def _init_notification(s: Services) -> None:
             )
     if telegram_enabled_bool and chat_id is not None:
         s.telegram_receiver = TelegramCommandReceiver(
-            adapter=adapter,
+            adapter=s.notification_service.adapter,
             allowed_user_ids=[chat_id],
             polling_interval=3.0,
             confirm_timeout=30.0,
@@ -1902,6 +1913,9 @@ async def _shutdown(s: Services) -> None:
     if s.telegram_receiver:
         await s.telegram_receiver.stop()
         logger.info("TelegramCommandReceiver 종료")
+
+    if s.notification_service is not None:
+        await s.notification_service.stop()
 
     if s.audit_cleanup_task and not s.audit_cleanup_task.done():
         s.audit_cleanup_task.cancel()
@@ -2087,6 +2101,7 @@ async def main() -> None:
         if applied:
             logger.info("DB 마이그레이션 적용: %s", ", ".join(applied))
 
+        await _init_notification_service(s)
         await _init_services(s)
         await _init_account(s)
         await _init_trading(s)
@@ -2094,9 +2109,11 @@ async def main() -> None:
         await _restore_bots(s)
         await _init_feed(s)
         await _init_approval(s)
-        await _init_notification(s)
+        await _init_telegram_receiver(s)
         await _notify_rules_unavailable(s)
         await _init_ipc(s)
+        if s.notification_service is not None:
+            s.notification_service.release()
         _remove_starting_marker(s.config)
         await _run(s)
     finally:

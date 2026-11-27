@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections import deque
 from datetime import time
 from typing import TYPE_CHECKING, Any, cast
 
@@ -11,6 +13,7 @@ from ante.notification.base import NotificationAdapter, NotificationLevel
 
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
+    from ante.eventbus.events import NotificationEvent
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +62,52 @@ class NotificationService:
         self._dedup_window = dedup_window
         self._telegram_enabled = telegram_enabled
         self._dedup_cache: dict[str, tuple[float, int]] = {}
+        self._queue: deque[NotificationEvent] = deque()
+        self._deferring = False
+        self._drain_task: asyncio.Task[None] | None = None
 
-    def subscribe(self) -> None:
-        """이벤트 구독 등록 — NotificationEvent + ConfigChangedEvent."""
+    @property
+    def adapter(self) -> NotificationAdapter:
+        """알림을 보내는 어댑터."""
+        return self._adapter
+
+    def subscribe(self, *, defer: bool = False) -> None:
+        """이벤트 구독 등록. ``defer=True``이면 ``release`` 전까지 알림을 쌓는다."""
         from ante.eventbus.events import ConfigChangedEvent, NotificationEvent
 
+        self._deferring = defer
         self._eventbus.subscribe(NotificationEvent, self._on_notification, priority=0)
         self._eventbus.subscribe(ConfigChangedEvent, self._on_config_changed)
+
+    def release(self) -> None:
+        """쌓인 알림을 보내는 작업자를 시작하고 쌓기를 끝낸다."""
+        if self._drain_task is None or self._drain_task.done():
+            self._drain_task = asyncio.create_task(self._drain())
+        self._deferring = False
+
+    async def stop(self, timeout: float = 5.0) -> None:
+        """쌓인 알림 전송을 최대 ``timeout``초 기다린 뒤 작업자를 멈춘다."""
+        task = self._drain_task
+        if task is not None and not task.done():
+            done, _ = await asyncio.wait({task}, timeout=timeout)
+            if not done:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        if self._queue:
+            logger.warning(
+                "NotificationService 정지 — 보내지 못한 알림 %d건을 버림",
+                len(self._queue),
+            )
+            self._queue.clear()
+
+    async def _drain(self) -> None:
+        """큐의 맨 앞을 보낸 뒤에 꺼내기를 큐가 빌 때까지 반복한다."""
+        while self._queue:
+            try:
+                await self._dispatch(self._queue[0])
+            except Exception:
+                logger.exception("쌓인 알림 전송 실패 — 다음 알림으로 넘어감")
+            self._queue.popleft()
 
     async def _on_config_changed(self, event: object) -> None:
         """``notification.*`` 키 변경 시 설정을 갱신한다."""
@@ -224,12 +266,21 @@ class NotificationService:
             return False
 
     async def _on_notification(self, event: object) -> None:
-        """NotificationEvent 단일 핸들러."""
+        """NotificationEvent 단일 핸들러 — 큐에 붙이거나 바로 보낸다."""
         from ante.eventbus.events import NotificationEvent
 
         if not isinstance(event, NotificationEvent):
             return
 
+        if self._deferring or (
+            self._queue and event.level != NotificationLevel.CRITICAL
+        ):
+            self._queue.append(event)
+            return
+        await self._dispatch(event)
+
+    async def _dispatch(self, event: NotificationEvent) -> None:
+        """필터 → 중복 억제 → 전송."""
         level = NotificationLevel(event.level)
         if not self._should_send(level):
             return
