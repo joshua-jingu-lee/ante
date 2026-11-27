@@ -9,6 +9,8 @@ from ante.notification.base import NotificationAdapter, NotificationLevel
 
 logger = logging.getLogger(__name__)
 
+TELEGRAM_REQUEST_TIMEOUT = 5.0
+
 LEVEL_EMOJI = {
     NotificationLevel.CRITICAL: "\U0001f6a8",
     NotificationLevel.ERROR: "\u274c",
@@ -87,11 +89,13 @@ class TelegramAdapter(NotificationAdapter):
             payload["text"] = text
 
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=TELEGRAM_REQUEST_TIMEOUT)
+            ) as session:
                 async with session.post(url, json=payload) as resp:
                     return resp.status == 200
         except Exception as e:
-            logger.warning("answerCallbackQuery 오류: %s", e)
+            logger.warning("answerCallbackQuery 오류: %r", e)
             return False
 
     async def _send_message(
@@ -119,13 +123,18 @@ class TelegramAdapter(NotificationAdapter):
         if reply_markup:
             payload["reply_markup"] = reply_markup
 
+        title = text.split("\n", 1)[0][:80]
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=TELEGRAM_REQUEST_TIMEOUT)
+            ) as session:
                 async with session.post(url, json=payload) as resp:
                     if resp.status == 200:
                         return True
-                    logger.warning("텔레그램 발송 실패: status=%d", resp.status)
+                    logger.warning(
+                        "텔레그램 발송 실패: status=%d, 알림=%s", resp.status, title
+                    )
                     return False
         except Exception as e:
-            logger.error("텔레그램 발송 오류: %s", e)
+            logger.error("텔레그램 발송 오류: %r, 알림=%s", e, title)
             return False
