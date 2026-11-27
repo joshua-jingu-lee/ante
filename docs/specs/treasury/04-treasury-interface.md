@@ -138,9 +138,12 @@ external_*      = 0
 초기화 순서는 다음을 따른다.
 
 1. AccountService가 계좌를 로드한다.
-2. TreasuryManager가 계좌별 Treasury를 생성하고 초기화한다.
-3. Broker/Gateway/Trade 서비스가 준비된다.
-4. 각 계좌의 `trading_mode`에 따라 `start_sync`를 호출한다.
+2. Trade 모듈(주문 추적기 포함)이 준비된다.
+3. TreasuryManager가 주문 추적기를 주입받아 계좌별 Treasury를 생성하고 초기화한다.
+4. Broker/Gateway가 준비된다.
+5. 각 계좌의 `trading_mode`에 따라 `start_sync`를 호출한다. Virtual 계좌에는 Gateway 기반 `price_resolver`를 넘긴다.
+
+전체 기동 순서는 [core.md 「시스템 초기화 순서」](../core/core.md#시스템-초기화-순서)를 따른다.
 
 상세 배경은 [09-virtual-asset-sync.md](09-virtual-asset-sync.md)를 참조한다.
 

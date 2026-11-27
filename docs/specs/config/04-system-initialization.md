@@ -12,9 +12,10 @@
 5. EventBus + EventHistoryStore 초기화
 6. DynamicConfigService 초기화 (DB + EventBus 주입)
 7. DB migration 적용
-8. AccountService 초기화 (DB + EventBus 주입, `Account.status` 복원)
-9. 나머지 모듈 초기화 — 전체 순서는 architecture.md 참조
+8. 나머지 모듈 초기화 (NotificationService 구독부터)
 ```
+
+8단계의 순서는 [core.md 「시스템 초기화 순서」](../core/core.md#시스템-초기화-순서)를 따른다.
 
 모든 상대 경로는 CWD가 아니라 `config_dir` 기준으로 해석한다. 서버와 CLI가 같은
 `--config-dir` 또는 `ANTE_CONFIG_DIR`을 사용하면 같은 DB, data root, IPC socket을 공유한다.
