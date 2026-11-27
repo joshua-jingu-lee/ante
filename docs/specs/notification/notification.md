@@ -56,7 +56,7 @@ NotificationEvent(
 
 구현: `src/ante/notification/base.py`, `src/ante/notification/telegram.py`
 
-TelegramAdapter와 TelegramCommandReceiver가 텔레그램으로 보내는 모든 HTTP 요청(sendMessage·answerCallbackQuery·getUpdates)은 전체 5초 제한을 쓰며, 넘으면 재시도 없이 실패로 끝난다. 알림 전송이면 텔레그램에 실제로 전달됐는지는 알 수 없고 실패로 보아 False를 반환하며, 로그에 보낸 본문의 첫 줄(제목 줄 — 이모지·강조 기호 포함) 앞 80자가 남는다. 요청 실패 로그에는 예외의 종류와 봇 토큰을 가린 메시지가 남고, 요청 주소에 든 봇 토큰은 메시지와 트레이스백 어디에도 남지 않는다(로깅 §민감값 취급). 이를 위해 TelegramAdapter·TelegramCommandReceiver 모듈의 로거는 레코드의 메시지와 예외를 가린 텍스트로 바꿔 넘기므로, JSONL 로그 파일에는 이 두 모듈 레코드의 `exc` 필드(트레이스백·fingerprint)가 실리지 않는다.
+TelegramAdapter와 TelegramCommandReceiver가 텔레그램으로 보내는 모든 HTTP 요청(sendMessage·answerCallbackQuery·getUpdates)은 전체 5초 제한을 쓰며, 넘으면 재시도 없이 실패로 끝난다. 알림 전송이면 텔레그램에 실제로 전달됐는지는 알 수 없고 실패로 보아 False를 반환하며, 로그에 보낸 본문의 첫 줄(제목 줄 — 이모지·강조 기호 포함) 앞 80자가 남는다. 요청 실패 로그에는 예외의 종류와 봇 토큰을 가린 메시지가 남고, 요청 주소에 든 봇 토큰은 메시지와 트레이스백 어디에도 남지 않는다(로깅 §민감값 취급). 이를 위해 TelegramAdapter·TelegramCommandReceiver 모듈의 로거는 봇 토큰이 든 메시지와 예외를 가린 텍스트로 바꿔 넘기므로, 예외에 봇 토큰이 든 레코드에 한해 JSONL 로그 파일에 `exc` 필드(트레이스백·fingerprint)가 실리지 않는다(요청 실패 로그면 메시지에 예외의 종류와 가린 설명이 남는다).
 
 ### NotificationService — 발송 + 필터링 + 이력
 
