@@ -744,6 +744,38 @@ class TestConfirmation:
             "bot-1", suppress_notification=True
         )
 
+    async def test_stop_returns_when_job_swallows_cancellation(
+        self, receiver, bot_manager
+    ):
+        """실행 중인 작업이 정지의 취소를 삼켜도 수신기 정지는 돌아온다."""
+        entered = asyncio.Event()
+        swallowed = asyncio.Event()
+
+        async def _stop_bot(bot_id, *, suppress_notification=False):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                swallowed.set()
+            return None
+
+        bot_manager.stop_bot = AsyncMock(side_effect=_stop_bot)
+        receiver._reply = AsyncMock()
+        await receiver._execute("stop", ["bot-1"], 12345, 100)
+        await receiver._handle_confirm(12345, 100)
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        worker = receiver._worker
+        assert worker is not None
+
+        stopping = asyncio.create_task(receiver.stop())
+        done, _ = await asyncio.wait({stopping}, timeout=5)
+
+        assert stopping in done
+        assert worker.done()
+        assert swallowed.is_set()
+        assert receiver._worker is None
+        bot_manager.stop_bot.assert_awaited_once()
+
     async def test_confirm_no_pending(self, receiver):
         """대기 중인 명령이 없으면 안내 메시지."""
         result = await receiver._handle_confirm(12345)

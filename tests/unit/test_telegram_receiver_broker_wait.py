@@ -708,3 +708,40 @@ async def test_stop_cancels_worker_and_logs_dropped(
     assert stack.executed == [("bot_delete", BOT)]
     assert await stack.approval_status(resume_id) == "pending"
     assert any("1건" in r.getMessage() for r in caplog.records)
+
+
+async def test_stop_during_dropped_notices_counts_unsent(
+    stack: Stack, caplog: pytest.LogCaptureFixture
+) -> None:
+    """버린 결재의 안내 도중 수신기가 멈추면 남은 안내의 건수가 경고 로그에 든다."""
+    await stack.make_bot(BOT)
+    await stack.seed("ord-1")
+    await _stopped_bot(stack, OTHER)
+    delete_id = await stack.approval("bot_delete", BOT)
+    first = await stack.approval("bot_resume", OTHER)
+    second = await stack.approval("bot_resume", OTHER)
+    entered = asyncio.Event()
+    recorded = stack._record_reply
+
+    async def _reply(chat_id: int | None, text: str) -> None:
+        if text.startswith(DROPPED_APPROVAL):
+            entered.set()
+            await asyncio.Event().wait()
+        await recorded(chat_id, text)
+
+    stack.receiver._reply = _reply  # type: ignore[method-assign]
+
+    await stack.run(
+        [
+            [_tap(1, f"approve:{delete_id}")],
+            [_tap(2, f"approve:{first}", CHAT_B), _tap(3, f"approve:{second}", CHAT_C)],
+            [_cmd(4, "/halt"), _cmd(5, "/confirm")],
+        ]
+    )
+    await asyncio.wait_for(entered.wait(), timeout=WAIT)
+    with caplog.at_level(logging.WARNING, logger="ante.notification.telegram_receiver"):
+        await asyncio.wait_for(stack.receiver.stop(), timeout=WAIT)
+
+    assert any("2건" in r.getMessage() for r in caplog.records)
+    assert await stack.approval_status(first) == "pending"
+    assert await stack.approval_status(second) == "pending"

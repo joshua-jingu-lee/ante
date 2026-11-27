@@ -140,8 +140,9 @@ class TelegramCommandReceiver:
             self._jobs.task_done()
 
     async def _work(self) -> None:
-        """줄의 작업을 도착 순서대로 하나씩 실행한다."""
-        while True:
+        """줄의 작업을 도착 순서대로 하나씩 실행하고, 취소 요청을 받으면 끝난다."""
+        current = asyncio.current_task()
+        while current is not None and not current.cancelling():
             job = await self._jobs.get()
             try:
                 await self._run_job(job)
@@ -635,11 +636,13 @@ class TelegramCommandReceiver:
         for job in jobs:
             if job.dropped_notice is None:
                 self._enqueue(job)
-        for job in jobs:
-            if job.dropped_notice is None:
-                continue
+        dropped = [job for job in jobs if job.dropped_notice is not None]
+        for sent, job in enumerate(dropped):
             try:
-                await self._reply(job.chat_id, job.dropped_notice)
+                await self._reply(job.chat_id, cast("str", job.dropped_notice))
+            except asyncio.CancelledError:
+                self._dropped_on_cancel += len(dropped) - sent
+                raise
             except Exception:
                 logger.exception("텔레그램 버린 작업 안내 실패")
 
