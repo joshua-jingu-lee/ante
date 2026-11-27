@@ -127,6 +127,23 @@ async def test_receiver_entries_pass_total_timeout(recorded_sessions):
         _assert_total_timeout(entry)
 
 
+async def test_send_failure_status_logs_title_without_secret(
+    recorded_sessions, monkeypatch, caplog
+):
+    monkeypatch.setattr(_FakeResponse, "status", 400)
+    adapter = TelegramAdapter(_TOKEN, _CHAT_ID)
+    title = "봇 중지"
+
+    with caplog.at_level(logging.WARNING, logger="ante.notification.telegram"):
+        result = await adapter.send_rich(NotificationLevel.INFO, title, "둘째 줄")
+
+    assert result is False
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("status=400" in m and title in m for m in messages), messages
+    assert all("둘째 줄" not in m for m in messages)
+    _assert_no_secret(caplog)
+
+
 # ── T4: 롱폴링 대기가 전체 제한보다 작다 ─────────────────
 
 
