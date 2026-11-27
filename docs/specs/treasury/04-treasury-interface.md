@@ -34,7 +34,8 @@
 | `set_bot_status_checker` | checker: Callable[[str], str] | None | 봇 상태 조회 콜백 주입. deallocate 시 봇 정지 상태 검증에 사용 |
 | `get_summary` | — | dict | 자금 현황 요약 (아래 상세 참조) |
 | `sync_balance` | balance_data: dict[str, float] | `None` | 브로커 잔고 데이터로 Treasury 상태 동기화 |
-| `start_sync` | broker: BrokerAdapter \| None, position_history: PositionHistory, interval_seconds=300, trading_mode="live", price_resolver=None | `None` | 자산 평가 주기적 동기화 시작. Live는 브로커 기반, Virtual은 Trade DB 기반 |
+| `start_sync` | broker: BrokerAdapter \| None, position_history: PositionHistory, interval_seconds=300, trading_mode="live", price_resolver=None | `None` | 자산 평가 주기적 동기화 시작. Live는 브로커 기반, Virtual은 Trade DB 기반. 받은 `interval_seconds`를 동기화 시세의 낡음 판정에 쓰도록 보관한다 |
+| `get_synced_price` | symbol: str | tuple[float \| None, str \| None] | 잔고 동기화가 받은 그 종목의 현재가를 동기 조회(인메모리). 신선하면 `(현재가, None)`, 아니면 `(None, 상세)`다. 상세는 `SYNCED_PRICE_MISSING`(`"no synced price"`) 또는 `SYNCED_PRICE_STALE`(`"synced price stale"`)이다 (#3103) |
 | `stop_sync` | — | `None` | 잔고 동기화 중지 |
 | `update_commission_rates` | buy_commission_rate: float, sell_commission_rate: float | `None` | 수수료율 재주입. 1.0 런타임 DynamicConfig 경로가 아니며, Account cold-path 재초기화/테스트 보조 경로에서만 사용 |
 | `release_budget` | bot_id: str | float | 봇 예산 전액 환수. 반환값은 환수된 금액 |
@@ -141,6 +142,19 @@ external_*      = 0
 4. 각 계좌의 `trading_mode`에 따라 `start_sync`를 호출한다.
 
 상세 배경은 [09-virtual-asset-sync.md](09-virtual-asset-sync.md)를 참조한다.
+
+**동기화 시세 (#3103)**: Treasury는 잔고 동기화가 받은 종목별 현재가를 받은 시각(`clock.monotonic()`)과 함께 메모리에만 두고 `get_synced_price`로 내준다. DB에는 저장하지 않으며, 이 표에 값을 쓰는 것은 동기화뿐이다(체결 이벤트의 체결가는 쓰지 않는다).
+
+- 값의 검사: `int`·`float`이고 `bool`이 아니며 유한하고 0보다 큰 값만 기록한다. 검사는 예외를 내지 않으므로 이상한 값 하나가 동기화를 깨지 않는다.
+- Live: `get_positions()`가 성공한 직후 응답의 전 종목(외부 보유 포함)의 `current_price`를 기록한다.
+- Virtual: 미청산 포지션의 종목마다 `price_resolver` 조회가 성공해 검사를 지난 값만 기록한다. `avg_entry_price`로 대신한 평가액의 값은 시세로 기록하지 않는다.
+- 동기화가 값을 준 종목은 기존 값과 시각을 덮는다. 다뤘지만 값을 주지 못한 종목의 옛 값은 시각과 함께 남는다.
+- 동기화가 끝까지 성공하면 그 동기화가 다루지 않은 종목의 값을 지운다. 동기화가 실패하면 아무것도 지우지 않는다.
+- 낡음: 받은 뒤 `2 × interval_seconds`를 넘은 값은 `SYNCED_PRICE_STALE`이다. 동기화 루프는 동기화가 끝난 뒤에 자므로, 성공이 이어져도 간격은 주기보다 길다.
+- `start_sync`가 불린 적이 없거나 보관한 주기가 위 값의 검사를 지나지 못하면 늘 `SYNCED_PRICE_MISSING`이다.
+- 평가액·요약·`BalanceSyncedEvent`의 계산은 이 표와 무관하다.
+
+알려진 한계는 [09-virtual-asset-sync.md](09-virtual-asset-sync.md#동기화-시세의-알려진-한계-3103)에 둔다.
 
 **매수가능액 동기화 규약 / write-path (#2384)**: Live 모드 잔고 동기화(`_do_sync`)는 `purchasable_amount`를 다음 단일 write-path로 갱신한다.
 
