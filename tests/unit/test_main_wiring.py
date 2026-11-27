@@ -53,6 +53,7 @@ from ante.eventbus.events import (
     OrderRejectedEvent,
     OrderRequestEvent,
     OrderSubmittedEvent,
+    OrderValidatedEvent,
     StopOrderExpiredEvent,
 )
 from ante.ipc.client import IPCClient
@@ -780,6 +781,45 @@ async def test_market_buy_reserve_uses_price_of_own_account(
     assert [e.reserved_amount for e in approved] == [1000.0]
     assert ("005930", "kv-a") in asked
     assert all(account_id == "kv-a" for _, account_id in asked)
+
+
+async def test_rule_quote_injection_survives_treasury_key_error(
+    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Treasury 쪽 주입이 KeyError여도 규칙 엔진은 시세 조회를 받는다(#3097)."""
+
+    def _missing(account_id: str, resolver: Any) -> None:
+        raise KeyError(account_id)
+
+    def _break_treasury_injection(asm: _Assembly) -> None:
+        monkeypatch.setattr(
+            asm.s.treasury_manager, "set_order_reserve_price_resolver", _missing
+        )
+
+    asm = await assemble(
+        [_kis_account("kv-a", mode=TradingMode.VIRTUAL)],
+        before_gateway=_break_treasury_injection,
+    )
+    s = asm.s
+    asked: list[str] = []
+
+    async def _price(symbol: str, *, account_id: str) -> float:
+        asked.append(account_id)
+        return 100.0
+
+    monkeypatch.setattr(s.api_gateway, "get_current_price", _price)
+    await _fund(s, "kv-a", "bot-1")
+    cap = _capture(s, OrderValidatedEvent, OrderRejectedEvent)
+
+    await s.eventbus.publish(
+        _request("kv-a", order_type="market", price=None, quantity=10.0)
+    )
+
+    assert len(cap.of(OrderValidatedEvent)) == 1
+    assert asked == ["kv-a"]
+    assert [e.reason for e in cap.of(OrderRejectedEvent)] == [
+        "market_buy_quote_unavailable: resolver not configured"
+    ]
 
 
 # ── 부팅 때 봇 복원 (#2813) ───────────────────────────────────────────────────

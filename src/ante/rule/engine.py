@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
 import math
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time, timedelta, timezone
 from typing import TYPE_CHECKING, Any, TypeGuard
 
@@ -44,6 +46,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _KST = timezone(timedelta(hours=9))
+
+_MARKET_PRICE_TIMEOUT_SECONDS = 10.0
 
 _VALID_ORDER_SIDES: frozenset[str] = frozenset({"buy", "sell"})
 
@@ -93,12 +97,17 @@ def _safe_str(value: object) -> str:
         return f"<unrenderable {type(value).__name__}>"
 
 
-def _safe_repr(value: object) -> str:
-    """``reason`` 메시지 조립용 안전한 ``repr``-스타일 변환."""
+def _safe_repr(value: object, render: Callable[[object], str] = repr) -> str:
+    """``reason`` 메시지 조립용 안전한 변환(기본 ``repr``)."""
     try:
-        return repr(value)
+        return render(value)
     except Exception:
         return f"<unrenderable {type(value).__name__}>"
+
+
+def _exception_detail(exc: BaseException) -> str:
+    """예외의 ``str``, 비면 타입 이름, ``str``이 실패하면 placeholder."""
+    return _safe_repr(exc, str) or type(exc).__name__
 
 
 def _safe_order_id(value: object) -> str:
@@ -196,6 +205,10 @@ class RuleEngine:
         self._strategy_rules: dict[str, list[Rule]] = {}
         self._rules_unavailable_cause: str | None = None
 
+        self._market_price_resolver: Callable[[str], Awaitable[float]] | None = None
+        self._market_price_inflight: dict[str, tuple[asyncio.Task[Any], float]] = {}
+        self._closed = False
+
     @property
     def account_id(self) -> str:
         """바인딩된 계좌 ID."""
@@ -249,6 +262,90 @@ class RuleEngine:
     def set_bot_strategy_resolver(self, resolver: Callable[[str], str | None]) -> None:
         """봇 ID → 전략 ID 변환 콜백 설정 (초기화 후 BotManager 연결 시 호출)."""
         self._bot_strategy_resolver = resolver
+
+    def set_market_price_resolver(
+        self, resolver: Callable[[str], Awaitable[float]]
+    ) -> None:
+        """시장가 매수 평가에 쓸 현재가 조회를 주입한다."""
+        self._market_price_resolver = resolver
+
+    async def aclose(self) -> None:
+        """닫힘 상태로 두고, 진행 중인 시세 조회를 취소한 뒤 끝나기를 기다린다."""
+        self._closed = True
+        tasks = [task for task, _ in self._market_price_inflight.values()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _fetch_market_price(
+        self, resolver: Callable[[str], Awaitable[float]], symbol: str
+    ) -> object:
+        """주입된 조회를 부른다(동기 예외도 태스크 안에서 나게)."""
+        return await resolver(symbol)
+
+    def _on_market_price_done(self, symbol: str, task: asyncio.Task[Any]) -> None:
+        """표의 항목이 그 태스크일 때만 지우고, 예외는 warning 로그로 수거한다."""
+        entry = self._market_price_inflight.get(symbol)
+        if entry is not None and entry[0] is task:
+            del self._market_price_inflight[symbol]
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.warning(
+                "시장가 매수 시세 조회 실패: account=%s symbol=%s error=%s",
+                self._account_id,
+                symbol,
+                _exception_detail(exc),
+            )
+
+    def _join_market_price(
+        self, resolver: Callable[[str], Awaitable[float]], symbol: str
+    ) -> tuple[asyncio.Task[Any], float]:
+        """진행 중인 조회에 합류하거나, 없거나 끝났으면 새로 띄운다."""
+        entry = self._market_price_inflight.get(symbol)
+        if entry is not None and not entry[0].done():
+            return entry
+        task = asyncio.create_task(self._fetch_market_price(resolver, symbol))
+        entry = (task, clock.monotonic())
+        self._market_price_inflight[symbol] = entry
+        task.add_done_callback(functools.partial(self._on_market_price_done, symbol))
+        return entry
+
+    async def _await_market_price(
+        self, task: asyncio.Task[Any], remaining: float
+    ) -> tuple[object, str | None]:
+        """조회를 취소하지 않고 ``remaining``초까지만 기다린다."""
+        await asyncio.wait({task}, timeout=remaining)
+        if not task.done():
+            return None, "timeout"
+        if task.cancelled():
+            return None, "engine closed"
+        exc = task.exception()
+        if exc is not None:
+            return None, _exception_detail(exc)
+        return task.result(), None
+
+    async def _resolve_market_price(
+        self, symbol: str
+    ) -> tuple[float | None, str | None]:
+        """시세와, 실패면 ``market_buy_quote_unavailable`` 상세를 돌려준다."""
+        if self._closed:
+            return None, "engine closed"
+        resolver = self._market_price_resolver
+        if resolver is None:
+            return None, "resolver not configured"
+        task, started = self._join_market_price(resolver, symbol)
+        remaining = started + _MARKET_PRICE_TIMEOUT_SECONDS - clock.monotonic()
+        if remaining <= 0:
+            return None, "timeout"
+        value, failure = await self._await_market_price(task, remaining)
+        if failure is not None:
+            return None, failure
+        if not (_is_finite_quantity(value) and value > 0):
+            return None, f"non-finite or non-positive quote {_safe_repr(value)}"
+        return float(value), None
 
     def set_unrecovered_buy_overlap(self, bot_id: str, allow: bool) -> None:
         """봇 단위 ``allow_unrecovered_buy_overlap`` opt-out 등록.
@@ -993,6 +1090,15 @@ class RuleEngine:
             )
 
             current_price = event.price or 0.0
+            quote_failure: str | None = None
+            if (
+                input_failure is None
+                and event.side == "buy"
+                and event.order_type == "market"
+            ):
+                quote, quote_failure = await self._resolve_market_price(event.symbol)
+                if quote is not None:
+                    current_price = quote
             position = await self._query_order_symbol_position(
                 bot_id=event.bot_id,
                 current_price=current_price,
@@ -1021,6 +1127,15 @@ class RuleEngine:
                         reason=input_reason,
                         side=event.side,
                         is_liquidation=is_liquidation,
+                    )
+                )
+                return
+            if quote_failure is not None:
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=f"market_buy_quote_unavailable: {quote_failure}",
                     )
                 )
                 return

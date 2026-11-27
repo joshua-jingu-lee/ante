@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from ante.rule.config_update import account_rules_config_key
@@ -108,6 +109,21 @@ class RuleEngineManager:
         if account_id not in self._engines:
             raise KeyError(f"account '{account_id}'의 RuleEngine이 존재하지 않습니다.")
         return self._engines[account_id]
+
+    def set_market_price_resolver(
+        self, account_id: str, resolver: Callable[[str], Awaitable[float]]
+    ) -> None:
+        """계좌의 RuleEngine에 시장가 매수 평가용 현재가 조회를 주입한다.
+
+        Raises:
+            KeyError: 해당 계좌의 RuleEngine이 없음.
+        """
+        self.get(account_id).set_market_price_resolver(resolver)
+
+    async def aclose(self) -> None:
+        """모든 RuleEngine의 진행 중인 시세 조회를 정리한다."""
+        for engine in list(self._engines.values()):
+            await engine.aclose()
 
     async def initialize_all(
         self,

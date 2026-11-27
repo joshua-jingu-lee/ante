@@ -5,6 +5,8 @@ RuleEngine은 Treasury가 없거나 조회가 예외를 던지면 매수를 거�
 매수 승인 경로를 검증하는 테스트는 이 가짜를 주입한다. 기본값은 예전의
 미주입 엔진이 채우던 값(전부 0·스냅샷 없음·예산 없음)과 같아 룰 판정을 바꾸지
 않는다. ``fail``에 조회 이름을 주면 그 조회만 예외를 던진다.
+
+시장가 매수를 통과시키는 테스트는 ``fixed_quote``를 시세 조회로 넣는다(#3097).
 """
 
 from __future__ import annotations
@@ -17,6 +19,14 @@ TREASURY_QUERIES = (
     "get_budget",
     "get_prev_day_snapshot",
 )
+
+
+FIXED_QUOTE = 10_000.0
+
+
+async def fixed_quote(symbol: str) -> float:
+    """시장가 매수 평가에 쓰는 고정 시세."""
+    return FIXED_QUOTE
 
 
 @dataclass
