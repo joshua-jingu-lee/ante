@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Callable
 from datetime import timedelta, timezone
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from urllib.parse import quote
 
 from ante.core import clock
 
@@ -16,6 +18,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _KST = timezone(timedelta(hours=9))
+
+_KEY_PARAM_PATTERN = re.compile(r"(?i)(crtfc_key|servicekey)(=|%3D)[^&'\"\s]*")
+
+
+def describe_source_error(exc: BaseException, api_key: str) -> str:
+    """예외를 종류 이름과 API 키를 가린 메시지로 바꾼다.
+
+    키 값(원문과 URL 인코딩 꼴)을 직접 바꾸고, 키를 싣는 쿼리 파라미터
+    (``crtfc_key``·``serviceKey``)의 값도 가린다. 키가 빈 문자열이면 직접
+    치환은 건너뛴다. 상태 코드·주소의 경로·나머지 쿼리는 남는다. 메시지가
+    비면 종류 이름만 돌려준다.
+    """
+    message = str(exc)
+    if api_key:
+        forms = {api_key, quote(api_key, safe=""), quote(api_key, safe="/")}
+        forms.add(quote(api_key, safe="/?:@"))
+        for form in sorted(forms, key=len, reverse=True):
+            message = message.replace(form, "***")
+    message = _KEY_PARAM_PATTERN.sub(r"\1\2***", message)
+    name = type(exc).__name__
+    return f"{name}: {message}" if message else name
 
 
 @runtime_checkable
