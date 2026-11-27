@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import defaultdict
 from datetime import UTC
 from pathlib import Path
@@ -17,6 +18,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from ante.account.errors import AccountSuspendAllFailedError
 from ante.account.models import Account, AccountStatus
 from ante.account.service import AccountService
 from ante.approval.service import ApprovalService
@@ -404,7 +406,8 @@ async def test_halt_runs_while_approved_delete_waits_for_broker(stack: Stack) ->
     row = await stack.db.fetch_one("SELECT status FROM bots WHERE bot_id = ?", (BOT,))
     assert row is not None
     assert row["status"] == "deleted"
-    assert stack.broker.completed.count("bk-ord-1") >= 1
+    assert stack.broker.calls == ["bk-ord-1"]
+    assert stack.broker.completed == ["bk-ord-1"]
     assert await stack.order_status("ord-1") == "cancelled"
     assert stack.adapter.answer_callback_query.await_count == 1
 
@@ -433,6 +436,8 @@ async def test_halt_runs_while_stop_confirm_waits_for_broker(stack: Stack) -> No
 
     assert stack.index_of(HALTED) < stack.index_of("봇 중지")
     assert stack.manager.get_bot(BOT).status == BotStatus.STOPPED
+    assert stack.broker.calls == ["bk-ord-1"]
+    assert await stack.order_status("ord-1") == "cancelled"
 
 
 # ── 전체 정지의 줄 비우기 ────────────────────────
@@ -464,3 +469,242 @@ async def test_halt_drops_queued_resume_behind_blocked_delete(stack: Stack) -> N
     assert stack.texts(CHAT_B) == [f"{DROPPED_APPROVAL}\nID: {resume_id}"]
     assert stack.index_of(DROPPED_APPROVAL) < stack.index_of(HALTED)
     assert any("✅ 결재 승인 완료" in text for text in stack.texts(CHAT_A))
+
+
+THIRD = "bot-c"
+CHAT_C = 300
+PARTIAL = "전체 거래 중지가 일부 계좌에서 실패했습니다"
+
+
+def _failing_suspend_all(kind: str):
+    async def _suspend_all(reason: str, suspended_by: str) -> list[dict[str, Any]]:
+        if kind == "partial":
+            raise AccountSuspendAllFailedError((ACCT,), 0)
+        raise RuntimeError("SECRET-3111")
+
+    return _suspend_all
+
+
+@pytest.mark.parametrize("kind", ["partial", "error"])
+async def test_failed_halt_drops_approvals_and_runs_queued_stop(
+    stack: Stack, kind: str
+) -> None:
+    """전체 정지가 실패해도 결재는 버리고, 줄의 /stop 확인은 정지 뒤에 실행한다."""
+    await stack.make_bot(BOT)
+    await stack.seed("ord-1")
+    other = await _stopped_bot(stack, OTHER)
+    third = await stack.make_bot(THIRD)
+    await stack.manager.start_bot(THIRD)
+    delete_id = await stack.approval("bot_delete", BOT)
+    resume_id = await stack.approval("bot_resume", OTHER)
+    stack.accounts.suspend_all = _failing_suspend_all(kind)  # type: ignore[method-assign]
+
+    script = await stack.run(
+        [
+            [_tap(1, f"approve:{delete_id}")],
+            [_tap(2, f"approve:{resume_id}", CHAT_B)],
+            [_cmd(3, f"/stop {THIRD}", CHAT_C)],
+            [_cmd(4, "/confirm", CHAT_C)],
+            [_cmd(5, "/halt")],
+            [_cmd(6, "/confirm")],
+        ]
+    )
+    await script.reach(7)
+    assert third.status == BotStatus.RUNNING
+    await stack.release()
+
+    assert stack.executed == [("bot_delete", BOT)]
+    assert other.status == BotStatus.STOPPED
+    assert await stack.approval_status(resume_id) == "pending"
+    assert stack.texts(CHAT_B) == [f"{DROPPED_APPROVAL}\nID: {resume_id}"]
+    assert third.status == BotStatus.STOPPED
+    stop_replies = [t for t in stack.texts(CHAT_C) if "봇 중지" in t]
+    assert len(stop_replies) == 1
+    halt_reply = PARTIAL if kind == "partial" else "처리 중 오류가 발생했습니다"
+    assert stack.index_of(DROPPED_APPROVAL) < stack.index_of(halt_reply)
+    assert stack.index_of(halt_reply) < stack.index_of("봇 중지")
+    assert all("SECRET-3111" not in text for _, text in stack.replies)
+
+
+async def test_dropped_notice_failure_does_not_skip_others(stack: Stack) -> None:
+    """버린 결재 한 건의 안내가 실패해도 나머지 안내는 간다."""
+    await stack.make_bot(BOT)
+    await stack.seed("ord-1")
+    await _stopped_bot(stack, OTHER)
+    delete_id = await stack.approval("bot_delete", BOT)
+    first = await stack.approval("bot_resume", OTHER)
+    second = await stack.approval("bot_resume", OTHER)
+    recorded = stack._record_reply
+
+    async def _reply(chat_id: int | None, text: str) -> None:
+        if chat_id == CHAT_B and text.startswith(DROPPED_APPROVAL):
+            raise RuntimeError("reply failed")
+        await recorded(chat_id, text)
+
+    stack.receiver._reply = _reply  # type: ignore[method-assign]
+
+    script = await stack.run(
+        [
+            [_tap(1, f"approve:{delete_id}")],
+            [_tap(2, f"approve:{first}", CHAT_B), _tap(3, f"approve:{second}", CHAT_C)],
+            [_cmd(4, "/halt"), _cmd(5, "/confirm")],
+        ]
+    )
+    await script.reach(4)
+    await stack.release()
+
+    assert stack.texts(CHAT_C) == [f"{DROPPED_APPROVAL}\nID: {second}"]
+    assert any(HALTED in text for text in stack.texts(CHAT_A))
+    assert await stack.approval_status(first) == "pending"
+    assert await stack.approval_status(second) == "pending"
+    assert stack.executed == [("bot_delete", BOT)]
+
+
+async def test_already_halted_keeps_queued_jobs(stack: Stack) -> None:
+    """「이미 중지됨」이면 줄을 건드리지 않고 대기 작업이 그대로 실행된다."""
+    await stack.make_bot(BOT)
+    await stack.seed("ord-1")
+    await _stopped_bot(stack, OTHER)
+    delete_id = await stack.approval("bot_delete", BOT)
+    resume_id = await stack.approval("bot_resume", OTHER)
+    await stack.accounts.suspend_all(reason="cli", suspended_by="admin")
+    stack.receiver._pending_confirm[USER] = ("halt", [], clock.monotonic())
+
+    script = await stack.run(
+        [
+            [_tap(1, f"approve:{delete_id}")],
+            [_tap(2, f"approve:{resume_id}", CHAT_B)],
+            [_cmd(3, "/confirm")],
+        ]
+    )
+    await script.reach(4)
+    assert "이미 거래가 중지된 상태입니다." in stack.texts(CHAT_A)
+    await stack.release()
+
+    assert stack.executed == [("bot_delete", BOT), ("bot_resume", OTHER)]
+    assert await stack.approval_status(resume_id) == "approved"
+    assert not any(DROPPED_APPROVAL in text for _, text in stack.replies)
+
+
+async def test_halt_and_confirm_in_one_batch(stack: Stack) -> None:
+    """/halt와 /confirm이 같은 묶음으로 와도 차례로 처리된다."""
+    script = await stack.run([[_cmd(1, "/halt"), _cmd(2, "/confirm")]], free=9)
+    await script.reach(2)
+
+    account = await stack.accounts.get(ACCT)
+    assert account.status == AccountStatus.SUSPENDED
+    texts = stack.texts(CHAT_A)
+    assert "/confirm" in texts[0]
+    assert HALTED in texts[1]
+
+
+# ── 작업자의 순서·실패·정지 ───────────────────────
+
+
+async def test_double_tap_runs_executor_once(stack: Stack) -> None:
+    """같은 결재의 승인이 두 번 와도 실행기는 한 번만 돈다."""
+    await _stopped_bot(stack, OTHER)
+    resume_id = await stack.approval("bot_resume", OTHER)
+
+    script = await stack.run(
+        [[_tap(1, f"approve:{resume_id}"), _tap(2, f"approve:{resume_id}")]], free=9
+    )
+    await script.reach(2)
+    await stack.release()
+
+    assert stack.executed == [("bot_resume", OTHER)]
+    texts = stack.texts(CHAT_A)
+    assert len(texts) == 2
+    assert "✅ 결재 승인 완료" in texts[0]
+    assert "ℹ️ 이미 처리된 결재입니다" in texts[1]
+
+
+async def test_approve_then_reject_keeps_approval(stack: Stack) -> None:
+    """승인 뒤에 온 거절은 충돌로 끝나고 실행기는 한 번만 돈다."""
+    await _stopped_bot(stack, OTHER)
+    resume_id = await stack.approval("bot_resume", OTHER)
+
+    script = await stack.run(
+        [[_tap(1, f"approve:{resume_id}"), _tap(2, f"reject:{resume_id}")]], free=9
+    )
+    await script.reach(2)
+    await stack.release()
+
+    assert stack.executed == [("bot_resume", OTHER)]
+    assert await stack.approval_status(resume_id) == "approved"
+    texts = stack.texts(CHAT_A)
+    assert "✅ 결재 승인 완료" in texts[0]
+    assert "ℹ️ 이미 처리된 결재입니다" in texts[1]
+
+
+async def test_same_bot_approvals_run_in_arrival_order(stack: Stack) -> None:
+    """같은 봇에 대한 결재 둘은 도착 순서대로 실행된다."""
+    other = await _stopped_bot(stack, OTHER)
+    resume_id = await stack.approval("bot_resume", OTHER)
+    delete_id = await stack.approval("bot_delete", OTHER)
+
+    script = await stack.run(
+        [[_tap(1, f"approve:{resume_id}"), _tap(2, f"approve:{delete_id}")]], free=9
+    )
+    await script.reach(2)
+    await stack.release()
+
+    assert stack.executed == [("bot_resume", OTHER), ("bot_delete", OTHER)]
+    assert OTHER not in stack.manager._bots
+    assert other.status != BotStatus.RUNNING
+    assert all("✅ 결재 승인 완료" in text for text in stack.texts(CHAT_A))
+
+
+async def test_executor_error_replies_and_next_job_runs(stack: Stack) -> None:
+    """실행기가 예외로 끝나도 그 chat에 실패 문구가 가고 다음 작업이 실행된다."""
+    await _stopped_bot(stack, OTHER)
+    resume_id = await stack.approval("bot_resume", OTHER)
+    real = ApprovalService.approve
+
+    async def _approve(*args: Any, **kwargs: Any) -> Any:
+        if not calls:
+            calls.append(1)
+            raise RuntimeError("SECRET-3111")
+        return await real(stack.approvals, *args, **kwargs)
+
+    calls: list[int] = []
+    stack.approvals.approve = _approve  # type: ignore[method-assign]
+
+    script = await stack.run(
+        [[_tap(1, f"approve:{resume_id}"), _tap(2, f"approve:{resume_id}", CHAT_B)]],
+        free=9,
+    )
+    await script.reach(2)
+    await stack.release()
+
+    assert stack.texts(CHAT_A) == ["처리 중 오류가 발생했습니다."]
+    assert len(stack.texts(CHAT_B)) == 1
+    assert "✅ 결재 승인 완료" in stack.texts(CHAT_B)[0]
+    assert stack.executed == [("bot_resume", OTHER)]
+
+
+async def test_stop_cancels_worker_and_logs_dropped(
+    stack: Stack, caplog: pytest.LogCaptureFixture
+) -> None:
+    """수신기 정지는 작업자를 끝내고, 시작하지 않은 작업은 버리고 건수를 남긴다."""
+    await stack.make_bot(BOT)
+    await stack.seed("ord-1")
+    await _stopped_bot(stack, OTHER)
+    delete_id = await stack.approval("bot_delete", BOT)
+    resume_id = await stack.approval("bot_resume", OTHER)
+
+    script = await stack.run(
+        [[_tap(1, f"approve:{delete_id}")], [_tap(2, f"approve:{resume_id}")]]
+    )
+    await script.reach(3)
+    worker = stack.receiver._worker
+    assert worker is not None
+    with caplog.at_level(logging.WARNING, logger="ante.notification.telegram_receiver"):
+        await asyncio.wait_for(stack.receiver.stop(), timeout=WAIT)
+
+    assert worker.done()
+    assert stack.receiver._worker is None
+    assert stack.receiver._jobs.empty()
+    assert stack.executed == [("bot_delete", BOT)]
+    assert await stack.approval_status(resume_id) == "pending"
+    assert any("1건" in r.getMessage() for r in caplog.records)

@@ -41,11 +41,11 @@ _PROCESSING_ANSWER = "⏳ 처리 중입니다"
 
 @dataclass(frozen=True)
 class _Job:
-    """작업자가 실행할 한 건과 그 회신 chat, 버릴 때의 안내."""
+    """작업자의 한 건과 회신 chat, 전체 정지가 버릴 때의 안내(없으면 남긴다)."""
 
     chat_id: int | None
     run: Callable[[], Awaitable[str]]
-    dropped_notice: str
+    dropped_notice: str | None = None
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -288,7 +288,10 @@ class TelegramCommandReceiver:
                 ),
             )
         )
-        await self._adapter.answer_callback_query(callback_id, _PROCESSING_ANSWER)
+        try:
+            await self._adapter.answer_callback_query(callback_id, _PROCESSING_ANSWER)
+        except Exception:
+            logger.exception("텔레그램 콜백 처리 중 응답 실패: %s", data)
 
     async def _resolve_approval(self, action: str, approval_id: str) -> str:
         """결재를 승인하거나 거절하고 결과 문구를 돌려준다."""
@@ -440,17 +443,7 @@ class TelegramCommandReceiver:
         if command == "clear_halt":
             return await self._cmd_clear_halt(args)
         if command == "stop":
-            bot_id = args[0] if args else "?"
-            self._enqueue(
-                _Job(
-                    chat_id=chat_id,
-                    run=partial(self._cmd_stop, args),
-                    dropped_notice=(
-                        f"ℹ️ 전체 거래 중지 요청으로 {bot_id} 중지를 실행하지 "
-                        "않았습니다. /bots로 상태를 확인해 주세요."
-                    ),
-                )
-            )
+            self._enqueue(_Job(chat_id=chat_id, run=partial(self._cmd_stop, args)))
             return ""
 
         return "알 수 없는 명령입니다."
@@ -615,7 +608,7 @@ class TelegramCommandReceiver:
             return "이미 거래가 중지된 상태입니다."
 
         reason = " ".join(args) if args else "텔레그램 명령"
-        dropped = self._take_queued_jobs()
+        taken = self._take_queued_jobs()
         try:
             await self._account_service.suspend_all(
                 reason=reason,
@@ -626,20 +619,25 @@ class TelegramCommandReceiver:
                 f"⚠️ 전체 거래 중지가 일부 계좌에서 실패했습니다.\n{exc}\n사유: {reason}"
             )
         except asyncio.CancelledError:
-            self._dropped_on_cancel += len(dropped)
-            dropped = []
+            self._dropped_on_cancel += len(taken)
+            taken = []
             raise
         finally:
-            await self._notify_dropped(dropped)
+            await self._requeue_or_drop(taken)
         return (
             "\U0001f6a8 전체 거래가 중지되었습니다.\n"
             f"사유: {reason}\n"
             "해제하려면 /clear_halt 를 입력하세요."
         )
 
-    async def _notify_dropped(self, jobs: list[_Job]) -> None:
-        """버린 작업마다 그 chat에 실행하지 않았다는 안내를 보낸다."""
+    async def _requeue_or_drop(self, jobs: list[_Job]) -> None:
+        """안내가 없는 작업은 순서대로 줄에 되돌리고, 나머지는 버리며 안내한다."""
         for job in jobs:
+            if job.dropped_notice is None:
+                self._enqueue(job)
+        for job in jobs:
+            if job.dropped_notice is None:
+                continue
             try:
                 await self._reply(job.chat_id, job.dropped_notice)
             except Exception:

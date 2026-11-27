@@ -359,6 +359,28 @@ class TestCallbackQuery:
         assert "승인 완료" in receiver._reply.call_args[0][1]
         adapter.answer_callback_query.assert_called_once_with("cb8", "⏳ 처리 중입니다")
 
+    async def test_processing_answer_failure_still_runs_approval(
+        self, receiver, adapter, approval_service
+    ):
+        """「처리 중」 응답이 예외를 내도 승인은 실행되고 결과 메시지 하나만 간다."""
+        adapter.answer_callback_query.side_effect = RuntimeError("telegram down")
+        update = {
+            "callback_query": {
+                "id": "cb9",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 100}},
+                "data": "approve:abc123",
+            }
+        }
+        receiver._reply = AsyncMock()
+        await receiver._handle_update(update)
+        await receiver._jobs.join()
+
+        approval_service.approve.assert_awaited_once()
+        receiver._reply.assert_awaited_once()
+        assert receiver._reply.call_args.args[0] == 100
+        assert "✅ 결재 승인 완료" in receiver._reply.call_args.args[1]
+
 
 # ── /approve, /reject 텍스트 명령 스펙아웃 회귀 (#2379) ──
 # 텔레그램 결재는 인라인 버튼 callback 전용. 텍스트 명령 /approve·/reject는
