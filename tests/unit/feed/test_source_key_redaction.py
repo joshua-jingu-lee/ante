@@ -686,12 +686,18 @@ async def test_message_without_key_is_unchanged_at_sites(
         ("ok", "dg.fetch_by_date", "[]"),
         ("echo-auth", "dart.validate_credentials", "False"),
         ("echo-auth", "dg.validate_credentials", "False"),
+        ("echo-auth", "dart.fetch_corp_codes", "CriticalApiError"),
+        ("echo-limit", "dart.fetch_financial", "DailyLimitExceededError"),
+        ("echo-limit", "dg.fetch_by_date", "DailyLimitExceededError"),
     ],
 )
 async def test_short_key_classifies_on_original_code(
     behavior: str, entry: str, expected: str, server: _ServerThread
 ) -> None:
-    result = await _run_entry(entry, "0", server.url(behavior), None)
+    try:
+        result = await _run_entry(entry, "0", server.url(behavior), None)
+    except Exception as exc:
+        result = type(exc).__name__
     shown = str(result[0]) if isinstance(result, tuple) else str(result)
     assert shown == expected
 
