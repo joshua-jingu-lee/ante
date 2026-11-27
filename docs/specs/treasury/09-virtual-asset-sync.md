@@ -43,6 +43,8 @@ PositionHistory(account_id의 미청산 포지션)
 `price_resolver`를 활용한다. 조회 실패 또는 `price_resolver` 미주입 시
 `avg_entry_price` fallback을 허용한다.
 
+평가액의 fallback으로 쓴 `avg_entry_price`는 동기화 시세(`get_synced_price`)로 기록하지 않는다. 시세의 계약은 [04-treasury-interface.md](04-treasury-interface.md#자산-평가-동기화-계약)의 「동기화 시세 (#3103)」가 SSOT다.
+
 ### 영향 범위
 
 - `get_summary()`: 수정 없음 — 입력 값(`_purchase_amount`, `_eval_amount`)이 갱신되면 기존 산식 그대로 동작
@@ -63,3 +65,10 @@ PositionHistory(account_id의 미청산 포지션)
 
 - **Treasury는 포지션을 소유하지 않는다** — 이 원칙은 유지된다. Virtual 동기화에서도 PositionHistory를 *조회만* 하며, 포지션 관리 책임은 Trade 모듈에 있다.
 - **get_summary() 하위 로직은 모드 무관** — 동기화 경로만 다르고, 산출 로직은 동일하다.
+
+### 동기화 시세의 알려진 한계 (#3103)
+
+1. 재시작 직후 첫 동기화가 끝나기 전에는 시세가 없다. 시세는 메모리에만 있고, readiness `TREASURY_SYNC`의 표시는 첫 동기화의 완료를 뜻하지 않는다.
+2. `price_resolver`가 없는 Virtual 계좌(게이트웨이 미주입)에는 시세가 생기지 않는다.
+3. 동기화 뒤에 새로 산 종목은 다음 동기화까지 시세가 없다.
+4. Live 계좌에서 내부 포지션에는 있지만 브로커의 `get_positions()` 응답에 없는 종목은, 성공한 동기화의 정리로 시세가 없게 된다.
