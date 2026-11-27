@@ -79,7 +79,7 @@ NotificationService는 `NotificationEvent`만 구독하여 발송한다. 개별 
 | `subscribe` | defer: bool = False | None | `NotificationEvent`와 `ConfigChangedEvent` 구독 등록. `defer=True`이면 `release` 전까지 알림을 큐에 쌓는다 |
 | `release` | — | None | 쌓인 알림을 보내는 백그라운드 작업자를 시작하고 쌓기를 끝낸다 |
 | `stop` | grace: float = 5.0 | None | 작업자가 큐를 비우기를 최대 `grace`초 기다린 뒤 취소한다. 남은 건수는 경고 로그로 남긴다 |
-| `_on_notification` | event: NotificationEvent | None | 필터링 → 발송 |
+| `_on_notification` | event: NotificationEvent | None | 쌓는 중이거나, 큐가 비어 있지 않고 CRITICAL이 아니면 큐에 붙인다. 아니면 바로 필터링 → 중복 억제 → 발송 |
 | `_on_config_changed` | event: ConfigChangedEvent | None | `notification.telegram_enabled`, `notification.min_level`, `notification.quiet_hours` 런타임 반영 |
 | `_should_send` | level: NotificationLevel | bool | 발송 여부 판단. CRITICAL은 always-send |
 | `parse_quiet_hours` | value: str | tuple[time, time] \| None | `HH:MM-HH:MM` 형식 파싱. invalid이면 None |

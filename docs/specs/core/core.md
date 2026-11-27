@@ -418,9 +418,9 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 3. Logging 초기화                          # logging.directory 참조
 4. Database 초기화                         # db.path 참조, SQLite 연결, WAL 모드 설정
 5. EventBus 초기화
-6. AccountService 초기화                   # DB + EventBus 주입, 기존 Account 로드
-7. DynamicConfigService 초기화             # DB + EventBus 주입
-8. NotificationService 구독                # EventBus + 알림 어댑터, 기동 중 알림은 큐에 쌓는다
+6. DynamicConfigService 초기화             # DB + EventBus 주입
+7. NotificationService 구독                # EventBus + 알림 어댑터, 기동 중 알림은 큐에 쌓는다
+8. AccountService 초기화                   # DB + EventBus 주입, 기존 Account 로드
 9. TreasuryManager 초기화                  # 계좌별 Treasury 생성
 10. TradeService 초기화                    # DB + EventBus (PositionHistory, TradeRecorder, PerformanceTracker)
 11. RuleEngineManager 초기화               # 계좌별 RuleEngine 생성 (Config + DynamicConfig + EventBus + AccountService)
@@ -436,7 +436,7 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 
 NotificationService는 계좌·거래·APIGateway 초기화보다 먼저 구독해, 그 단계들이 내는 기동 실패 알림(브로커 연결 실패·실시간 시세 연결 실패·잔고 동기화 실패 등)을 받는다. 기동 중에는 전송을 기다리지 않고 쌓기만 하므로, 텔레그램이 응답하지 않아도 IPC 서버가 늦게 뜨지 않는다.
 
-계좌 topology는 6~13단계에서 서버 시작 시점의 DB 상태를 기준으로 고정된다.
+계좌 topology는 8~13단계에서 서버 시작 시점의 DB 상태를 기준으로 고정된다.
 계좌 생성/삭제/credentials·broker_config·commission 변경은 cold-path 전용이며, 서버 실행 중
 hot-add/hot-remove를 수행하지 않는다.
 
