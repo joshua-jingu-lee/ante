@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, TypeGuard
 
 from ante.core import clock
 from ante.core.market_data_vocab import is_krx_symbol
+from ante.core.price import SYNCED_PRICE_MISSING, SYNCED_PRICE_STALE
 from ante.rule.base import (
     EvaluationResult,
     Rule,
@@ -33,7 +34,6 @@ from ante.rule.strategy_rules import (
     TradeFrequencyRule,
     UnrealizedLossLimitRule,
 )
-from ante.treasury.treasury import SYNCED_PRICE_MISSING, SYNCED_PRICE_STALE
 
 if TYPE_CHECKING:
     from ante.account.models import Account

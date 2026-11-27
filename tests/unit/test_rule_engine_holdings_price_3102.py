@@ -782,6 +782,7 @@ async def test_r10_treasury_exceptions_reject_buy_but_not_sell(h: _H) -> None:
 
     await h.order(B, side="sell")
     assert len(h.validated) == 1
+    assert h.notifications == []
 
 
 @pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf"), True, "1"])

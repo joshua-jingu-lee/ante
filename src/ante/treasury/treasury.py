@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
 from ante.account.scoping import require_account_id
 from ante.core import clock
+from ante.core.price import SYNCED_PRICE_MISSING, SYNCED_PRICE_STALE
 from ante.treasury.exceptions import DuplicateReservationError
 from ante.treasury.models import BotBudget
 
@@ -141,9 +142,6 @@ _SNAPSHOT_MIGRATION_COLUMNS = [
 _SNAPSHOT_RETENTION_DAYS = 365 * 5
 
 _PURCHASABLE_PROBE_SYMBOL = "005930"
-
-SYNCED_PRICE_MISSING = "no synced price"
-SYNCED_PRICE_STALE = "synced price stale"
 
 
 def _is_positive_finite(value: object) -> TypeGuard[int | float]:

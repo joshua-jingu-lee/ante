@@ -113,7 +113,6 @@
     "rule->account",
     "rule->core",
     "rule->eventbus",
-    "rule->treasury",
     "strategy->core",
     "trade->account",
     "trade->core",
