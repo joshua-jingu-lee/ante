@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
 from ante.account.scoping import require_account_id
 from ante.core import clock
-from ante.core.price import SYNCED_PRICE_MISSING, SYNCED_PRICE_STALE
+from ante.core.price import SYNCED_PRICE_MISSING, SYNCED_PRICE_STALE, is_valid_price
 from ante.treasury.exceptions import DuplicateReservationError
 from ante.treasury.models import BotBudget
 
@@ -142,6 +142,14 @@ _SNAPSHOT_MIGRATION_COLUMNS = [
 _SNAPSHOT_RETENTION_DAYS = 365 * 5
 
 _PURCHASABLE_PROBE_SYMBOL = "005930"
+
+
+def _safe_repr(value: object) -> str:
+    """거부 사유에 싣는 ``repr`` — 문자열 변환 상한을 넘는 정수는 고정 문구로."""
+    try:
+        return repr(value)
+    except ValueError:
+        return f"<unrenderable {type(value).__name__}>"
 
 
 def _is_positive_finite(value: object) -> TypeGuard[int | float]:
@@ -895,9 +903,7 @@ class Treasury:
                 )
                 return
 
-            if not (
-                isinstance(quote, int | float) and math.isfinite(quote) and quote > 0
-            ):
+            if not is_valid_price(quote):
                 await self._eventbus.publish(
                     OrderRejectedEvent(
                         order_id=event.order_id,
@@ -911,7 +917,7 @@ class Treasury:
                         account_id=self._account_id,
                         reason=(
                             f"market_buy_quote_unavailable: "
-                            f"non-finite or non-positive quote {quote!r}"
+                            f"non-finite or non-positive quote {_safe_repr(quote)}"
                         ),
                         exchange=event.exchange,
                     )
