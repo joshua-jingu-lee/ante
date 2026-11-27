@@ -887,3 +887,19 @@ async def test_stop_sync_clears_coverage(virtual: _H) -> None:
     await virtual.treasury.stop_sync()
 
     assert virtual.treasury.get_last_sync_coverage() is None
+
+
+async def test_start_sync_clears_coverage(virtual: _H) -> None:
+    await virtual.sync({})
+    assert virtual.treasury.get_last_sync_coverage() is not None
+
+    virtual.treasury.start_sync(
+        None,
+        virtual.position_history,
+        interval_seconds=INTERVAL,
+        trading_mode="virtual",
+    )
+    try:
+        assert virtual.treasury.get_last_sync_coverage() is None
+    finally:
+        await virtual.treasury.stop_sync()
