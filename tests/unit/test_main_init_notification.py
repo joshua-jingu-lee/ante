@@ -1,19 +1,31 @@
-"""``_init_notification`` 단위 테스트 (#1118).
+"""알림 서비스 생성과 텔레그램 명령 수신기 시작 단위 테스트 (#1118, #3109).
 
 ``notification.telegram_enabled=false`` 일 때 Telegram 시크릿 조회 없이
 즉시 반환되는지, 활성화 상태에서 시크릿이 없으면 ``ConfigError`` 를
-흡수하고 건너뛰는지 검증한다.
+흡수하고 건너뛰는지 검증한다. 기동 중에 쌓인 알림의 해제·종료 순서도 본다.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from ante.config import ConfigError
-from ante.main import Services, _init_notification
+from ante.main import (
+    Services,
+    _init_notification_service,
+    _init_telegram_receiver,
+)
+
+
+async def _init_notification(s: Services) -> None:
+    """``main()`` 이 부르는 두 단계를 차례로 부른다."""
+    await _init_notification_service(s)
+    await _init_telegram_receiver(s)
 
 
 class _StubConfig:
@@ -105,8 +117,9 @@ async def test_disabled_with_secrets_still_creates_service(
     class _StubNotificationService:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             created_kwargs.append(kwargs)
+            self.adapter = kwargs["adapter"]
 
-        def subscribe(self) -> None:
+        def subscribe(self, *, defer: bool = False) -> None:
             pass
 
     monkeypatch.setattr(
@@ -219,8 +232,9 @@ async def test_enabled_with_secrets_initializes_service(
     class _StubNotificationService:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             created.append(SimpleNamespace(args=args, kwargs=kwargs))
+            self.adapter = kwargs["adapter"]
 
-        def subscribe(self) -> None:
+        def subscribe(self, *, defer: bool = False) -> None:
             pass
 
     monkeypatch.setattr(
@@ -281,9 +295,9 @@ def _real_config_services(
 
     class _StubNotificationService:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
-            pass
+            self.adapter = kwargs["adapter"]
 
-        def subscribe(self) -> None:
+        def subscribe(self, *, defer: bool = False) -> None:
             pass
 
     captured: list[dict[str, Any]] = []
@@ -347,3 +361,227 @@ async def test_receiver_and_sender_share_env_chat_id_over_secrets_file(
     assert len(captured) == 1
     assert captured[0]["allowed_user_ids"] == [7]
     assert captured[0]["adapter"]._chat_id == "7"
+
+
+# ── #3109: 서비스·수신기 분리, 기동 중 쌓기, 종료 순서 ────────────────────────
+
+
+class _RecordingAdapter:
+    """보낸 제목을 기록하는 알림 어댑터 더블. ``delay`` 만큼 전송이 걸린다."""
+
+    def __init__(self, delay: float = 0.0) -> None:
+        self.delay = delay
+        self.titles: list[str] = []
+
+    async def send(self, level: Any, message: str) -> bool:
+        return True
+
+    async def send_rich(
+        self, level: Any, title: str, body: str, metadata: Any = None
+    ) -> bool:
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        self.titles.append(title)
+        return True
+
+
+def _receiver_stub(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    import ante.notification as notification_mod
+
+    captured: list[dict[str, Any]] = []
+
+    class _StubReceiver:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            captured.append(kwargs)
+
+        def start(self) -> None:
+            pass
+
+    monkeypatch.setattr(notification_mod, "TelegramCommandReceiver", _StubReceiver)
+    return captured
+
+
+def _real_service_services(
+    *, chat_id: str = "42", telegram_enabled: str = "true"
+) -> Services:
+    from ante.eventbus import EventBus
+
+    s = _make_services(
+        telegram_enabled=telegram_enabled,
+        secrets={"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": chat_id},
+    )
+    s.eventbus = EventBus()
+    return s
+
+
+@pytest.mark.asyncio
+async def test_receiver_shares_adapter_instance_with_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """수신기는 알림 서비스가 보내는 데 쓰는 바로 그 어댑터를 받는다."""
+    captured = _receiver_stub(monkeypatch)
+    s = _real_service_services()
+
+    await _init_notification_service(s)
+    assert s.telegram_receiver is None
+    await _init_telegram_receiver(s)
+
+    assert len(captured) == 1
+    assert captured[0]["adapter"] is s.notification_service.adapter
+    assert captured[0]["allowed_user_ids"] == [42]
+
+
+@pytest.mark.asyncio
+async def test_service_subscribes_in_deferring_mode() -> None:
+    """서비스는 쌓기 모드로 구독해, 해제 전에는 어댑터를 부르지 않는다."""
+    from ante.eventbus.events import NotificationEvent
+
+    s = _real_service_services()
+    await _init_notification_service(s)
+    adapter = _RecordingAdapter()
+    s.notification_service._adapter = adapter
+
+    await s.eventbus.publish(NotificationEvent(level="error", title="기동 중"))
+    assert adapter.titles == []
+
+    s.notification_service.release()
+    await s.notification_service.stop()
+    assert adapter.titles == ["기동 중"]
+
+
+@pytest.mark.asyncio
+async def test_receiver_skips_when_service_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """서비스가 없으면(시크릿 없음·공란) 수신기도 만들지 않고 돌아온다."""
+    captured = _receiver_stub(monkeypatch)
+    s = _make_services(telegram_enabled="true", secrets=None)
+
+    await _init_notification_service(s)
+    await _init_telegram_receiver(s)
+
+    assert s.notification_service is None
+    assert s.telegram_receiver is None
+    assert captured == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chat_id", "telegram_enabled", "level", "phrase"),
+    [
+        (
+            "not-int",
+            "true",
+            logging.WARNING,
+            "TELEGRAM_CHAT_ID 값이 올바른 정수가 아닙니다: 'not-int' — 무시합니다",
+        ),
+        (
+            "42",
+            "false",
+            logging.INFO,
+            "TelegramCommandReceiver 건너뜀 — telegram_enabled=false",
+        ),
+        (
+            "not-int",
+            "true",
+            logging.INFO,
+            "TelegramCommandReceiver 건너뜀 — TELEGRAM_CHAT_ID 미설정",
+        ),
+    ],
+)
+async def test_receiver_skip_branches_keep_log_phrases(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    chat_id: str,
+    telegram_enabled: str,
+    level: int,
+    phrase: str,
+) -> None:
+    """수신기의 건너뜀 분기 셋은 나눈 뒤에도 같은 로그 문구로 건너뛴다."""
+    captured = _receiver_stub(monkeypatch)
+    s = _real_service_services(chat_id=chat_id, telegram_enabled=telegram_enabled)
+
+    with caplog.at_level(logging.INFO, logger="ante.main"):
+        await _init_notification_service(s)
+        await _init_telegram_receiver(s)
+
+    assert s.notification_service is not None
+    assert s.telegram_receiver is None
+    assert captured == []
+    assert any(
+        r.levelno == level and r.getMessage() == phrase for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+@pytest.mark.asyncio
+async def test_rules_unavailable_notice_is_sent_exactly_once() -> None:
+    """뒤로 늦춘 규칙 차단 알림은 쌓였다가 해제 뒤 정확히 한 번 나간다."""
+    from ante.main import _notify_rules_unavailable
+
+    s = _real_service_services()
+    await _init_notification_service(s)
+    adapter = _RecordingAdapter()
+    s.notification_service._adapter = adapter
+    s.rule_engine_manager = SimpleNamespace(
+        rules_unavailable_accounts=lambda: {"acc-1": "not_list"}
+    )
+
+    await _notify_rules_unavailable(s)
+    s.notification_service.release()
+    await s.notification_service.stop()
+
+    assert adapter.titles == ["계좌 규칙을 읽지 못함 — 주문 차단"]
+
+
+def _shutdown_services(adapter: _RecordingAdapter) -> tuple[Services, list[str]]:
+    from ante.eventbus import EventBus
+    from ante.notification.service import NotificationService
+
+    s = Services()
+    s.eventbus = EventBus()
+    s.notification_service = NotificationService(
+        adapter=adapter,  # type: ignore[arg-type]
+        eventbus=s.eventbus,
+    )
+    s.notification_service.subscribe(defer=True)
+    seen_at_receiver_stop: list[str] = []
+
+    class _Receiver:
+        async def stop(self) -> None:
+            seen_at_receiver_stop.extend(adapter.titles)
+
+    s.telegram_receiver = _Receiver()
+    return s, seen_at_receiver_stop
+
+
+@pytest.mark.asyncio
+async def test_shutdown_with_empty_queue_sends_system_stop_right_away() -> None:
+    """큐가 빈 평소 종료에서 「시스템 종료」는 정지 전에 바로 닿는다."""
+    from ante.main import _shutdown
+
+    adapter = _RecordingAdapter()
+    s, seen = _shutdown_services(adapter)
+    s.notification_service.release()
+    await asyncio.sleep(0)
+
+    await _shutdown(s)
+
+    assert seen == ["시스템 종료"]
+    assert adapter.titles == ["시스템 종료"]
+
+
+@pytest.mark.asyncio
+async def test_shutdown_during_drain_sends_system_stop_last() -> None:
+    """큐를 비우는 중의 종료에서 「시스템 종료」는 버려지지 않고 마지막으로 닿는다."""
+    from ante.eventbus.events import NotificationEvent
+    from ante.main import _shutdown
+
+    adapter = _RecordingAdapter(delay=0.1)
+    s, _ = _shutdown_services(adapter)
+    for title in ("A", "B", "C"):
+        await s.eventbus.publish(NotificationEvent(level="error", title=title))
+    s.notification_service.release()
+
+    await asyncio.wait_for(_shutdown(s), timeout=10.0)
+
+    assert adapter.titles == ["A", "B", "C", "시스템 종료"]

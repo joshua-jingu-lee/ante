@@ -5,6 +5,7 @@ NotificationService는 NotificationEvent 단일 구독으로 동작한다.
 각 모듈이 NotificationEvent를 직접 발행하는 구조.
 """
 
+import asyncio
 import inspect
 from datetime import time
 
@@ -615,3 +616,215 @@ class TestQuietHoursConfigChange:
         )
         assert service._quiet_start is None
         assert service._quiet_end is None
+
+
+# ── 기동 중 쌓기 · 해제 뒤 전송 · 정지 (#3109) ─────────
+
+
+class GatedAdapter(NotificationAdapter):
+    """보낸 제목을 기록한다. ``blocked`` 의 제목은 ``gate`` 가 열릴 때까지 막힌다."""
+
+    def __init__(self, blocked: set[str] | None = None) -> None:
+        self.blocked = blocked or set()
+        self.gate = asyncio.Event()
+        self.started: list[str] = []
+        self.delivered: list[str] = []
+
+    async def send(self, level: NotificationLevel, message: str) -> bool:
+        return True
+
+    async def send_rich(
+        self,
+        level: NotificationLevel,
+        title: str,
+        body: str,
+        metadata: dict | None = None,
+    ) -> bool:
+        self.started.append(title)
+        if title in self.blocked:
+            await self.gate.wait()
+        self.delivered.append(title)
+        return True
+
+
+def _event(title: str, level: str = "info") -> NotificationEvent:
+    return NotificationEvent(level=level, title=title, message=f"{title} 본문")
+
+
+async def _until(predicate, *, guard: float = 5.0) -> None:
+    async def _poll() -> None:
+        while not predicate():
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(_poll(), timeout=guard)
+
+
+def _deferred(adapter: NotificationAdapter, **kwargs) -> tuple:
+    bus = EventBus()
+    svc = NotificationService(adapter=adapter, eventbus=bus, **kwargs)
+    svc.subscribe(defer=True)
+    return svc, bus
+
+
+class TestDeferredDelivery:
+    async def test_events_wait_until_release_then_go_in_publish_order(self):
+        """쌓는 중의 알림은 CRITICAL을 포함해 해제 뒤 발행 순서대로 나간다."""
+        adapter = GatedAdapter()
+        svc, bus = _deferred(adapter)
+
+        await bus.publish(_event("A"))
+        await bus.publish(_event("K", level="critical"))
+        await bus.publish(_event("B", level="error"))
+        assert adapter.started == []
+
+        svc.release()
+        await _until(lambda: len(adapter.delivered) == 3)
+
+        assert adapter.delivered == ["A", "K", "B"]
+
+    async def test_non_critical_published_during_drain_goes_after_queue(self):
+        """해제 뒤 큐를 비우는 중에 낸 CRITICAL이 아닌 알림은 큐 뒤에 붙는다."""
+        adapter = GatedAdapter(blocked={"A"})
+        svc, bus = _deferred(adapter)
+        await bus.publish(_event("A"))
+        await bus.publish(_event("B"))
+
+        svc.release()
+        await _until(lambda: adapter.started == ["A"])
+        await bus.publish(_event("C", level="error"))
+        assert adapter.started == ["A"]
+
+        adapter.gate.set()
+        await _until(lambda: len(adapter.delivered) == 3)
+        assert adapter.delivered == ["A", "B", "C"]
+
+    async def test_published_while_last_item_sending_goes_after_it(self):
+        """마지막 건을 보내는 중에 낸 알림은 그 뒤에 닿는다(보낸 뒤 꺼내기)."""
+        adapter = GatedAdapter(blocked={"A"})
+        svc, bus = _deferred(adapter)
+        await bus.publish(_event("A"))
+
+        svc.release()
+        await _until(lambda: adapter.started == ["A"])
+        await bus.publish(_event("C"))
+        assert adapter.started == ["A"]
+
+        adapter.gate.set()
+        await _until(lambda: len(adapter.delivered) == 2)
+        assert adapter.delivered == ["A", "C"]
+
+    async def test_critical_during_drain_is_sent_before_queue(self):
+        """해제 뒤 큐를 비우는 중에 낸 CRITICAL은 큐를 기다리지 않고 바로 나간다."""
+        adapter = GatedAdapter(blocked={"A"})
+        svc, bus = _deferred(adapter)
+        await bus.publish(_event("A"))
+        await bus.publish(_event("B"))
+
+        svc.release()
+        await _until(lambda: adapter.started == ["A"])
+        await bus.publish(_event("K", level="critical"))
+        assert adapter.delivered == ["K"]
+
+        adapter.gate.set()
+        await _until(lambda: len(adapter.delivered) == 3)
+        assert adapter.delivered == ["K", "A", "B"]
+
+    async def test_after_drain_sends_immediately(self):
+        """큐가 비면 바로 보내는 평소 방식으로 돌아간다."""
+        adapter = GatedAdapter()
+        svc, bus = _deferred(adapter)
+        await bus.publish(_event("A"))
+        svc.release()
+        await _until(lambda: adapter.delivered == ["A"])
+
+        await bus.publish(_event("B"))
+
+        assert adapter.delivered == ["A", "B"]
+
+    async def test_filters_and_dedup_apply_at_send_time(self):
+        """최소 레벨·중복 억제는 쌓을 때가 아니라 보낼 때 평소의 경로로 판정한다."""
+        from ante.eventbus.events import ConfigChangedEvent
+
+        adapter = GatedAdapter()
+        svc, bus = _deferred(adapter, min_level=NotificationLevel.ERROR)
+        await bus.publish(_event("I"))
+        await bus.publish(_event("W", level="warning"))
+        await bus.publish(_event("D", level="error"))
+        await bus.publish(_event("D", level="error"))
+        await bus.publish(
+            ConfigChangedEvent(
+                category="notification",
+                key="notification.min_level",
+                old_value='"error"',
+                new_value='"warning"',
+                changed_by="test",
+            )
+        )
+
+        svc.release()
+        await _until(lambda: svc._drain_task is not None and svc._drain_task.done())
+
+        assert adapter.delivered == ["W", "D"]
+
+    async def test_one_failing_item_does_not_drop_the_rest(self, caplog):
+        """한 건의 처리 실패가 나머지 큐를 버리지 않고, 실패는 로그로 남는다."""
+        import logging
+
+        adapter = GatedAdapter()
+        svc, bus = _deferred(adapter)
+        await bus.publish(_event("bad", level="bogus"))
+        await bus.publish(_event("A"))
+
+        with caplog.at_level(logging.ERROR, logger="ante.notification.service"):
+            svc.release()
+            await _until(lambda: svc._drain_task.done())
+
+        assert adapter.delivered == ["A"]
+        assert any("쌓인 알림 전송 실패" in r.message for r in caplog.records)
+
+    async def test_stop_waits_for_drain(self):
+        """정지는 큐를 다 비울 때까지 기다린다."""
+        adapter = GatedAdapter(blocked={"A"})
+        svc, bus = _deferred(adapter)
+        await bus.publish(_event("A"))
+        await bus.publish(_event("B"))
+        svc.release()
+        await _until(lambda: adapter.started == ["A"])
+
+        asyncio.get_running_loop().call_later(0.05, adapter.gate.set)
+        await svc.stop(grace=5.0)
+
+        assert adapter.delivered == ["A", "B"]
+
+    async def test_stop_returns_after_timeout_with_blocked_adapter(self, caplog):
+        """막힌 어댑터에서 정지는 제한 시간 뒤 작업자를 취소하고 남은 건수를 남긴다."""
+        import logging
+
+        adapter = GatedAdapter(blocked={"A"})
+        svc, bus = _deferred(adapter)
+        await bus.publish(_event("A"))
+        await bus.publish(_event("B"))
+        svc.release()
+        await _until(lambda: adapter.started == ["A"])
+
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        with caplog.at_level(logging.WARNING, logger="ante.notification.service"):
+            await asyncio.wait_for(svc.stop(grace=0.05), timeout=2.0)
+        elapsed = loop.time() - started
+
+        assert 0.05 <= elapsed < 2.0
+        assert svc._drain_task.cancelled()
+        assert adapter.delivered == []
+        assert any("2건" in r.message for r in caplog.records)
+
+    def test_stop_timeout_defaults_to_five_seconds(self):
+        """정지의 기본 제한 시간은 5초다."""
+        param = inspect.signature(NotificationService.stop).parameters["grace"]
+        assert param.default == 5.0
+
+    def test_adapter_property_returns_same_instance(self):
+        """``adapter`` 는 서비스가 보내는 데 쓰는 바로 그 인스턴스다."""
+        adapter = GatedAdapter()
+        svc = NotificationService(adapter=adapter, eventbus=EventBus())
+        assert svc.adapter is adapter

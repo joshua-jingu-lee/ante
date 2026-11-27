@@ -162,6 +162,15 @@ async def test_main_writes_marker_before_pid_and_removes_after_init_ipc(
 
         return _step
 
+    class _RecordingNotificationService:
+        def release(self) -> None:
+            calls.append("release")
+            steps.append("release")
+
+    async def fake_init_notification_service(s: main_module.Services) -> None:
+        steps.append("_init_notification_service")
+        s.notification_service = _RecordingNotificationService()
+
     step_names = (
         "_init_services",
         "_init_account",
@@ -170,10 +179,13 @@ async def test_main_writes_marker_before_pid_and_removes_after_init_ipc(
         "_restore_bots",
         "_init_feed",
         "_init_approval",
-        "_init_notification",
+        "_init_telegram_receiver",
     )
     for name in step_names:
         monkeypatch.setattr(main_module, name, fake_init_step(name))
+    monkeypatch.setattr(
+        main_module, "_init_notification_service", fake_init_notification_service
+    )
     monkeypatch.setattr(main_module, "_init_core", fake_init_core)
     monkeypatch.setattr(main_module, "_init_ipc", fake_init_ipc)
     monkeypatch.setattr(main_module, "_run", fake_run)
@@ -184,9 +196,15 @@ async def test_main_writes_marker_before_pid_and_removes_after_init_ipc(
     assert not main_module._starting_marker_path(config).exists()
     assert not config.runtime_pid_path().exists()
     assert calls[:4] == ["write_marker", "write_pid", "init_core", "init_ipc"]
-    assert calls[calls.index("init_ipc") + 1] == "remove_marker"
+    assert calls[calls.index("init_ipc") + 1] == "release"
+    assert calls[calls.index("release") + 1] == "remove_marker"
     assert calls[-1] == "remove_marker"
-    assert steps == [*step_names, "_init_ipc"]
+    assert steps == [
+        "_init_notification_service",
+        *step_names,
+        "_init_ipc",
+        "release",
+    ]
 
 
 @pytest.mark.asyncio
