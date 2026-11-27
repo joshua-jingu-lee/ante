@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 CHANNEL_PRICE = "H0STCNT0"
 CHANNEL_EXECUTION = "H0STCNI0"
+TR_ID_PINGPONG = "PINGPONG"
+
+PRICE_RECORD_FIELDS = 46
+MAX_CONTROL_FRAME_PAYLOAD = 125
 
 MAX_SUBSCRIPTIONS = 40
 
@@ -29,6 +33,29 @@ DEFAULT_PING_INTERVAL = 30.0
 
 PriceCallback = Callable[[str, float], Coroutine[Any, Any, None]]
 ExecutionCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
+
+
+def _is_pingpong(message: object) -> bool:
+    """KIS PINGPONG JSON 메시지인지 본다. 어떤 입력에도 예외를 내지 않는다."""
+    if isinstance(message, bytes):
+        try:
+            text = message.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+    elif isinstance(message, str):
+        text = message
+    else:
+        return False
+    if not text.startswith("{"):
+        return False
+    try:
+        data = json.loads(text)
+    except (ValueError, RecursionError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    header = data.get("header")
+    return isinstance(header, dict) and header.get("tr_id") == TR_ID_PINGPONG
 
 
 class KISStreamClient:
@@ -68,6 +95,8 @@ class KISStreamClient:
         self._execution_callbacks: list[ExecutionCallback] = []
 
         self._reconnect_delay = DEFAULT_RECONNECT_DELAY
+        self._pong_too_long_warned = False
+        self._record_count_warned = False
 
     @property
     def is_connected(self) -> bool:
@@ -216,12 +245,32 @@ class KISStreamClient:
             async for message in ws:
                 if not self._running:
                     break
+                if _is_pingpong(message):
+                    await self._send_pong(ws, message)
+                    continue
                 try:
                     await self._handle_message(message)
                 except Exception:
                     logger.exception("WebSocket 메시지 처리 오류")
 
         self._ws = None
+        if self._running:
+            raise ConnectionError("KIS WebSocket 서버가 연결을 닫았다")
+
+    async def _send_pong(self, ws: Any, message: str | bytes) -> None:
+        """받은 원문을 pong으로 되돌리고, 제어 프레임 한도를 넘으면 보내지 않는다."""
+        payload = message if isinstance(message, bytes) else message.encode("utf-8")
+        if len(payload) > MAX_CONTROL_FRAME_PAYLOAD:
+            level = logging.DEBUG if self._pong_too_long_warned else logging.WARNING
+            self._pong_too_long_warned = True
+            logger.log(
+                level,
+                "KIS PINGPONG 원문이 %d바이트라 pong(최대 %d바이트)을 보내지 않는다",
+                len(payload),
+                MAX_CONTROL_FRAME_PAYLOAD,
+            )
+            return
+        await ws.pong(message)
 
     async def _resubscribe_all(self) -> None:
         """재연결 후 기존 구독 복구."""
@@ -274,22 +323,45 @@ class KISStreamClient:
 
         tr_id = parts[1]
         if tr_id == CHANNEL_PRICE:
-            await self._handle_price_data(parts[3])
+            await self._handle_price_data(parts[3], parts[2])
         elif tr_id == CHANNEL_EXECUTION:
             await self._handle_execution_data(parts[3])
 
-    async def _handle_price_data(self, data_str: str) -> None:
-        """실시간 시세 데이터 파싱 및 콜백 호출."""
-        fields = data_str.split("^")
-        if len(fields) < 3:
-            return
+    async def _handle_price_data(self, data_str: str, count_str: str) -> None:
+        """시세 프레임의 레코드마다 차례로 가격 콜백을 부른다."""
+        for record in self._price_records(data_str.split("^"), count_str):
+            if len(record) < 3:
+                continue
+            try:
+                price = float(record[2])
+            except ValueError:
+                continue
+            await self._dispatch_price(record[0], price)
 
-        symbol = fields[0]
+    def _price_records(self, fields: list[str], count_str: str) -> list[list[str]]:
+        """건수 × 46필드로 레코드를 나누고, 맞지 않으면 첫 레코드만 돌려준다."""
         try:
-            price = float(fields[2])
-        except (ValueError, IndexError):
-            return
+            count = int(count_str)
+        except ValueError:
+            count = 0
+        if count > 0 and len(fields) == count * PRICE_RECORD_FIELDS:
+            return [
+                fields[start : start + PRICE_RECORD_FIELDS]
+                for start in range(0, len(fields), PRICE_RECORD_FIELDS)
+            ]
+        level = logging.DEBUG if self._record_count_warned else logging.WARNING
+        self._record_count_warned = True
+        logger.log(
+            level,
+            "KIS 시세 프레임의 값 %d개가 건수 %r × %d와 맞지 않아 첫 레코드만 처리한다",
+            len(fields),
+            count_str,
+            PRICE_RECORD_FIELDS,
+        )
+        return [fields]
 
+    async def _dispatch_price(self, symbol: str, price: float) -> None:
+        """가격 콜백을 차례로 부르고, 콜백의 오류는 남기고 넘어간다."""
         for callback in self._price_callbacks:
             try:
                 await callback(symbol, price)
