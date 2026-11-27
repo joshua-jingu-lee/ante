@@ -38,6 +38,7 @@ import ante.bot.reconcile_scheduler as scheduler_mod
 import ante.broker.fill_scheduler as fill_scheduler_mod
 import ante.core.log as core_log_mod
 import ante.main as main_module
+import ante.notification as notification_mod
 import ante.trade as trade_mod
 from ante.account import Account, AccountService, TradingMode
 from ante.account.readiness import ReadinessFlag
@@ -57,6 +58,7 @@ from ante.eventbus.events import (
     StopOrderExpiredEvent,
 )
 from ante.ipc.client import IPCClient
+from ante.notification.base import NotificationAdapter, NotificationLevel
 from ante.trade.fill_outbox import FillOutboxPublisher
 from tests.conftest import ManualClock
 
@@ -192,6 +194,32 @@ class _QuietPublisher(FillOutboxPublisher):
         super().__init__(**kwargs)
 
 
+class _FakeTelegram(NotificationAdapter):
+    """TelegramAdapter 더블. 받은 제목을 기록하고 외부에 보내지 않는다.
+
+    ``blocked`` 이면 ``gate`` 가 열릴 때까지 모든 전송이 막힌다."""
+
+    def __init__(self, *, blocked: bool = False) -> None:
+        self.gate = asyncio.Event()
+        if not blocked:
+            self.gate.set()
+        self.titles: list[str] = []
+
+    async def send(self, level: NotificationLevel, message: str) -> bool:
+        return True
+
+    async def send_rich(
+        self,
+        level: NotificationLevel,
+        title: str,
+        body: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        await self.gate.wait()
+        self.titles.append(title)
+        return True
+
+
 AssembleFn = Callable[..., Awaitable[_Assembly]]
 
 
@@ -212,6 +240,7 @@ async def assemble(
         fill_succeeds: dict[str, bool] | None = None,
         before_gateway: Callable[[_Assembly], Any] | None = None,
         before_seed: Callable[[AccountService], Awaitable[None]] | None = None,
+        telegram: _FakeTelegram | None = None,
     ) -> _Assembly:
         config_dir = Path(tempfile.mkdtemp(prefix="aw", dir="/tmp"))
         cfg_static: dict[str, Any] = {
@@ -224,7 +253,13 @@ async def assemble(
             },
         }
         cfg_static.update(static or {})
-        config = Config(static=cfg_static, secrets={}, config_dir=config_dir)
+        secrets: dict[str, str] = {}
+        if telegram is not None:
+            secrets = {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "42"}
+            monkeypatch.setattr(
+                notification_mod, "TelegramAdapter", lambda **kwargs: telegram
+            )
+        config = Config(static=cfg_static, secrets=secrets, config_dir=config_dir)
         log: list[str] = []
         runs: list[tuple[str, bool]] = []
         succeeds = dict(fill_succeeds or {})
@@ -255,6 +290,8 @@ async def assemble(
         await main_module._init_core(s)
         assert s.db is not None and s.eventbus is not None
         await run_migrations(s.db, data_path=config_dir / "data")
+        if telegram is not None:
+            await main_module._init_notification_service(s)
         seed = AccountService(db=s.db, eventbus=s.eventbus)
         await seed.initialize()
         if before_seed is not None:
@@ -276,6 +313,8 @@ async def assemble(
         await main_module._init_gateway(s)
         await main_module._restore_bots(s)
         await main_module._init_ipc(s)
+        if s.notification_service is not None:
+            s.notification_service.release()
         return asm
 
     yield _assemble
@@ -1627,3 +1666,79 @@ async def test_daily_report_scheduler_assembly_with_no_accounts() -> None:
             assert s.daily_report_schedulers == {}
         finally:
             await db.close()
+
+
+# ── 기동 중 알림이 텔레그램에 닿는다 (#3109) ─────────────────────────────────
+
+
+async def test_startup_broker_connect_failure_reaches_telegram(
+    assemble: AssembleFn,
+) -> None:
+    """LIVE 계좌의 브로커 연결 실패로 기동하면 해제 뒤 「Broker 연결 실패」가 닿는다."""
+    telegram = _FakeTelegram()
+    await assemble(
+        [_kis_account("live-a")],
+        connect_errors={"live-a": RuntimeError("connect refused")},
+        telegram=telegram,
+    )
+
+    await _wait_for(lambda: "Broker 연결 실패" in telegram.titles)
+
+
+async def test_startup_stream_init_failure_reaches_telegram(
+    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """실시간 시세 연동 초기화가 실패하면 해제 뒤 「실시간 시세 연결 실패」가 닿는다."""
+
+    async def _fail(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("stream down")
+
+    monkeypatch.setattr(main_module, "_init_stream_integration", _fail)
+    monkeypatch.setattr(_FakeBroker, "websocket_url", "ws://stream.invalid:1")
+    telegram = _FakeTelegram()
+    await assemble([_kis_account("live-a")], telegram=telegram)
+
+    await _wait_for(lambda: "실시간 시세 연결 실패" in telegram.titles)
+
+
+async def test_startup_treasury_sync_failure_reaches_telegram(
+    assemble: AssembleFn,
+) -> None:
+    """Treasury 동기화 시작 실패 뒤 해제하면 「Treasury 잔고 동기화 실패」가 닿는다."""
+
+    def _break_sync(asm: _Assembly) -> None:
+        treasury = asm.s.treasury_manager.get("live-a")
+
+        def _raise(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("sync down")
+
+        treasury.start_sync = _raise
+
+    telegram = _FakeTelegram()
+    await assemble(
+        [_kis_account("live-a")], before_gateway=_break_sync, telegram=telegram
+    )
+
+    await _wait_for(lambda: "Treasury 잔고 동기화 실패" in telegram.titles)
+
+
+async def test_blocked_telegram_does_not_delay_startup(
+    assemble: AssembleFn,
+) -> None:
+    """텔레그램 전송이 막혀 있어도 기동이 끝나 IPC 서버가 뜨고, 알림은 쌓여 있다가
+    전송이 풀리면 나간다."""
+    telegram = _FakeTelegram(blocked=True)
+    asm = await asyncio.wait_for(
+        assemble(
+            [_kis_account("live-a")],
+            connect_errors={"live-a": RuntimeError("connect refused")},
+            telegram=telegram,
+        ),
+        timeout=15.0,
+    )
+
+    assert asm.s.ipc_server is not None
+    assert telegram.titles == []
+
+    telegram.gate.set()
+    await _wait_for(lambda: "Broker 연결 실패" in telegram.titles)
