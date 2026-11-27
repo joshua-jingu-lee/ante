@@ -12,6 +12,7 @@ from ante.account.errors import (
     AccountSuspendAllFailedError,
 )
 from ante.core import clock
+from ante.notification.telegram import TELEGRAM_REQUEST_TIMEOUT
 
 if TYPE_CHECKING:
     from ante.account.service import AccountService
@@ -128,10 +129,10 @@ class TelegramCommandReceiver:
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, params=params, timeout=aiohttp.ClientTimeout(total=5)
-                ) as resp:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=TELEGRAM_REQUEST_TIMEOUT)
+            ) as session:
+                async with session.get(url, params=params) as resp:
                     if resp.status != 200:
                         return []
                     data = await resp.json()
@@ -637,7 +638,9 @@ class TelegramCommandReceiver:
         payload = {"chat_id": chat_id, "text": text}
 
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=TELEGRAM_REQUEST_TIMEOUT)
+            ) as session:
                 async with session.post(url, json=payload) as resp:
                     if resp.status != 200:
                         logger.warning("텔레그램 회신 실패: status=%d", resp.status)
