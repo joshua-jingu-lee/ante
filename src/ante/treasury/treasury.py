@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
 from ante.account.scoping import require_account_id
 from ante.core import clock
+from ante.core.price import SYNCED_PRICE_MISSING, SYNCED_PRICE_STALE
 from ante.treasury.exceptions import DuplicateReservationError
 from ante.treasury.models import BotBudget
 
@@ -142,9 +143,6 @@ _SNAPSHOT_RETENTION_DAYS = 365 * 5
 
 _PURCHASABLE_PROBE_SYMBOL = "005930"
 
-SYNCED_PRICE_MISSING = "no synced price"
-SYNCED_PRICE_STALE = "synced price stale"
-
 
 def _is_positive_finite(value: object) -> TypeGuard[int | float]:
     """bool이 아닌 int·float이고 유한한 양수인지 예외 없이 판정한다."""
@@ -214,6 +212,7 @@ class Treasury:
         self._sync_task: asyncio.Task[None] | None = None
         self._sync_interval_seconds: object = None
         self._synced_prices: dict[str, tuple[float, float]] = {}
+        self._sync_coverage: tuple[float, datetime, frozenset[str]] | None = None
 
         self._account_number: str = ""
         self._is_demo_trading: bool = False
@@ -1484,6 +1483,7 @@ class Treasury:
             return
 
         self._sync_interval_seconds = interval_seconds
+        self._sync_coverage = None
         self._sync_task = asyncio.create_task(
             self._sync_loop(
                 broker,
@@ -1511,6 +1511,7 @@ class Treasury:
                 pass
             self._sync_task = None
             logger.info("잔고 동기화 중지")
+        self._sync_coverage = None
 
     async def _sync_loop(
         self,
@@ -1556,6 +1557,22 @@ class Treasury:
             return None, SYNCED_PRICE_STALE
         return price, None
 
+    def get_last_sync_coverage(self) -> tuple[datetime, frozenset[str]] | None:
+        """마지막으로 성공한 동기화의 진입 벽시계 시각과 다룬 종목을 동기 조회한다.
+
+        이 프로세스에서 성공한 동기화가 없거나, 그 진입에서
+        ``2 × interval_seconds``가 지났거나, 보관한 주기가 유한한 양수가
+        아니면 ``None``이다.
+        """
+        interval = self._sync_interval_seconds
+        coverage = self._sync_coverage
+        if coverage is None or not _is_positive_finite(interval):
+            return None
+        entered_mono, entered_at, symbols = coverage
+        if clock.monotonic() - entered_mono > 2 * float(interval):
+            return None
+        return entered_at, symbols
+
     def _record_synced_price(self, symbol: str, value: object) -> None:
         """검사를 지난 값만 받은 시각과 함께 동기화 시세 표에 덮어쓴다."""
         if _is_positive_finite(value):
@@ -1575,6 +1592,7 @@ class Treasury:
         """한 번의 잔고 동기화 수행 (Live 모드)."""
         from ante.eventbus.events import BalanceSyncedEvent
 
+        entered = (clock.monotonic(), clock.now(UTC))
         balance_data = await broker.get_account_balance()
         await self.sync_balance(balance_data)
 
@@ -1618,6 +1636,7 @@ class Treasury:
             )
         )
         self._prune_synced_prices(handled_symbols)
+        self._sync_coverage = (*entered, frozenset(handled_symbols | internal_symbols))
         logger.info(
             "잔고 동기화 완료: 예수금=%s, 매수가능=%s, 외부종목=%d건 (account=%s)",
             f"{self._account_balance:,.0f}",
@@ -1634,6 +1653,7 @@ class Treasury:
         """한 번의 잔고 동기화 수행 (Virtual 모드)."""
         from ante.eventbus.events import BalanceSyncedEvent
 
+        entered = (clock.monotonic(), clock.now(UTC))
         positions = await position_history.get_all_positions(
             account_id=self._account_id
         )
@@ -1677,6 +1697,7 @@ class Treasury:
             )
         )
         self._prune_synced_prices(handled_symbols)
+        self._sync_coverage = (*entered, frozenset(handled_symbols))
         logger.info(
             "Virtual 잔고 동기화 완료: 매수금=%s, 평가금=%s, 포지션=%d건 (account=%s)",
             f"{purchase_amount:,.0f}",

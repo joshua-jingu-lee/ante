@@ -7,12 +7,15 @@ RuleEngine은 Treasury가 없거나 조회가 예외를 던지면 매수를 거�
 않는다. ``fail``에 조회 이름을 주면 그 조회만 예외를 던진다.
 
 시장가 매수를 통과시키는 테스트는 ``fixed_quote``를 시세 조회로 넣는다(#3097).
+보유 종목의 동기화 시세와 성공한 동기화의 범위는 기본으로 없다(#3102).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+
+from ante.treasury.treasury import SYNCED_PRICE_MISSING
 
 TREASURY_QUERIES = (
     "get_summary",
@@ -71,6 +74,14 @@ class StubTreasury:
     async def get_prev_day_snapshot(self, before_date: str) -> dict[str, Any] | None:
         self._maybe_fail("get_prev_day_snapshot")
         return self._prev
+
+    def get_synced_price(self, symbol: str) -> tuple[float | None, str | None]:
+        """동기화 시세는 없다(#3102)."""
+        return None, SYNCED_PRICE_MISSING
+
+    def get_last_sync_coverage(self) -> None:
+        """성공한 동기화는 없다(#3102)."""
+        return None
 
 
 class StubTreasuryManager:
