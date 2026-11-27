@@ -42,6 +42,8 @@ PositionHistory(account_id의 미청산 포지션)
 현재가(`current_price`) 조회는 서버 초기화 시 주입된 Gateway/DataProvider 기반
 `price_resolver`를 활용한다. 조회 실패 또는 `price_resolver` 미주입 시
 `avg_entry_price` fallback을 허용한다.
+`price_resolver`가 돌려준 값이 유한한 실수가 아니면(`bool`·수가 아닌 값·NaN·±inf·`float`로 바꿀 수 없는 정수) 조회 실패와 같다 — 그 종목만 `avg_entry_price`로 평가하고 나머지 종목은 그대로 계산한다. 0·음수는 그대로 평가액에 쓴다.
+평가액이나 매입 금액의 합계가 유한하지 않으면 그 동기화는 실패하고, 평가액·매입 금액은 이전 값을 유지한다.
 
 평가액의 fallback으로 쓴 `avg_entry_price`는 동기화 시세(`get_synced_price`)로 기록하지 않는다. 시세의 계약은 [04-treasury-interface.md](04-treasury-interface.md#자산-평가-동기화-계약)의 「동기화 시세 (#3103)」가 SSOT다.
 

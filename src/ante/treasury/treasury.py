@@ -153,6 +153,16 @@ def _is_positive_finite(value: object) -> TypeGuard[int | float]:
     return math.isfinite(value) and value > 0
 
 
+def _is_finite_number(value: object) -> TypeGuard[int | float]:
+    """bool이 아닌 int·float이고 유한한지 예외 없이 판정한다."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError, TypeError):
+        return False
+
+
 _OPEN_ORDER_STATUSES: frozenset[str] = frozenset({"open", "partially_filled"})
 
 
@@ -1664,21 +1674,33 @@ class Treasury:
         for pos in positions:
             handled_symbols.add(pos.symbol)
             purchase_amount += pos.avg_entry_price * pos.quantity
+            current_price: float = pos.avg_entry_price
             if price_resolver:
                 try:
-                    current_price = await price_resolver(pos.symbol)
+                    quote: object = await price_resolver(pos.symbol)
                 except Exception:
                     logger.debug(
                         "Virtual 시세 조회 실패: %s — avg_entry_price 사용",
                         pos.symbol,
                     )
-                    current_price = pos.avg_entry_price
                 else:
-                    self._record_synced_price(pos.symbol, current_price)
-            else:
-                current_price = pos.avg_entry_price
+                    if _is_finite_number(quote):
+                        current_price = quote
+                        self._record_synced_price(pos.symbol, quote)
+                    else:
+                        logger.debug(
+                            "Virtual 시세가 유한한 실수가 아님: %s (%s)"
+                            " — avg_entry_price 사용",
+                            pos.symbol,
+                            type(quote).__name__,
+                        )
             eval_amount += current_price * pos.quantity
 
+        if not (math.isfinite(eval_amount) and math.isfinite(purchase_amount)):
+            raise ValueError(
+                "Virtual 잔고 합계가 유한하지 않음 "
+                f"(account={self._account_id}, positions={len(positions)})"
+            )
         self._purchase_amount = purchase_amount
         self._eval_amount = eval_amount
         self._external_purchase_amount = 0.0
