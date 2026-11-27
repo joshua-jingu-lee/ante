@@ -620,8 +620,23 @@ class TestTradeFrequencyRule:
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.REJECT
 
-    def test_pass_no_metadata(self, rule, base_context):
-        """메타데이터 없으면 0으로 간주, 통과."""
+    def test_reject_buy_without_count(self, rule, base_context):
+        """매수인데 최근 체결 주문 수가 없으면 REJECT (#3099)."""
+        base_context.side = "buy"
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.REJECT
+        assert result.message == "Recent trade count unavailable"
+
+    def test_pass_sell_without_count(self, rule, base_context):
+        """매도는 최근 체결 주문 수가 없어도 통과 (#3099)."""
+        base_context.side = "sell"
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.PASS
+
+    def test_pass_sell_over_limit(self, rule, base_context):
+        """매도는 한도를 넘어도 통과 (#3099)."""
+        base_context.side = "sell"
+        base_context.metadata["recent_trade_count"] = 50
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.PASS
 

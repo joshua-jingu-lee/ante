@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import functools
 import logging
 import math
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from typing import TYPE_CHECKING, Any, TypeGuard
 
 from ante.core import clock
@@ -49,11 +50,26 @@ _KST = timezone(timedelta(hours=9))
 
 _MARKET_PRICE_TIMEOUT_SECONDS = 10.0
 
+_TRADE_FREQUENCY_WINDOW = timedelta(minutes=60)
+
 _VALID_ORDER_SIDES: frozenset[str] = frozenset({"buy", "sell"})
 
 _VALID_ORDER_TYPES: frozenset[str] = frozenset(
     {"market", "limit", "stop", "stop_limit"}
 )
+
+
+async def _await_or_nan(call: Callable[[], Awaitable[object]]) -> object:
+    """``call()``을 기다린 값을, 예외면 ``math.nan``을 돌려준다."""
+    try:
+        return await call()
+    except Exception:
+        return math.nan
+
+
+def _has_enabled_trade_frequency(rules: list[Rule]) -> bool:
+    """켜진 ``TradeFrequencyRule``이 있는지."""
+    return any(isinstance(r, TradeFrequencyRule) and r.enabled for r in rules)
 
 
 def _is_finite_quantity(value: object) -> TypeGuard[int | float]:
@@ -467,11 +483,23 @@ class RuleEngine:
         """하위 호환: _global_rules → _account_rules."""
         return self._account_rules
 
-    def evaluate(self, context: RuleContext) -> EvaluationResult:
-        """주문에 대한 룰 평가. 계좌 룰 → 전략별 순서로 평가."""
+    def evaluate(
+        self,
+        context: RuleContext,
+        strategy_context: RuleContext | None = None,
+        skip: tuple[type[Rule], ...] = (),
+    ) -> EvaluationResult:
+        """주문에 대한 룰 평가. 계좌 룰 → 전략별 순서로 평가.
+
+        전략 룰은 ``strategy_context``(없으면 ``context``)로 평가하고,
+        ``skip``의 유형인 룰은 건너뛴다.
+        """
         all_evaluations: list[RuleEvaluation] = []
+        tier_context = strategy_context or context
 
         for rule in self._account_rules:
+            if isinstance(rule, skip):
+                continue
             if rule.is_applicable(context):
                 evaluation = rule.evaluate(context)
                 all_evaluations.append(evaluation)
@@ -483,8 +511,10 @@ class RuleEngine:
         ):
             strategy_rules = self._strategy_rules.get(context.strategy_id, [])
             for rule in strategy_rules:
-                if rule.is_applicable(context):
-                    evaluation = rule.evaluate(context)
+                if isinstance(rule, skip):
+                    continue
+                if rule.is_applicable(tier_context):
+                    evaluation = rule.evaluate(tier_context)
                     all_evaluations.append(evaluation)
                     if evaluation.result in (
                         RuleResult.BLOCK,
@@ -603,18 +633,59 @@ class RuleEngine:
         if self._trade_service is None:
             return 0.0
         start = datetime.combine(today or clock.now(_KST).date(), time(), tzinfo=_KST)
-        try:
-            value = await self._trade_service.get_realized_pnl(
+        service = self._trade_service
+        value = await _await_or_nan(
+            lambda: service.get_realized_pnl(
                 account_id=self._account_id,
                 start=start,
                 end=start + timedelta(days=1),
             )
-        except Exception:
-            value = math.nan
+        )
         if isinstance(value, (int, float)) and math.isfinite(value):
             return float(value)
         logger.warning("당일 실현 손익 조회 실패: %s", self._account_id)
         return None
+
+    async def _query_recent_order_counts(
+        self, strategy_id: str
+    ) -> tuple[dict[str, int] | None, dict[str, int] | None, bool]:
+        """켜진 거래 빈도 룰이 있는 계층별 (계좌, 전략) 메타데이터와 실패 여부."""
+        scopes = [
+            (_has_enabled_trade_frequency(self._account_rules), None),
+            (
+                _has_enabled_trade_frequency(self._strategy_rules.get(strategy_id, [])),
+                strategy_id,
+            ),
+        ]
+        since = clock.now(UTC) - _TRADE_FREQUENCY_WINDOW
+        metas: list[dict[str, int] | None] = []
+        for enabled, scope in scopes:
+            if not enabled:
+                metas.append(None)
+                continue
+            value = await self._count_filled_orders(since, scope)
+            if type(value) is not int or value < 0:
+                logger.warning(
+                    "최근 체결 주문 수 조회 실패: account=%s strategy=%s",
+                    self._account_id,
+                    scope,
+                )
+                return None, None, True
+            metas.append({"recent_trade_count": value})
+        return metas[0], metas[1], False
+
+    async def _count_filled_orders(
+        self, since: datetime, strategy_id: str | None
+    ) -> object:
+        """체결 주문 수. 미주입이면 0, 조회 예외면 ``math.nan``."""
+        service = self._trade_service
+        if service is None:
+            return 0
+        return await _await_or_nan(
+            lambda: service.count_filled_orders(
+                account_id=self._account_id, since=since, strategy_id=strategy_id
+            )
+        )
 
     async def _query_order_symbol_position(
         self, bot_id: str, current_price: float, order_symbol: str
@@ -1112,6 +1183,16 @@ class RuleEngine:
             if daily_pnl is None:
                 daily_pnl = 0.0
                 input_failure = input_failure or "positions_unavailable"
+            account_meta: dict[str, int] | None = None
+            strategy_meta: dict[str, int] | None = None
+            if event.side == "buy" and input_failure is None and quote_failure is None:
+                (
+                    account_meta,
+                    strategy_meta,
+                    count_failed,
+                ) = await self._query_recent_order_counts(event.strategy_id)
+                if count_failed:
+                    input_failure = "positions_unavailable"
             if input_failure is not None and event.side == "buy":
                 input_reason = f"{ACCOUNT_NOT_READY_REASON}: {input_failure}"
                 await self._eventbus.publish(
@@ -1163,9 +1244,15 @@ class RuleEngine:
                 trading_hours_start=trading_hours_start,
                 trading_hours_end=trading_hours_end,
                 timezone=account_timezone,
+                metadata=dict(account_meta or {}),
+            )
+            strategy_context = (
+                None
+                if strategy_meta is None
+                else dataclasses.replace(context, metadata=dict(strategy_meta))
             )
 
-            result = self.evaluate(context)
+            result = self.evaluate(context, strategy_context)
 
             if result.overall_result in (RuleResult.PASS, RuleResult.WARN):
                 await self._eventbus.publish(
@@ -1394,7 +1481,7 @@ class RuleEngine:
         )
 
         try:
-            result = self.evaluate(context)
+            result = self.evaluate(context, skip=(TradeFrequencyRule,))
 
             if result.overall_result in (
                 RuleResult.BLOCK,

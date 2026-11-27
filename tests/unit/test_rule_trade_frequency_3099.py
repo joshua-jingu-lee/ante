@@ -68,21 +68,15 @@ class _TFStack(_Stack):
 
     async def start(self) -> None:
         await super().start()
-        self.bus.subscribe(
-            NotificationEvent, self.notifications.append, priority=-1000
-        )
+        self.bus.subscribe(NotificationEvent, self.notifications.append, priority=-1000)
 
     def strategy_tf(self, limit: int, **config: Any) -> TradeFrequencyRule:
-        rule = TradeFrequencyRule(
-            "tf-s", {"max_trades_per_hour": limit, **config}
-        )
+        rule = TradeFrequencyRule("tf-s", {"max_trades_per_hour": limit, **config})
         self.engine.add_strategy_rule("s1", rule)
         return rule
 
     def account_tf(self, limit: int, **config: Any) -> TradeFrequencyRule:
-        rule = TradeFrequencyRule(
-            "tf-a", {"max_trades_per_hour": limit, **config}
-        )
+        rule = TradeFrequencyRule("tf-a", {"max_trades_per_hour": limit, **config})
         self.engine.add_account_rule(rule)
         return rule
 
@@ -354,9 +348,7 @@ async def test_t5_only_filled_rows_count_and_sells_count(stack: _TFStack) -> Non
     await stack.recorder._on_modified(
         OrderModifyExecutedEvent(**common, order_id="m1", price=1.0)
     )
-    await stack.recorder.save_adjustment(
-        BOT, SYMBOL, 1.0, 2.0, "adj", account_id=ACCT
-    )
+    await stack.recorder.save_adjustment(BOT, SYMBOL, 1.0, 2.0, "adj", account_id=ACCT)
     statuses = await stack.db.fetch_all(
         "SELECT DISTINCT status FROM trades ORDER BY status", ()
     )
@@ -374,12 +366,13 @@ async def test_t5_only_filled_rows_count_and_sells_count(stack: _TFStack) -> Non
             )
             == 0
         )
+    await stack.fill(at, side="buy")
     await stack.fill(at, side="sell")
     assert (
         await stack.trade_service.count_filled_orders(
             account_id=ACCT, since=NOW - timedelta(minutes=60), strategy_id="s1"
         )
-        == 1
+        == 2
     )
 
 
