@@ -1538,7 +1538,7 @@ class Treasury:
             raise
 
     def get_synced_price(self, symbol: str) -> tuple[float | None, str | None]:
-        """잔고 동기화가 받은 그 종목의 현재가를 동기 조회한다 (#3103).
+        """잔고 동기화가 받은 그 종목의 현재가를 동기 조회한다.
 
         신선하면 ``(현재가, None)``, 아니면 ``(None, 상세)``다. 상세는
         ``SYNCED_PRICE_MISSING`` 또는 ``SYNCED_PRICE_STALE``이다. 받은 뒤
