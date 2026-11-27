@@ -15,7 +15,7 @@ from xml.etree import ElementTree
 
 import aiohttp
 
-from ante.feed.sources.base import RateLimiter
+from ante.feed.sources.base import RateLimiter, describe_source_error
 
 logger = logging.getLogger(__name__)
 
@@ -276,8 +276,9 @@ class DARTSource:
                 timeout=REQUEST_TIMEOUT,
             )
         except (TimeoutError, aiohttp.ClientError) as exc:
-            logger.info("DART 키 검증 불가 (네트워크): %s", exc)
-            return None, f"검증 불가 (네트워크): {exc}"
+            reason = describe_source_error(exc, self._api_key)
+            logger.info("DART 키 검증 불가 (네트워크): %s", reason)
+            return None, f"검증 불가 (네트워크): {reason}"
         finally:
             if own_session:
                 await session.close()
@@ -358,7 +359,7 @@ class DARTSource:
                     "DART corpCode 다운로드 실패 (attempt=%d/%d): %s. %.1f초 후 재시도",
                     attempt + 1,
                     self._max_retries,
-                    last_error,
+                    describe_source_error(last_error, self._api_key),
                     delay,
                 )
                 await asyncio.sleep(delay)
@@ -431,7 +432,7 @@ class DARTSource:
                     "(attempt=%d/%d): %s. %.1f초 후 재시도",
                     attempt + 1,
                     self._max_retries,
-                    exc,
+                    describe_source_error(exc, self._api_key),
                     delay,
                 )
                 await asyncio.sleep(delay)
