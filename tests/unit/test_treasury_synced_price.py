@@ -126,6 +126,7 @@ class TestLiveSync:
                 _row("NEG", -5.0),
                 _row("BOOL", True),
                 _row("STR", "100"),
+                _row("HUGE", 10**400),
                 {"symbol": "NOKEY", "quantity": 1.0, "avg_price": 1.0},
                 _row("005930", 71000.0),
                 _row("000660", 120000),
@@ -138,7 +139,17 @@ class TestLiveSync:
         assert treasury._last_synced_at is not None
         assert treasury.get_synced_price("005930") == (71000.0, None)
         assert treasury.get_synced_price("000660") == (120000.0, None)
-        for symbol in ("NONE", "TEXT", "ZERO", "NAN", "INF", "NEG", "BOOL", "STR"):
+        for symbol in (
+            "NONE",
+            "TEXT",
+            "ZERO",
+            "NAN",
+            "INF",
+            "NEG",
+            "BOOL",
+            "STR",
+            "HUGE",
+        ):
             assert treasury.get_synced_price(symbol) == _missing(), symbol
         assert treasury.get_synced_price("NOKEY") == _missing()
         assert treasury.get_synced_price("UNSEEN") == _missing()
@@ -179,7 +190,7 @@ class TestVirtualSync:
     async def test_resolved_bad_value_is_not_recorded(self, treasury: Treasury) -> None:
         await _start(treasury, trading_mode="virtual")
         history = _History([_snap("AAA"), _snap("BBB")])
-        resolver = _Resolver({"AAA": 0.0, "BBB": float("nan")})
+        resolver = _Resolver({"AAA": 0.0, "BBB": -1.0})
 
         await treasury._do_sync_virtual(history, resolver)  # type: ignore[arg-type]
 
@@ -304,7 +315,9 @@ class TestIntervalGuard:
 
         assert treasury.get_synced_price("AAA") == _missing()
 
-    @pytest.mark.parametrize("interval", [0, -1, "300", True, float("nan"), None])
+    @pytest.mark.parametrize(
+        "interval", [0, -1, "300", True, float("nan"), float("inf"), None, 10**400]
+    )
     async def test_bad_interval_is_always_missing(
         self, treasury: Treasury, interval: Any
     ) -> None:

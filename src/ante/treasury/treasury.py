@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
 from ante.account.scoping import require_account_id
 from ante.core import clock
@@ -141,6 +142,19 @@ _SNAPSHOT_RETENTION_DAYS = 365 * 5
 
 _PURCHASABLE_PROBE_SYMBOL = "005930"
 
+SYNCED_PRICE_MISSING = "no synced price"
+SYNCED_PRICE_STALE = "synced price stale"
+
+
+def _is_positive_finite(value: object) -> TypeGuard[int | float]:
+    """bool이 아닌 int·float이고 유한한 양수인지 예외 없이 판정한다."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return 0 < value <= sys.float_info.max
+    return math.isfinite(value) and value > 0
+
+
 _OPEN_ORDER_STATUSES: frozenset[str] = frozenset({"open", "partially_filled"})
 
 
@@ -198,6 +212,8 @@ class Treasury:
         self._unallocated: float = 0.0
         self._reservations: dict[str, tuple[str, float]] = {}
         self._sync_task: asyncio.Task[None] | None = None
+        self._sync_interval_seconds: object = None
+        self._synced_prices: dict[str, tuple[float, float]] = {}
 
         self._account_number: str = ""
         self._is_demo_trading: bool = False
@@ -1467,6 +1483,7 @@ class Treasury:
             logger.warning("이미 동기화 루프가 실행 중입니다")
             return
 
+        self._sync_interval_seconds = interval_seconds
         self._sync_task = asyncio.create_task(
             self._sync_loop(
                 broker,
@@ -1520,6 +1537,36 @@ class Treasury:
         except asyncio.CancelledError:
             raise
 
+    def get_synced_price(self, symbol: str) -> tuple[float | None, str | None]:
+        """잔고 동기화가 받은 그 종목의 현재가를 동기 조회한다 (#3103).
+
+        신선하면 ``(현재가, None)``, 아니면 ``(None, 상세)``다. 상세는
+        ``SYNCED_PRICE_MISSING`` 또는 ``SYNCED_PRICE_STALE``이다. 받은 뒤
+        ``2 × interval_seconds``를 넘으면 낡았다. ``start_sync`` 전이거나
+        보관한 주기가 유한한 양수가 아니면 늘 ``SYNCED_PRICE_MISSING``이다.
+        """
+        interval = self._sync_interval_seconds
+        if not _is_positive_finite(interval):
+            return None, SYNCED_PRICE_MISSING
+        entry = self._synced_prices.get(symbol)
+        if entry is None:
+            return None, SYNCED_PRICE_MISSING
+        price, received_at = entry
+        if clock.monotonic() - received_at > 2 * float(interval):
+            return None, SYNCED_PRICE_STALE
+        return price, None
+
+    def _record_synced_price(self, symbol: str, value: object) -> None:
+        """검사를 지난 값만 받은 시각과 함께 동기화 시세 표에 덮어쓴다."""
+        if _is_positive_finite(value):
+            self._synced_prices[symbol] = (float(value), clock.monotonic())
+
+    def _prune_synced_prices(self, handled_symbols: set[str]) -> None:
+        """이번 동기화가 다루지 않은 종목을 동기화 시세 표에서 지운다."""
+        for symbol in list(self._synced_prices):
+            if symbol not in handled_symbols:
+                del self._synced_prices[symbol]
+
     async def _do_sync(
         self,
         broker: BrokerAdapter,
@@ -1537,6 +1584,10 @@ class Treasury:
         )
 
         broker_positions = await broker.get_positions()
+        handled_symbols: set[str] = set()
+        for pos in broker_positions:
+            handled_symbols.add(pos["symbol"])
+            self._record_synced_price(pos["symbol"], pos.get("current_price"))
         internal_positions = await position_history.get_all_positions(
             account_id=self._account_id
         )
@@ -1566,6 +1617,7 @@ class Treasury:
                 external_eval_amount=self._external_eval_amount,
             )
         )
+        self._prune_synced_prices(handled_symbols)
         logger.info(
             "잔고 동기화 완료: 예수금=%s, 매수가능=%s, 외부종목=%d건 (account=%s)",
             f"{self._account_balance:,.0f}",
@@ -1588,7 +1640,9 @@ class Treasury:
 
         purchase_amount = 0.0
         eval_amount = 0.0
+        handled_symbols: set[str] = set()
         for pos in positions:
+            handled_symbols.add(pos.symbol)
             purchase_amount += pos.avg_entry_price * pos.quantity
             if price_resolver:
                 try:
@@ -1599,6 +1653,8 @@ class Treasury:
                         pos.symbol,
                     )
                     current_price = pos.avg_entry_price
+                else:
+                    self._record_synced_price(pos.symbol, current_price)
             else:
                 current_price = pos.avg_entry_price
             eval_amount += current_price * pos.quantity
@@ -1620,6 +1676,7 @@ class Treasury:
                 external_eval_amount=0.0,
             )
         )
+        self._prune_synced_prices(handled_symbols)
         logger.info(
             "Virtual 잔고 동기화 완료: 매수금=%s, 평가금=%s, 포지션=%d건 (account=%s)",
             f"{purchase_amount:,.0f}",
