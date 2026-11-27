@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
+from urllib.parse import quote
 
 from ante.notification.base import NotificationAdapter, NotificationLevel
 
@@ -11,12 +13,78 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_REQUEST_TIMEOUT = 5.0
 
+_BOT_PATH_RE = re.compile(r"/bot\d+(?::|%3[Aa])[^/?#\s'\"]+")
+
 LEVEL_EMOJI = {
     NotificationLevel.CRITICAL: "\U0001f6a8",
     NotificationLevel.ERROR: "\u274c",
     NotificationLevel.WARNING: "\u26a0\ufe0f",
     NotificationLevel.INFO: "\u2139\ufe0f",
 }
+
+
+TELEGRAM_SECRET_ATTR = "_telegram_secret"
+
+_FILTER_FAILURE_MESSAGE = "텔레그램 로그 가림 실패 — 원본 메시지와 예외를 버렸다"
+
+_EXC_FORMATTER = logging.Formatter()
+
+
+def _encoded_token_re(token: str) -> re.Pattern[str]:
+    """퍼센트 인코딩 부분만 대소문자를 무시하는, 인코딩된 토큰의 정규식."""
+    parts = re.split(r"(%[0-9A-F]{2})", quote(token, safe=""))
+    return re.compile(
+        "".join(
+            f"(?i:{re.escape(part)})" if i % 2 else re.escape(part)
+            for i, part in enumerate(parts)
+        )
+    )
+
+
+def _redact(text: str, token: object) -> str:
+    """주소 꼴의 봇 토큰과, 주어지면 원본·인코딩된 토큰을 가린다."""
+    text = _BOT_PATH_RE.sub("/bot***", text)
+    if isinstance(token, str) and token:
+        text = _encoded_token_re(token).sub("***", text.replace(token, "***"))
+    return text
+
+
+def describe_telegram_error(exc: BaseException, token: str) -> str:
+    """텔레그램 요청 예외를 봇 토큰을 가린 "종류: 메시지" 문자열로 설명한다."""
+    message = _redact(str(exc), token)
+    name = type(exc).__name__
+    return f"{name}: {message}" if message else name
+
+
+class TelegramLogRedactFilter(logging.Filter):
+    """텔레그램 모듈 로그의 메시지와 트레이스백에서 봇 토큰을 가린다."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """가린 결과가 원문과 다른 메시지·예외만 가린 텍스트로 바꿔 통과시킨다."""
+        token = record.__dict__.pop(TELEGRAM_SECRET_ATTR, "")
+        try:
+            message = record.getMessage()
+            redacted = _redact(message, token)
+            if redacted != message:
+                record.msg = redacted
+                record.args = None
+            if record.exc_info and record.exc_info[1] is not None:
+                text = _EXC_FORMATTER.formatException(record.exc_info)
+                redacted = _redact(text, token)
+                if redacted != text:
+                    record.exc_text = redacted
+                    record.exc_info = None
+            elif record.exc_text:
+                record.exc_text = _redact(record.exc_text, token)
+        except (TypeError, ValueError, LookupError, AttributeError, RuntimeError):
+            record.msg = _FILTER_FAILURE_MESSAGE
+            record.args = None
+            record.exc_text = None
+            record.exc_info = None
+        return True
+
+
+logger.addFilter(TelegramLogRedactFilter())
 
 
 class TelegramAdapter(NotificationAdapter):
@@ -95,7 +163,10 @@ class TelegramAdapter(NotificationAdapter):
                 async with session.post(url, json=payload) as resp:
                     return resp.status == 200
         except Exception as e:
-            logger.warning("answerCallbackQuery 오류: %r", e)
+            logger.warning(
+                "answerCallbackQuery 오류: %s",
+                describe_telegram_error(e, self._bot_token),
+            )
             return False
 
     async def _send_message(
@@ -136,5 +207,9 @@ class TelegramAdapter(NotificationAdapter):
                     )
                     return False
         except Exception as e:
-            logger.error("텔레그램 발송 오류: %r, 알림=%s", e, title)
+            logger.error(
+                "텔레그램 발송 오류: %s, 알림=%s",
+                describe_telegram_error(e, self._bot_token),
+                title,
+            )
             return False

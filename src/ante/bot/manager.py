@@ -230,7 +230,7 @@ class BotManager:
         self._stop_order_manager: StopOrderManager | None = None
         self._shutting_down = False
         self._last_cleanup: dict[str, StopCleanup] = {}
-        self._cancelling_order_ids: set[str] = set()
+        self._cancelling_order_ids: dict[str, asyncio.Event] = {}
         self._suspending_bot_ids: set[str] = set()
         self._suspension_cleanups: dict[str, asyncio.Task[None]] = {}
         self._suspension_rerun: dict[str, list[StopOrder]] = {}
@@ -1426,7 +1426,9 @@ class BotManager:
         for record in [r for r in records if r.bot_id == bot.bot_id]:
             if _cleanup_interrupted(bot, mark):
                 break
-            outcome = await self._request_cancel(record, "bot_stopped")
+            outcome = await self._request_cancel(
+                record, "bot_stopped", wait=bot in self._deleting_bots
+            )
             cleanup = _tally(cleanup, outcome)
         return cleanup
 
@@ -1435,12 +1437,19 @@ class BotManager:
         record: OrderTrackerRecord,
         reason: str,
         skip: Callable[[OrderTrackerRecord], bool] | None = None,
+        *,
+        wait: bool = False,
     ) -> str:
-        """취소 요청의 유일한 출구: 진행 중이거나 재조회 뒤 skip이면 skipped."""
+        """취소 요청의 유일한 출구: 진행 중(wait면 한 번 기다린 뒤)·skip이면 skipped."""
         order_id = record.order_id
-        if order_id in self._cancelling_order_ids:
+        in_flight = self._cancelling_order_ids.get(order_id)
+        if in_flight is not None and wait:
+            await in_flight.wait()
+            in_flight = self._cancelling_order_ids.get(order_id)
+        if in_flight is not None:
             return "skipped"
-        self._cancelling_order_ids.add(order_id)
+        done = asyncio.Event()
+        self._cancelling_order_ids[order_id] = done
         try:
             if not await self._still_open(order_id):
                 return "closed"
@@ -1457,7 +1466,8 @@ class BotManager:
             )
             return await self._cancel_outcome(order_id)
         finally:
-            self._cancelling_order_ids.discard(order_id)
+            self._cancelling_order_ids.pop(order_id, None)
+            done.set()
 
     async def _still_open(self, order_id: str) -> bool:
         """추적기의 열린 주문 정의로 다시 확인한다(조회가 실패하면 열린 것으로 본다)."""

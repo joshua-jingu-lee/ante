@@ -48,7 +48,7 @@ JSONL 파일에 기록되는 한 줄의 구조를 정의한다. stdout 평문 �
 
 ## Exception 필드 (예외 포함 시)
 
-`logger.exception()` 또는 `logger.error(..., exc_info=True)` 호출 시 Formatter가 자동 생성한다.
+`logger.exception()` 또는 `logger.error(..., exc_info=True)` 호출 시 Formatter가 자동 생성한다. 텔레그램 알림 두 모듈에서 로거가 예외의 봇 토큰을 가린 레코드는 예외다 — 그 예외를 가린 텍스트로 바꿔 넘기므로 이 필드가 없다([notification.md](../notification/notification.md)).
 
 ```json
 {
