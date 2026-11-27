@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
+from urllib.parse import quote
 
 from ante.notification.base import NotificationAdapter, NotificationLevel
 
@@ -11,12 +13,24 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_REQUEST_TIMEOUT = 5.0
 
+_BOT_PATH_RE = re.compile(r"/bot[^/?#\s'\"]+")
+
 LEVEL_EMOJI = {
     NotificationLevel.CRITICAL: "\U0001f6a8",
     NotificationLevel.ERROR: "\u274c",
     NotificationLevel.WARNING: "\u26a0\ufe0f",
     NotificationLevel.INFO: "\u2139\ufe0f",
 }
+
+
+def describe_telegram_error(exc: BaseException, token: str) -> str:
+    """텔레그램 요청 예외를 봇 토큰을 가린 "종류: 메시지" 문자열로 설명한다."""
+    message = _BOT_PATH_RE.sub("/bot***", str(exc))
+    if isinstance(token, str) and token:
+        for secret in (token, quote(token, safe="")):
+            message = message.replace(secret, "***")
+    name = type(exc).__name__
+    return f"{name}: {message}" if message else name
 
 
 class TelegramAdapter(NotificationAdapter):
@@ -95,7 +109,10 @@ class TelegramAdapter(NotificationAdapter):
                 async with session.post(url, json=payload) as resp:
                     return resp.status == 200
         except Exception as e:
-            logger.warning("answerCallbackQuery 오류: %r", e)
+            logger.warning(
+                "answerCallbackQuery 오류: %s",
+                describe_telegram_error(e, self._bot_token),
+            )
             return False
 
     async def _send_message(
@@ -136,5 +153,9 @@ class TelegramAdapter(NotificationAdapter):
                     )
                     return False
         except Exception as e:
-            logger.error("텔레그램 발송 오류: %r, 알림=%s", e, title)
+            logger.error(
+                "텔레그램 발송 오류: %s, 알림=%s",
+                describe_telegram_error(e, self._bot_token),
+                title,
+            )
             return False

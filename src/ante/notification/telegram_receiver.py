@@ -14,7 +14,10 @@ from ante.account.errors import (
     AccountSuspendAllFailedError,
 )
 from ante.core import clock
-from ante.notification.telegram import TELEGRAM_REQUEST_TIMEOUT
+from ante.notification.telegram import (
+    TELEGRAM_REQUEST_TIMEOUT,
+    describe_telegram_error,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -211,9 +214,13 @@ class TelegramCommandReceiver:
                     if results:
                         self._offset = results[-1]["update_id"] + 1
                     return results
-        except Exception:
-            logger.warning("getUpdates 호출 실패", exc_info=True)
+        except Exception as e:
+            logger.warning("getUpdates 호출 실패: %s", self._describe_error(e))
             return []
+
+    def _describe_error(self, exc: BaseException) -> str:
+        """어댑터의 봇 토큰을 가린 예외 설명."""
+        return describe_telegram_error(exc, getattr(self._adapter, "_bot_token", ""))
 
     async def _handle_update(self, update: dict[str, Any]) -> None:
         """개별 업데이트 처리."""
@@ -746,5 +753,5 @@ class TelegramCommandReceiver:
                 async with session.post(url, json=payload) as resp:
                     if resp.status != 200:
                         logger.warning("텔레그램 회신 실패: status=%d", resp.status)
-        except Exception:
-            logger.warning("텔레그램 회신 오류", exc_info=True)
+        except Exception as e:
+            logger.warning("텔레그램 회신 오류: %s", self._describe_error(e))
