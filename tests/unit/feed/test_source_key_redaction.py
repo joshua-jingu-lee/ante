@@ -106,6 +106,9 @@ def _echo_response(behavior: str, request: web.Request) -> web.StreamResponse | 
         payload = _echo_payload(url, "00", url, url)
         payload["response"]["body"]["items"] = {"item": url}
         return web.json_response(payload)
+    if kind == "padtotal":
+        total = "x" * int(arg) + key + "-tail"
+        return web.json_response(_echo_payload("000", "00", "NORMAL", total))
     if kind == "html":
         return web.Response(text=f"<html>{url} {key}</html>", content_type="text/html")
     if kind == "pad":
@@ -772,3 +775,61 @@ def test_cli_config_check_echo_auth_has_no_key(
     _assert_no_key(result.stdout, "stdout")
     _assert_no_key(result.stderr, "stderr")
     _assert_no_key(caplog.text, "로그")
+
+
+_BOUNDARY_OFFSETS = (0, 150, 175, 180, 185, 190, 193, 196, 198, 199, 200, 260)
+
+
+def _assert_no_key_prefix(text: str, where: str) -> None:
+    for key in _KEYS:
+        for form in _key_forms(key):
+            assert form[:5] not in text, f"{where}에 키의 앞 조각이 있다: {text!r}"
+
+
+@pytest.mark.parametrize("key", _KEYS)
+@pytest.mark.parametrize("offset", _BOUNDARY_OFFSETS)
+async def test_total_count_bare_key_at_boundary_leaves_no_prefix(
+    offset: int, key: str, server: _ServerThread, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    _RECEIVED_KEYS.clear()
+    dg = DataGoKrSource(
+        api_key=key, max_retries=2, base_url=server.url(f"padtotal-{offset}")
+    )
+    with pytest.raises(ValueError) as info:
+        await dg.fetch_by_date("2026-11-27")
+    assert key in _RECEIVED_KEYS
+    assert type(info.value) is ValueError
+    text = str(info.value)
+    assert text.startswith(
+        "invalid literal for int() with base 10: 'xxx"
+        if offset
+        else "invalid literal for int() with base 10: '***"
+    )
+    assert info.value.__cause__ is None
+    _assert_no_key(text, "예외")
+    _assert_no_key_prefix(text, "예외")
+    _assert_no_key_prefix(caplog.text, "로그")
+
+
+def test_cli_run_daily_total_count_boundary_has_no_key_prefix(
+    cli_env: tuple[CliRunner, Path],
+    server: _ServerThread,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ante.cli.main import cli
+
+    runner, data_dir = cli_env
+    _use_behavior(monkeypatch, server, "padtotal-190")
+    result = runner.invoke(
+        cli, ["--format", "json", "feed", "run", "daily", "--data-path", str(data_dir)]
+    )
+    assert result.exit_code == 0, result.output
+    reasons = [f["reason"] for f in json.loads(result.stdout)["failures"]]
+    assert any(r.startswith("invalid literal for int() with base 10:") for r in reasons)
+    _assert_no_key_prefix(result.stdout, "stdout")
+    _assert_no_key_prefix(result.stderr, "stderr")
+    reports = [p for p in (data_dir / ".feed" / "reports").rglob("*") if p.is_file()]
+    assert reports
+    for path in reports:
+        _assert_no_key_prefix(path.read_text(encoding="utf-8"), str(path))

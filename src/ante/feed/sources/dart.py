@@ -512,7 +512,7 @@ class DARTSource:
                 timeout=REQUEST_TIMEOUT,
             )
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            return None, str(exc)[:200]
+            return None, redact_source_text(str(exc), self._api_key)[:200]
         return data, None
 
     @staticmethod

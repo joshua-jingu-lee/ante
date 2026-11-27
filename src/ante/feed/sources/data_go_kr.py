@@ -335,7 +335,7 @@ class DataGoKrSource:
                 timeout=REQUEST_TIMEOUT,
             )
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            return None, str(exc)[:200]
+            return None, redact_source_text(str(exc), self._api_key)[:200]
         return data, None
 
     async def _do_request(
@@ -368,7 +368,19 @@ class DataGoKrSource:
         try:
             return self._extract_items(data)
         except ValueError as exc:
-            raise ValueError(redact_source_text(str(exc), self._api_key)) from None
+            message = self._redacted_total_error(data) or str(exc)
+            raise ValueError(redact_source_text(message, self._api_key)) from None
+
+    def _redacted_total_error(self, data: dict[str, Any]) -> str | None:
+        """가린 totalCount를 다시 변환한 실패 문구(실패하지 않으면 None)."""
+        raw = data.get("response", {}).get("body", {}).get("totalCount")
+        if not isinstance(raw, str):
+            return None
+        try:
+            int(redact_source_text(raw, self._api_key))
+        except ValueError as exc:
+            return str(exc)
+        return None
 
     @staticmethod
     def _extract_items(data: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
