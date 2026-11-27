@@ -23,14 +23,52 @@ LEVEL_EMOJI = {
 }
 
 
-def describe_telegram_error(exc: BaseException, token: str) -> str:
-    """텔레그램 요청 예외를 봇 토큰을 가린 "종류: 메시지" 문자열로 설명한다."""
-    message = _BOT_PATH_RE.sub("/bot***", str(exc))
+TELEGRAM_SECRET_ATTR = "_telegram_secret"
+
+_FILTER_FAILURE_MESSAGE = "텔레그램 로그 가림 실패 — 원본 메시지와 예외를 버렸다"
+
+_EXC_FORMATTER = logging.Formatter()
+
+
+def _redact(text: str, token: object) -> str:
+    """주소 꼴의 봇 경로와, 주어지면 원본·인코딩된 토큰을 가린다."""
+    text = _BOT_PATH_RE.sub("/bot***", text)
     if isinstance(token, str) and token:
         for secret in (token, quote(token, safe="")):
-            message = message.replace(secret, "***")
+            text = text.replace(secret, "***")
+    return text
+
+
+def describe_telegram_error(exc: BaseException, token: str) -> str:
+    """텔레그램 요청 예외를 봇 토큰을 가린 "종류: 메시지" 문자열로 설명한다."""
+    message = _redact(str(exc), token)
     name = type(exc).__name__
     return f"{name}: {message}" if message else name
+
+
+class TelegramLogRedactFilter(logging.Filter):
+    """텔레그램 모듈 로그의 메시지와 트레이스백에서 봇 토큰을 가린다."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """레코드를 가린 완성 문자열과 가린 예외 텍스트로 바꿔 통과시킨다."""
+        token = record.__dict__.pop(TELEGRAM_SECRET_ATTR, "")
+        try:
+            record.msg = _redact(record.getMessage(), token)
+            record.args = None
+            if record.exc_info and record.exc_info[1] is not None:
+                text = _EXC_FORMATTER.formatException(record.exc_info)
+                record.exc_text = _redact(text, token)
+            elif record.exc_text:
+                record.exc_text = _redact(record.exc_text, token)
+        except (TypeError, ValueError, LookupError, AttributeError, RuntimeError):
+            record.msg = _FILTER_FAILURE_MESSAGE
+            record.args = None
+            record.exc_text = None
+        record.exc_info = None
+        return True
+
+
+logger.addFilter(TelegramLogRedactFilter())
 
 
 class TelegramAdapter(NotificationAdapter):

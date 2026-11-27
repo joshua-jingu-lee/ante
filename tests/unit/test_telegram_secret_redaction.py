@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
@@ -16,8 +18,15 @@ import aiohttp
 import pytest
 from aiohttp import web
 
+import ante.notification.telegram as telegram_mod
+from ante.core.log.formatter import JsonFormatter
 from ante.notification.base import NotificationLevel
-from ante.notification.telegram import TelegramAdapter, describe_telegram_error
+from ante.notification.telegram import (
+    TELEGRAM_SECRET_ATTR,
+    TelegramAdapter,
+    TelegramLogRedactFilter,
+    describe_telegram_error,
+)
 from ante.notification.telegram_receiver import TelegramCommandReceiver
 
 _TOKEN = "123456:SECRET-TOKEN-VALUE"
@@ -229,3 +238,96 @@ def test_describe_empty_token_leaves_message_unchanged():
     assert describe_telegram_error(RuntimeError("plain text"), "") == (
         "RuntimeError: plain text"
     )
+
+
+# ── 로거 가림 필터 ─────────────────────────────────
+
+
+_RECEIVER_SITES = ("get_updates", "reply")
+
+
+@pytest.mark.parametrize("make_exc", [_with_url, _token_only])
+@pytest.mark.parametrize("site", _RECEIVER_SITES)
+async def test_receiver_sites_keep_redacted_traceback(site, make_exc, caplog):
+    adapter = TelegramAdapter(_TOKEN, _CHAT_ID)
+    exc = make_exc(adapter)
+
+    with (
+        patch("aiohttp.ClientSession", side_effect=lambda **_: _RaisingSession(exc)),
+        caplog.at_level(logging.DEBUG),
+    ):
+        await _call_site(site, adapter)
+
+    _assert_redacted(caplog, site)
+    (record,) = _site_records(caplog, site)
+    assert record.exc_text is not None
+    assert "Traceback" in record.exc_text
+    assert "RuntimeError: boom" in record.exc_text
+    assert TELEGRAM_SECRET_ATTR not in record.__dict__
+
+
+@pytest.mark.parametrize("make_exc", [_with_url, _token_only])
+@pytest.mark.parametrize("site", _SITES)
+@pytest.mark.parametrize("formatter_kind", ["json", "standard"])
+async def test_formatted_output_has_no_token(site, make_exc, formatter_kind):
+    adapter = TelegramAdapter(_TOKEN, _CHAT_ID)
+    exc = make_exc(adapter)
+    formatter: logging.Formatter = (
+        JsonFormatter() if formatter_kind == "json" else logging.Formatter()
+    )
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(formatter)
+    handler.setLevel(logging.DEBUG)
+    target = logging.getLogger(_SITE_LOGGER[site])
+    target.addHandler(handler)
+    try:
+        with patch(
+            "aiohttp.ClientSession", side_effect=lambda **_: _RaisingSession(exc)
+        ):
+            await _call_site(site, adapter)
+    finally:
+        target.removeHandler(handler)
+
+    output = stream.getvalue()
+    assert "RuntimeError" in output, output
+    for secret in _forbidden():
+        assert secret not in output, output
+    if formatter_kind == "json":
+        lines = [json.loads(line) for line in output.splitlines()]
+        assert lines and all("exc" not in line for line in lines)
+        assert all(TELEGRAM_SECRET_ATTR not in json.dumps(line) for line in lines)
+    elif site in _RECEIVER_SITES:
+        assert "Traceback (most recent call last)" in output
+
+
+class _ExplodingStr:
+    def __str__(self) -> str:
+        raise RuntimeError(f"str failed /bot{_TOKEN}/x")
+
+
+@pytest.mark.parametrize(
+    "args", [("not-a-number",), (_ExplodingStr(),)], ids=["bad-format", "bad-str"]
+)
+@pytest.mark.parametrize("site", ["send_message", "get_updates"])
+def test_filter_failure_does_not_escape_logging_call(site, args, caplog):
+    target = logging.getLogger(_SITE_LOGGER[site])
+    fmt = "%d" if args[0] == "not-a-number" else "%s"
+
+    with caplog.at_level(logging.DEBUG):
+        try:
+            raise RuntimeError(f"inner {_TOKEN}")
+        except RuntimeError:
+            target.warning(fmt, *args, exc_info=True)
+
+    (record,) = [r for r in caplog.records if r.name == target.name]
+    assert record.getMessage() == telegram_mod._FILTER_FAILURE_MESSAGE
+    assert record.exc_info is None
+    assert record.exc_text is None
+    assert _TOKEN not in caplog.text
+
+
+def test_both_telegram_loggers_carry_the_filter():
+    for name in set(_SITE_LOGGER.values()):
+        filters = logging.getLogger(name).filters
+        assert any(isinstance(f, TelegramLogRedactFilter) for f in filters), name

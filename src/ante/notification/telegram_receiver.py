@@ -16,6 +16,8 @@ from ante.account.errors import (
 from ante.core import clock
 from ante.notification.telegram import (
     TELEGRAM_REQUEST_TIMEOUT,
+    TELEGRAM_SECRET_ATTR,
+    TelegramLogRedactFilter,
     describe_telegram_error,
 )
 
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
     from ante.treasury.manager import TreasuryManager
 
 logger = logging.getLogger(__name__)
+logger.addFilter(TelegramLogRedactFilter())
 
 _DANGEROUS_COMMANDS = {"halt", "clear_halt", "stop"}
 
@@ -215,12 +218,22 @@ class TelegramCommandReceiver:
                         self._offset = results[-1]["update_id"] + 1
                     return results
         except Exception as e:
-            logger.warning("getUpdates 호출 실패: %s", self._describe_error(e))
+            logger.warning(
+                "getUpdates 호출 실패: %s",
+                self._describe_error(e),
+                exc_info=True,
+                extra={TELEGRAM_SECRET_ATTR: self._bot_token()},
+            )
             return []
+
+    def _bot_token(self) -> str:
+        """어댑터의 봇 토큰(문자열이 아니면 빈 문자열)."""
+        token = getattr(self._adapter, "_bot_token", "")
+        return token if isinstance(token, str) else ""
 
     def _describe_error(self, exc: BaseException) -> str:
         """어댑터의 봇 토큰을 가린 예외 설명."""
-        return describe_telegram_error(exc, getattr(self._adapter, "_bot_token", ""))
+        return describe_telegram_error(exc, self._bot_token())
 
     async def _handle_update(self, update: dict[str, Any]) -> None:
         """개별 업데이트 처리."""
@@ -754,4 +767,9 @@ class TelegramCommandReceiver:
                     if resp.status != 200:
                         logger.warning("텔레그램 회신 실패: status=%d", resp.status)
         except Exception as e:
-            logger.warning("텔레그램 회신 오류: %s", self._describe_error(e))
+            logger.warning(
+                "텔레그램 회신 오류: %s",
+                self._describe_error(e),
+                exc_info=True,
+                extra={TELEGRAM_SECRET_ATTR: self._bot_token()},
+            )
