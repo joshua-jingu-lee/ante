@@ -55,6 +55,7 @@ A = "005930"
 B = "000660"
 C = "035420"
 PREFIX = "holding_quote_unavailable"
+PREFLIGHT_ERROR = "OrderRequest preflight error (see logs)"
 
 
 class _Clock:
@@ -771,11 +772,13 @@ async def test_r10_treasury_exceptions_reject_buy_but_not_sell(h: _H) -> None:
 
     h.treasury.get_last_sync_coverage = _raise  # type: ignore[method-assign]
     await h.order(C)
-    assert h.reasons() == [f"{PREFIX}: {B}: {SYNCED_PRICE_MISSING}"]
+    assert h.reasons() == [PREFLIGHT_ERROR]
 
+    h.treasury.get_last_sync_coverage = lambda: None  # type: ignore[method-assign]
     h.treasury.get_synced_price = _raise  # type: ignore[method-assign]
     await h.order(C)
-    assert h.reasons()[-1] == f"{PREFIX}: {B}: {SYNCED_PRICE_MISSING}"
+    assert h.reasons() == [PREFLIGHT_ERROR, PREFLIGHT_ERROR]
+    assert h.validated == []
 
     await h.order(B, side="sell")
     assert len(h.validated) == 1

@@ -33,6 +33,7 @@ from ante.rule.strategy_rules import (
     TradeFrequencyRule,
     UnrealizedLossLimitRule,
 )
+from ante.treasury.treasury import SYNCED_PRICE_MISSING, SYNCED_PRICE_STALE
 
 if TYPE_CHECKING:
     from ante.account.models import Account
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
     from ante.instrument.service import InstrumentService
+    from ante.trade.models import PositionSnapshot
     from ante.trade.order_tracker import OrderTracker
     from ante.trade.service import TradeService
     from ante.treasury.treasury import Treasury
@@ -51,6 +53,8 @@ _KST = timezone(timedelta(hours=9))
 _MARKET_PRICE_TIMEOUT_SECONDS = 10.0
 
 _TRADE_FREQUENCY_WINDOW = timedelta(minutes=60)
+
+HOLDING_QUOTE_UNAVAILABLE_REASON = "holding_quote_unavailable"
 
 _VALID_ORDER_SIDES: frozenset[str] = frozenset({"buy", "sell"})
 
@@ -70,6 +74,24 @@ async def _await_or_nan(call: Callable[[], Awaitable[object]]) -> object:
 def _has_enabled_trade_frequency(rules: list[Rule]) -> bool:
     """켜진 ``TradeFrequencyRule``이 있는지."""
     return any(isinstance(r, TradeFrequencyRule) and r.enabled for r in rules)
+
+
+def _has_enabled_unrealized_loss(rules: list[Rule]) -> bool:
+    """켜진 ``UnrealizedLossLimitRule``이 있는지."""
+    return any(isinstance(r, UnrealizedLossLimitRule) and r.enabled for r in rules)
+
+
+def _changed_after(updated_at: object, since: datetime) -> bool:
+    """UTC로 읽은 ``updated_at``이 ``since``보다 뒤이고 지금보다 뒤가 아닌지."""
+    if not isinstance(updated_at, str) or not updated_at:
+        return False
+    try:
+        parsed = datetime.fromisoformat(updated_at)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return since < parsed <= clock.now(UTC)
+    except (ValueError, TypeError, OverflowError):
+        return False
 
 
 def _is_finite_quantity(value: object) -> TypeGuard[int | float]:
@@ -689,10 +711,10 @@ class RuleEngine:
 
     async def _query_order_symbol_position(
         self, bot_id: str, current_price: float, order_symbol: str
-    ) -> tuple[float, float] | None:
-        """주문 종목의 (미실현 손익, 보유 수량)을, 조회 예외면 ``None``을 돌려준다."""
+    ) -> tuple[float, float, list[PositionSnapshot]] | None:
+        """주문 종목의 (미실현 손익, 보유 수량)과 봇 포지션을, 조회 예외면 ``None``."""
         if self._trade_service is None:
-            return 0.0, 0.0
+            return 0.0, 0.0, []
 
         try:
             positions = await self._trade_service.get_positions(
@@ -704,10 +726,65 @@ class RuleEngine:
                 if pos.symbol == order_symbol:
                     total += (current_price - pos.avg_entry_price) * pos.quantity
                     quantity += pos.quantity
-            return total, quantity
+            return total, quantity, list(positions)
         except Exception:
             logger.warning("미실현 손익 계산 실패: bot=%s", bot_id)
             return None
+
+    def _holdings_check_enabled(self, strategy_id: str, budget: object) -> bool:
+        """예산이 양수이고 계좌·그 전략 룰에 켜진 미실현 손실 룰이 있는지."""
+        if not _is_finite_quantity(budget) or budget <= 0:
+            return False
+        return _has_enabled_unrealized_loss(
+            self._account_rules
+        ) or _has_enabled_unrealized_loss(self._strategy_rules.get(strategy_id, []))
+
+    def _synced_price(self, symbol: str) -> tuple[float | None, str]:
+        """Treasury 동기화 시세와, 없으면 상세(불량 값은 ``SYNCED_PRICE_MISSING``)."""
+        value, detail = self._treasury.get_synced_price(symbol)  # type: ignore[union-attr]
+        if detail == SYNCED_PRICE_STALE:
+            return None, SYNCED_PRICE_STALE
+        if detail is not None or not _is_finite_quantity(value) or value <= 0:
+            return None, SYNCED_PRICE_MISSING
+        return float(value), ""
+
+    def _value_holdings(
+        self,
+        holdings: list[PositionSnapshot],
+        order_symbol: str,
+        market_quote: float | None,
+    ) -> tuple[float, str | None]:
+        """보유 전부를 동기화 시세로 평가한 미실현 손익과, 첫 실패의 ``종목: 상세``."""
+        coverage = self._treasury.get_last_sync_coverage()  # type: ignore[union-attr]
+        total = 0.0
+        for pos in sorted(holdings, key=lambda p: p.symbol):
+            if market_quote is not None and pos.symbol == order_symbol:
+                price: float | None = market_quote
+            else:
+                price, detail = self._synced_price(pos.symbol)
+            if price is None:
+                if detail == SYNCED_PRICE_MISSING and self._changed_since_sync(
+                    pos, coverage
+                ):
+                    continue
+                return 0.0, f"{pos.symbol}: {detail}"
+            total += (price - pos.avg_entry_price) * pos.quantity
+        return total, None
+
+    @staticmethod
+    def _changed_since_sync(
+        pos: PositionSnapshot, coverage: tuple[datetime, frozenset[str]] | None
+    ) -> bool:
+        """동기화가 다루지 않았고 그 진입 뒤에 바뀐 포지션인지."""
+        if coverage is None:
+            return False
+        try:
+            since, symbols = coverage
+            if pos.symbol in symbols:
+                return False
+        except (ValueError, TypeError):
+            return False
+        return _changed_after(pos.updated_at, since)
 
     async def _calculate_bot_unrealized_pnl(
         self, bot_id: str, current_price: float, order_symbol: str
@@ -1176,9 +1253,9 @@ class RuleEngine:
                 order_symbol=event.symbol,
             )
             if position is None:
-                position = (0.0, 0.0)
+                position = (0.0, 0.0, [])
                 input_failure = input_failure or "positions_unavailable"
-            unrealized_pnl, current_position = position
+            unrealized_pnl, current_position, holdings = position
             daily_pnl = await self._query_daily_realized_pnl(today)
             if daily_pnl is None:
                 daily_pnl = 0.0
@@ -1193,6 +1270,20 @@ class RuleEngine:
                 ) = await self._query_recent_order_counts(event.strategy_id)
                 if count_failed:
                     input_failure = "positions_unavailable"
+            holding_failure: str | None = None
+            if (
+                event.side == "buy"
+                and input_failure is None
+                and quote_failure is None
+                and self._holdings_check_enabled(
+                    event.strategy_id, treasury_data["bot_allocated_budget"]
+                )
+            ):
+                unrealized_pnl, holding_failure = self._value_holdings(
+                    holdings,
+                    event.symbol,
+                    current_price if event.order_type == "market" else None,
+                )
             if input_failure is not None and event.side == "buy":
                 input_reason = f"{ACCOUNT_NOT_READY_REASON}: {input_failure}"
                 await self._eventbus.publish(
@@ -1217,6 +1308,15 @@ class RuleEngine:
                         account_id=self._account_id,
                         event=event,
                         reason=f"market_buy_quote_unavailable: {quote_failure}",
+                    )
+                )
+                return
+            if holding_failure is not None:
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=f"{HOLDING_QUOTE_UNAVAILABLE_REASON}: {holding_failure}",
                     )
                 )
                 return

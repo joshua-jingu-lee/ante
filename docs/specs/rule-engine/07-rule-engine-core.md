@@ -183,7 +183,7 @@ OrderRequestEvent preflight 도메인 검증(`side`/`order_type`/`symbol`/`price
 
 - **방금 바뀜**: `get_last_sync_coverage()`가 `(진입 시각, 다룬 종목)`을 내주고, 그 종목이 다룬 종목에 없고, 포지션의 `updated_at`이 진입 시각보다 뒤(`>`)이고 지금(`clock.now(UTC)`)보다 뒤가 아닐 때만 참이다.
 - **시계**: `updated_at`은 SQLite `datetime('now')`가 찍은 UTC 문자열이다. `datetime.fromisoformat`으로 읽고 시간대가 없으면 UTC로 본다. 빈 값·읽지 못하는 값·미래의 값이면 방금 바뀐 것이 아니다. 초 단위로 내려가므로 진입과 같은 초에 바뀐 포지션은 거부 쪽으로 틀린다.
-- **실패**: 하나라도 거부 칸이면 룰 평가 없이 `holding_quote_unavailable: <종목>: <상세>`로 거부한다. 종목은 정렬 순서에서 첫 실패이고, 상세는 `SYNCED_PRICE_STALE` 또는 `SYNCED_PRICE_MISSING`의 값이다. 값이 유한한 양수가 아니거나 Treasury 조회가 예외를 내도 그 종목은 `SYNCED_PRICE_MISSING`이다. 알림은 내지 않는다.
+- **실패**: 하나라도 거부 칸이면 룰 평가 없이 `holding_quote_unavailable: <종목>: <상세>`로 거부한다. 종목은 정렬 순서에서 첫 실패이고, 상세는 `SYNCED_PRICE_STALE` 또는 `SYNCED_PRICE_MISSING`의 값이다. 값이 유한한 양수가 아니면 그 종목은 `SYNCED_PRICE_MISSING`이다. 알림은 내지 않는다. Treasury의 두 조회가 예외를 내면 그 매수는 preflight 오류의 거부(`OrderRequest preflight error (see logs)`)가 된다.
 - **판정 순서**: 최근 체결 주문 수(#3099) 뒤에 판정한다. #3047의 거부가 이기고, 그다음 `market_buy_quote_unavailable`, 그다음 이 거부다.
 - **사유**: `account_not_ready:` 토큰이 아니고 `market_buy_quote_unavailable`과도 다르다. 거부되면 `OrderValidatedEvent`가 나가지 않으므로 사유는 전략에 한 번만 보인다.
 - **평단으로 치는 창**: 마지막으로 성공한 동기화가 내부 포지션을 읽은 뒤에 처음 생긴 포지션은 다음 성공한 동기화가 그 종목을 다룰 때까지 평단이다. 동기화가 실패하면 직전 성공의 진입에서 `2 × 동기화 주기`까지다.
