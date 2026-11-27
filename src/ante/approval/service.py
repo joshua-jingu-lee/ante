@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 from uuid import uuid4
 
 from ante.account.scoping import require_account_id
@@ -61,6 +61,114 @@ def _transition_status(
         )
     request.status = target
     return target
+
+
+def _require_found(id: str, request: ApprovalRequest | None) -> ApprovalRequest:
+    if not request:
+        msg = f"결재 요청을 찾을 수 없음: {id}"
+        raise ValueError(msg)
+    return request
+
+
+def _check_approve(id: str, request: ApprovalRequest | None) -> ApprovalRequest:
+    request = _require_found(id, request)
+    if request.type not in _VALID_APPROVAL_TYPES:
+        msg = f"invalid approval type: {request.type!r}"
+        raise ValueError(msg)
+    approvable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
+    if request.status not in approvable:
+        raise ApprovalStatusConflictError(
+            id,
+            current_status=str(request.status),
+            requested_action="approve",
+        )
+    return request
+
+
+def _check_reject(id: str, request: ApprovalRequest | None) -> ApprovalRequest:
+    request = _require_found(id, request)
+    rejectable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
+    if request.status not in rejectable:
+        raise ApprovalStatusConflictError(
+            id,
+            current_status=str(request.status),
+            requested_action="reject",
+        )
+    return request
+
+
+def _check_reopen(
+    id: str, request: ApprovalRequest | None, requester: str
+) -> ApprovalRequest:
+    request = _require_found(id, request)
+    if request.status != ApprovalStatus.REJECTED:
+        msg = f"rejected 상태에서만 reopen 가능 (현재: {request.status})"
+        raise ValueError(msg)
+    if request.requester != requester:
+        msg = f"본인 요청만 reopen 가능 (요청자: {request.requester})"
+        raise ValueError(msg)
+    return request
+
+
+def _check_cancel(
+    id: str, request: ApprovalRequest | None, requester: str
+) -> ApprovalRequest:
+    request = _require_found(id, request)
+    if request.requester != requester:
+        msg = f"본인 요청만 철회 가능 (요청자: {request.requester})"
+        raise ValueError(msg)
+    cancellable = (
+        ApprovalStatus.PENDING,
+        ApprovalStatus.ON_HOLD,
+        ApprovalStatus.EXECUTION_FAILED,
+    )
+    if request.status not in cancellable:
+        msg = (
+            "pending/on_hold/execution_failed 상태에서만 철회 가능"
+            f" (현재: {request.status})"
+        )
+        raise ValueError(msg)
+    return request
+
+
+def _check_hold(id: str, request: ApprovalRequest | None) -> ApprovalRequest:
+    request = _require_found(id, request)
+    holdable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
+    if request.status not in holdable:
+        msg = f"pending/execution_failed 상태에서만 보류 가능 (현재: {request.status})"
+        raise ValueError(msg)
+    return request
+
+
+def _check_resume(id: str, request: ApprovalRequest | None) -> ApprovalRequest:
+    request = _require_found(id, request)
+    if request.status != ApprovalStatus.ON_HOLD:
+        msg = f"on_hold 상태에서만 재개 가능 (현재: {request.status})"
+        raise ValueError(msg)
+    return request
+
+
+def _check_cancel_invalid(id: str, request: ApprovalRequest | None) -> ApprovalRequest:
+    if not request:
+        raise ApprovalNotFoundError(id)
+    if request.type in _VALID_APPROVAL_TYPES:
+        msg = (
+            f"not an invalid-type request: id={id!r} type={request.type!r}"
+            " — use 'ante approval cancel' instead"
+        )
+        raise ValueError(msg)
+    cancellable = (
+        ApprovalStatus.PENDING,
+        ApprovalStatus.ON_HOLD,
+        ApprovalStatus.EXECUTION_FAILED,
+    )
+    if request.status not in cancellable:
+        msg = (
+            "pending/on_hold/execution_failed 상태에서만 cancel-invalid 가능"
+            f" (현재: {request.status})"
+        )
+        raise ValueError(msg)
+    return request
 
 
 APPROVAL_SCHEMA = """
@@ -197,22 +305,8 @@ class ApprovalService:
         suppress_notification: bool = False,
     ) -> ApprovalRequest:
         """결재 승인 + 자동 실행."""
-        request = await self.get(id)
-        if not request:
-            msg = f"결재 요청을 찾을 수 없음: {id}"
-            raise ValueError(msg)
-
-        if request.type not in _VALID_APPROVAL_TYPES:
-            msg = f"invalid approval type: {request.type!r}"
-            raise ValueError(msg)
-
-        approvable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
-        if request.status not in approvable:
-            raise ApprovalStatusConflictError(
-                id,
-                current_status=str(request.status),
-                requested_action="approve",
-            )
+        request = _check_approve(id, await self.get(id))
+        read_status = request.status
 
         now = clock.now(UTC).isoformat()
         request.history.append(
@@ -223,19 +317,23 @@ class ApprovalService:
         request.resolved_at = now
         request.resolved_by = resolved_by
 
-        await self._db.execute(
+        won = await self._db.execute_fetch_one(
             """UPDATE approvals
                SET status = ?, resolved_at = ?, resolved_by = ?,
                    history = ?
-               WHERE id = ?""",
+               WHERE id = ? AND status = ?
+               RETURNING id""",
             (
                 status,
                 now,
                 resolved_by,
                 json.dumps(request.history, ensure_ascii=False),
                 id,
+                read_status,
             ),
         )
+        if won is None:
+            await self._raise_lost(id, lambda r: _check_approve(id, r), "approve")
 
         logger.info("결재 승인: %s by %s", id, resolved_by)
 
@@ -254,18 +352,8 @@ class ApprovalService:
         suppress_notification: bool = False,
     ) -> ApprovalRequest:
         """결재 거절."""
-        request = await self.get(id)
-        if not request:
-            msg = f"결재 요청을 찾을 수 없음: {id}"
-            raise ValueError(msg)
-
-        rejectable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
-        if request.status not in rejectable:
-            raise ApprovalStatusConflictError(
-                id,
-                current_status=str(request.status),
-                requested_action="reject",
-            )
+        request = _check_reject(id, await self.get(id))
+        read_status = request.status
 
         now = clock.now(UTC).isoformat()
         request.history.append(
@@ -278,11 +366,12 @@ class ApprovalService:
         )
 
         status = _transition_status(request, ApprovalStatus.REJECTED, "reject")
-        await self._db.execute(
+        won = await self._db.execute_fetch_one(
             """UPDATE approvals
                SET status = ?, resolved_at = ?, resolved_by = ?,
                    reject_reason = ?, history = ?
-               WHERE id = ?""",
+               WHERE id = ? AND status = ?
+               RETURNING id""",
             (
                 status,
                 now,
@@ -290,8 +379,11 @@ class ApprovalService:
                 reject_reason,
                 json.dumps(request.history, ensure_ascii=False),
                 id,
+                read_status,
             ),
         )
+        if won is None:
+            await self._raise_lost(id, lambda r: _check_reject(id, r), "reject")
 
         request.resolved_at = now
         request.resolved_by = resolved_by
@@ -328,18 +420,8 @@ class ApprovalService:
         body와 params를 갱신할 수 있다. None이면 기존 값 유지.
         본인 요청만 reopen 가능. 사전 검증(validator)을 재실행한다.
         """
-        request = await self.get(id)
-        if not request:
-            msg = f"결재 요청을 찾을 수 없음: {id}"
-            raise ValueError(msg)
-
-        if request.status != ApprovalStatus.REJECTED:
-            msg = f"rejected 상태에서만 reopen 가능 (현재: {request.status})"
-            raise ValueError(msg)
-
-        if request.requester != requester:
-            msg = f"본인 요청만 reopen 가능 (요청자: {request.requester})"
-            raise ValueError(msg)
+        request = _check_reopen(id, await self.get(id), requester)
+        read_status = request.status
 
         if body is not None:
             request.body = body
@@ -377,12 +459,13 @@ class ApprovalService:
             }
         )
 
-        await self._db.execute(
+        won = await self._db.execute_fetch_one(
             """UPDATE approvals
                SET status = ?, body = ?, params = ?, reviews = ?,
                    history = ?, reject_reason = ?,
                    resolved_at = ?, resolved_by = ?
-               WHERE id = ?""",
+               WHERE id = ? AND status = ?
+               RETURNING id""",
             (
                 status,
                 request.body,
@@ -393,8 +476,13 @@ class ApprovalService:
                 "",
                 "",
                 id,
+                read_status,
             ),
         )
+        if won is None:
+            await self._raise_lost(
+                id, lambda r: _check_reopen(id, r, requester), "reopen"
+            )
 
         logger.info("결재 재상신: %s by %s", id, requester)
 
@@ -418,26 +506,8 @@ class ApprovalService:
         requester: str,
     ) -> ApprovalRequest:
         """결재 철회 (요청자만 가능, pending/on_hold/execution_failed 상태에서만)."""
-        request = await self.get(id)
-        if not request:
-            msg = f"결재 요청을 찾을 수 없음: {id}"
-            raise ValueError(msg)
-
-        if request.requester != requester:
-            msg = f"본인 요청만 철회 가능 (요청자: {request.requester})"
-            raise ValueError(msg)
-
-        cancellable = (
-            ApprovalStatus.PENDING,
-            ApprovalStatus.ON_HOLD,
-            ApprovalStatus.EXECUTION_FAILED,
-        )
-        if request.status not in cancellable:
-            msg = (
-                "pending/on_hold/execution_failed 상태에서만 철회 가능"
-                f" (현재: {request.status})"
-            )
-            raise ValueError(msg)
+        request = _check_cancel(id, await self.get(id), requester)
+        read_status = request.status
 
         now = clock.now(UTC).isoformat()
         request.history.append(
@@ -445,19 +515,25 @@ class ApprovalService:
         )
 
         status = _transition_status(request, ApprovalStatus.CANCELLED, "cancel")
-        await self._db.execute(
+        won = await self._db.execute_fetch_one(
             """UPDATE approvals
                SET status = ?, resolved_at = ?, resolved_by = ?,
                    history = ?
-               WHERE id = ?""",
+               WHERE id = ? AND status = ?
+               RETURNING id""",
             (
                 status,
                 now,
                 requester,
                 json.dumps(request.history, ensure_ascii=False),
                 id,
+                read_status,
             ),
         )
+        if won is None:
+            await self._raise_lost(
+                id, lambda r: _check_cancel(id, r, requester), "cancel"
+            )
 
         request.resolved_at = now
         request.resolved_by = requester
@@ -482,18 +558,8 @@ class ApprovalService:
 
     async def hold(self, id: str) -> ApprovalRequest:
         """보류 전환."""
-        request = await self.get(id)
-        if not request:
-            msg = f"결재 요청을 찾을 수 없음: {id}"
-            raise ValueError(msg)
-
-        holdable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
-        if request.status not in holdable:
-            msg = (
-                "pending/execution_failed 상태에서만 보류 가능"
-                f" (현재: {request.status})"
-            )
-            raise ValueError(msg)
+        request = _check_hold(id, await self.get(id))
+        read_status = request.status
 
         now = clock.now(UTC).isoformat()
         request.history.append(
@@ -501,28 +567,26 @@ class ApprovalService:
         )
 
         status = _transition_status(request, ApprovalStatus.ON_HOLD, "hold")
-        await self._db.execute(
-            """UPDATE approvals SET status = ?, history = ? WHERE id = ?""",
+        won = await self._db.execute_fetch_one(
+            """UPDATE approvals SET status = ?, history = ?
+               WHERE id = ? AND status = ? RETURNING id""",
             (
                 status,
                 json.dumps(request.history, ensure_ascii=False),
                 id,
+                read_status,
             ),
         )
+        if won is None:
+            await self._raise_lost(id, lambda r: _check_hold(id, r), "hold")
 
         logger.info("결재 보류: %s", id)
         return request
 
     async def resume(self, id: str) -> ApprovalRequest:
         """보류 해제 → pending."""
-        request = await self.get(id)
-        if not request:
-            msg = f"결재 요청을 찾을 수 없음: {id}"
-            raise ValueError(msg)
-
-        if request.status != ApprovalStatus.ON_HOLD:
-            msg = f"on_hold 상태에서만 재개 가능 (현재: {request.status})"
-            raise ValueError(msg)
+        request = _check_resume(id, await self.get(id))
+        read_status = request.status
 
         now = clock.now(UTC).isoformat()
         request.history.append(
@@ -530,14 +594,18 @@ class ApprovalService:
         )
 
         status = _transition_status(request, ApprovalStatus.PENDING, "resume")
-        await self._db.execute(
-            """UPDATE approvals SET status = ?, history = ? WHERE id = ?""",
+        won = await self._db.execute_fetch_one(
+            """UPDATE approvals SET status = ?, history = ?
+               WHERE id = ? AND status = ? RETURNING id""",
             (
                 status,
                 json.dumps(request.history, ensure_ascii=False),
                 id,
+                read_status,
             ),
         )
+        if won is None:
+            await self._raise_lost(id, lambda r: _check_resume(id, r), "resume")
 
         logger.info("결재 재개: %s", id)
         return request
@@ -608,20 +676,26 @@ class ApprovalService:
                 {"action": "expired", "actor": "system", "at": now, "detail": ""}
             )
 
+            read_status = request.status
             status = _transition_status(request, ApprovalStatus.EXPIRED, "expire_stale")
-            await self._db.execute(
+            won = await self._db.execute_fetch_one(
                 """UPDATE approvals
                    SET status = ?, resolved_at = ?, resolved_by = ?,
                        history = ?
-                   WHERE id = ?""",
+                   WHERE id = ? AND status = ?
+                   RETURNING id""",
                 (
                     status,
                     now,
                     "system",
                     json.dumps(request.history, ensure_ascii=False),
                     request.id,
+                    read_status,
                 ),
             )
+            if won is None:
+                logger.debug("만료 처리 건너뜀 (상태가 바뀜): %s", request.id)
+                continue
 
             from ante.eventbus.events import ApprovalResolvedEvent
 
@@ -756,28 +830,8 @@ class ApprovalService:
           notification 발행을 생략한다. False 면 일반 ``cancel()`` 과 동일한
           event/notification 경로를 탄다.
         """
-        request = await self.get(id)
-        if not request:
-            raise ApprovalNotFoundError(id)
-
-        if request.type in _VALID_APPROVAL_TYPES:
-            msg = (
-                f"not an invalid-type request: id={id!r} type={request.type!r}"
-                " — use 'ante approval cancel' instead"
-            )
-            raise ValueError(msg)
-
-        cancellable = (
-            ApprovalStatus.PENDING,
-            ApprovalStatus.ON_HOLD,
-            ApprovalStatus.EXECUTION_FAILED,
-        )
-        if request.status not in cancellable:
-            msg = (
-                "pending/on_hold/execution_failed 상태에서만 cancel-invalid 가능"
-                f" (현재: {request.status})"
-            )
-            raise ValueError(msg)
+        request = _check_cancel_invalid(id, await self.get(id))
+        read_status = request.status
 
         now = clock.now(UTC).isoformat()
         request.history.append(
@@ -792,19 +846,27 @@ class ApprovalService:
         status = _transition_status(
             request, ApprovalStatus.CANCELLED, "cancel_invalid_type_request"
         )
-        await self._db.execute(
+        won = await self._db.execute_fetch_one(
             """UPDATE approvals
                SET status = ?, resolved_at = ?, resolved_by = ?,
                    history = ?
-               WHERE id = ?""",
+               WHERE id = ? AND status = ?
+               RETURNING id""",
             (
                 status,
                 now,
                 resolved_by,
                 json.dumps(request.history, ensure_ascii=False),
                 id,
+                read_status,
             ),
         )
+        if won is None:
+            await self._raise_lost(
+                id,
+                lambda r: _check_cancel_invalid(id, r),
+                "cancel_invalid_type_request",
+            )
 
         request.resolved_at = now
         request.resolved_by = resolved_by
@@ -832,6 +894,20 @@ class ApprovalService:
             )
 
         return request
+
+    async def _raise_lost(
+        self,
+        id: str,
+        check: Callable[[ApprovalRequest | None], ApprovalRequest],
+        action: str,
+    ) -> NoReturn:
+        """진 쪽: 다시 읽어 가드를 다시 돌리고, 통과하면 상태 충돌을 낸다."""
+        current = check(await self.get(id))
+        raise ApprovalStatusConflictError(
+            id,
+            current_status=str(current.status),
+            requested_action=action,
+        )
 
     async def _validate_params(
         self,
@@ -947,6 +1023,7 @@ class ApprovalService:
             raise ValueError(msg)
 
         now = clock.now(UTC).isoformat()
+        read_status = request.status
         executor = self._executors.get(request.type)
         if executor:
             try:
@@ -971,14 +1048,24 @@ class ApprovalService:
                         "detail": str(exc),
                     }
                 )
-                await self._db.execute(
-                    """UPDATE approvals SET status = ?, history = ? WHERE id = ?""",
+                won = await self._db.execute_fetch_one(
+                    """UPDATE approvals SET status = ?, history = ?
+                       WHERE id = ? AND status = ? RETURNING id""",
                     (
                         status,
                         json.dumps(request.history, ensure_ascii=False),
                         request.id,
+                        read_status,
                     ),
                 )
+                if won is None:
+                    logger.warning(
+                        "결재 실행 실패 기록 건너뜀 (상태가 바뀜): %s (%s): %s",
+                        request.id,
+                        request.type,
+                        exc,
+                    )
+                    return
                 logger.exception("결재 실행 실패: %s (%s)", request.id, request.type)
         else:
             status = _transition_status(
@@ -992,14 +1079,23 @@ class ApprovalService:
                     "detail": (f"no executor registered for type {request.type!r}"),
                 }
             )
-            await self._db.execute(
-                """UPDATE approvals SET status = ?, history = ? WHERE id = ?""",
+            won = await self._db.execute_fetch_one(
+                """UPDATE approvals SET status = ?, history = ?
+                   WHERE id = ? AND status = ? RETURNING id""",
                 (
                     status,
                     json.dumps(request.history, ensure_ascii=False),
                     request.id,
+                    read_status,
                 ),
             )
+            if won is None:
+                logger.warning(
+                    "결재 실행 불가 기록 건너뜀 (상태가 바뀜): %s (%s)",
+                    request.id,
+                    request.type,
+                )
+                return
             logger.warning(
                 "결재 실행 불가 (executor 미등록): %s (%s)",
                 request.id,
