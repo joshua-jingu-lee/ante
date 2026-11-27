@@ -418,7 +418,7 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 3. Logging 초기화                          # logging.directory 참조
 4. Database 초기화                         # db.path 참조, SQLite 연결, WAL 모드 설정
 5. EventBus 초기화                         # EventHistoryStore 동반
-6. DynamicConfigService 초기화             # DB + EventBus 주입
+6. DynamicConfigService 초기화             # DB + EventBus 주입, 이어서 ParquetStore 생성(data.path — 디렉터리는 17단계)
 7. DB 마이그레이션 적용                    # 뒤 단계가 쓰는 스키마
 8. NotificationService 구독                # EventBus + 알림 어댑터, 기동 중 알림은 큐에 쌓는다
 9. 서비스 초기화                           # AuditLogger, MemberService, InstrumentService
@@ -429,7 +429,7 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 14. BotManager 초기화                      # EventBus + StrategySnapshot, 컨텍스트 팩토리는 15단계에서 주입
 15. APIGateway 초기화                      # 브로커 연결·실시간 시세, 컨텍스트 팩토리 주입, 잔고 동기화 시작, 체결 복구·대사 스케줄러
 16. BotManager.restore_bots()              # 삭제되지 않은 봇을 created로 복원 (시작하지 않음)
-17. 피드 초기화                            # Data Pipeline(APIGateway가 있을 때 DataCollector), BacktestService, ReportStore
+17. 피드 초기화                            # 데이터 디렉터리 생성, Data Pipeline(6단계의 ParquetStore, APIGateway가 있을 때 DataCollector), BacktestService, ReportStore
 18. 승인 서비스 초기화                     # ApprovalService + 만료 스케줄러
 19. Telegram 명령 수신기 시작              # 승인 서비스 초기화 뒤, 필요한 서비스 주입
 20. IPC 서버 시작                          # CommandRegistry + ServiceRegistry 주입
