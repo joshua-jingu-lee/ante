@@ -85,11 +85,11 @@ class NotificationService:
             self._drain_task = asyncio.create_task(self._drain())
         self._deferring = False
 
-    async def stop(self, timeout: float = 5.0) -> None:
-        """쌓인 알림 전송을 최대 ``timeout``초 기다린 뒤 작업자를 멈춘다."""
+    async def stop(self, grace: float = 5.0) -> None:
+        """쌓인 알림 전송을 최대 ``grace``초 기다린 뒤 작업자를 멈춘다."""
         task = self._drain_task
         if task is not None and not task.done():
-            done, _ = await asyncio.wait({task}, timeout=timeout)
+            done, _ = await asyncio.wait({task}, timeout=grace)
             if not done:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)

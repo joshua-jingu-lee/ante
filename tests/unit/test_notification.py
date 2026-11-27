@@ -792,7 +792,7 @@ class TestDeferredDelivery:
         await _until(lambda: adapter.started == ["A"])
 
         asyncio.get_running_loop().call_later(0.05, adapter.gate.set)
-        await svc.stop(timeout=5.0)
+        await svc.stop(grace=5.0)
 
         assert adapter.delivered == ["A", "B"]
 
@@ -810,7 +810,7 @@ class TestDeferredDelivery:
         loop = asyncio.get_running_loop()
         started = loop.time()
         with caplog.at_level(logging.WARNING, logger="ante.notification.service"):
-            await asyncio.wait_for(svc.stop(timeout=0.05), timeout=2.0)
+            await asyncio.wait_for(svc.stop(grace=0.05), timeout=2.0)
         elapsed = loop.time() - started
 
         assert 0.05 <= elapsed < 2.0
@@ -820,7 +820,7 @@ class TestDeferredDelivery:
 
     def test_stop_timeout_defaults_to_five_seconds(self):
         """정지의 기본 제한 시간은 5초다."""
-        param = inspect.signature(NotificationService.stop).parameters["timeout"]
+        param = inspect.signature(NotificationService.stop).parameters["grace"]
         assert param.default == 5.0
 
     def test_adapter_property_returns_same_instance(self):

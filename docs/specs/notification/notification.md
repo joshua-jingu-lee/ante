@@ -78,7 +78,7 @@ NotificationService는 `NotificationEvent`만 구독하여 발송한다. 개별 
 |--------|----------|--------|------|
 | `subscribe` | defer: bool = False | None | `NotificationEvent`와 `ConfigChangedEvent` 구독 등록. `defer=True`이면 `release` 전까지 알림을 큐에 쌓는다 |
 | `release` | — | None | 쌓인 알림을 보내는 백그라운드 작업자를 시작하고 쌓기를 끝낸다 |
-| `stop` | timeout: float = 5.0 | None | 작업자가 큐를 비우기를 최대 `timeout`초 기다린 뒤 취소한다. 남은 건수는 경고 로그로 남긴다 |
+| `stop` | grace: float = 5.0 | None | 작업자가 큐를 비우기를 최대 `grace`초 기다린 뒤 취소한다. 남은 건수는 경고 로그로 남긴다 |
 | `_on_notification` | event: NotificationEvent | None | 필터링 → 발송 |
 | `_on_config_changed` | event: ConfigChangedEvent | None | `notification.telegram_enabled`, `notification.min_level`, `notification.quiet_hours` 런타임 반영 |
 | `_should_send` | level: NotificationLevel | bool | 발송 여부 판단. CRITICAL은 always-send |
@@ -107,12 +107,11 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 우회하여 항상 발송한다.
 
 서버 기동 중 NotificationService 구독 뒤에 발행된 알림은 CRITICAL을 포함해 큐에 쌓이고,
-IPC 서버가 뜬 뒤 쌓인 순서대로
-전송된다. 쌓인 알림의 전송이 끝나기 전에 발행된 CRITICAL이 아닌 알림은 그 뒤에 붙는다.
-순서 보장은 CRITICAL이 아닌 알림에만 적용되며, 이때의 CRITICAL은 큐를 기다리지 않고 바로
-전송된다. 레벨·무음 시간대·중복 억제 판정은 쌓을 때가 아니라 전송할 때 평소대로 한다.
-종료 시에는 남은 알림의 전송을 최대 5초 기다린 뒤 버린다. 기동이 예외로 끝나면 쌓인 알림은
-전송되지 않는다.
+IPC 서버가 뜬 뒤 쌓인 순서대로 전송된다. 쌓인 알림의 전송이 끝나기 전에 발행된 CRITICAL이
+아닌 알림은 그 뒤에 붙는다. 순서 보장은 CRITICAL이 아닌 알림에만 적용되며, 그사이 발행된
+CRITICAL은 큐를 기다리지 않고 바로 전송된다. 레벨·무음 시간대·중복 억제 판정은 쌓을 때가
+아니라 전송할 때 평소대로 한다. 종료 시에는 남은 알림의 전송을 최대 5초 기다리고, 그때까지
+보내지 못한 알림은 버린다. 기동이 예외로 끝나면 쌓인 알림은 전송되지 않는다.
 
 ### 알림 트리거 전체 목록
 

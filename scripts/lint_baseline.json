@@ -170,7 +170,7 @@
     "src/ante/main.py": {
       "ASYNC240": 1,
       "BLE001": 2,
-      "C901": 5
+      "C901": 4
     },
     "src/ante/member/service.py": {
       "BLE001": 1,
