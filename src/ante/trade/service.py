@@ -102,6 +102,14 @@ class TradeService:
             account_id=account_id, start=start, end=end
         )
 
+    async def count_filled_orders(
+        self, *, account_id: str, since: datetime, strategy_id: str | None = None
+    ) -> int:
+        """계좌(``strategy_id``면 그 전략)의 ``since`` 이후 체결 주문 수."""
+        return await self._performance.count_filled_orders(
+            account_id=account_id, since=since, strategy_id=strategy_id
+        )
+
     async def get_performance(
         self,
         account_id: str,

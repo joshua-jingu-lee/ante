@@ -35,7 +35,7 @@ RuleEngine이 OrderRequestEvent와 Account 상태를 조합하여 생성하는 �
 | `prev_day_total_asset` | `float` | `0.0` | KST 오늘 이전의 가장 최근 일별 스냅샷의 `total_asset`. DailyLossLimitRule의 분모 |
 | `total_pnl` | `float` | `0.0` | 총 손익 |
 | **확장** | | | |
-| `metadata` | `dict[str, Any]` | `{}` | 추가 메타데이터 (`unrealized_pnl`, `allocated_budget`, `recent_trade_count`, `current_time` 등) |
+| `metadata` | `dict[str, Any]` | `{}` | 추가 메타데이터. 엔진이 싣는 키는 `recent_trade_count`(그 계층에 켜진 TradeFrequencyRule이 있을 때, 매수 평가에만 — [06-rule-catalog.md](06-rule-catalog.md) 「용어 산식」의 최근 체결 주문 수)다. `current_time`은 TradingHoursRule의 테스트용 주입점이다 |
 
 ### `account_status` dead field caveat (#2396)
 

@@ -22,7 +22,7 @@ RuleEngine은 룰을 로드하고 평가하는 메인 엔진입니다.
 ### 이벤트 구독
 
 - `OrderRequestEvent` (priority=100): 주문 평가 — `event.account_id` 필터링 → **OrderRequestEvent preflight** (아래 소절 참조) → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행
-- `OrderModifyEvent` (priority=100): 주문 정정 평가 — `event.account_id` 필터링 → symbol/side enrich → **v1 가격 preflight**(finite `price>0` 아니면 `modify_invalid_args` 거부 + `_consumed` 설정; #2391 — 기존 `event.price or 0.0` 추론 제거, 정정은 항상 지정가이므로 `order_type="limit"` 고정) → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행. 룰 거부 시 `OrderModifyRejectedEvent` + `_consumed`. **룰 통과 시**: broker-level 정정 v1(price-only)이 지원되므로 Gateway(priority=50)가 fail-closed 게이트 후 broker 위임 → `OrderModifyExecutedEvent`(성공) 또는 사유별 `OrderModifyRejectedEvent`. 고급 케이스(수량변경 등)=#2393.
+- `OrderModifyEvent` (priority=100): 주문 정정 평가 — `event.account_id` 필터링 → symbol/side enrich → **v1 가격 preflight**(finite `price>0` 아니면 `modify_invalid_args` 거부 + `_consumed` 설정; #2391 — 기존 `event.price or 0.0` 추론 제거, 정정은 항상 지정가이므로 `order_type="limit"` 고정) → RuleContext 생성 → 계좌/전략별 룰 평가(`TradeFrequencyRule`은 빼고 평가한다, #3099) → 결과 이벤트 발행. 룰 거부 시 `OrderModifyRejectedEvent` + `_consumed`. **룰 통과 시**: broker-level 정정 v1(price-only)이 지원되므로 Gateway(priority=50)가 fail-closed 게이트 후 broker 위임 → `OrderModifyExecutedEvent`(성공) 또는 사유별 `OrderModifyRejectedEvent`. 고급 케이스(수량변경 등)=#2393.
 - `ConfigChangedEvent`: 룰 설정 변경 감지. `category="rule"` + `key="accounts.{account_id}.rules"`이면 해당 계좌 엔진만 계좌 룰을 재로드하고, `category="strategy_rule"`이면 해당 전략 룰을 재로드한다. `rules_unavailable` 엔진은 `category="rule"`·자기 key의 리스트 재로드가 성공하면 그 상태를 푼다. 재로드가 실패하면 해제하지 않는다.
 
 ### 룰 레지스트리
@@ -132,12 +132,12 @@ OrderRequestEvent preflight 도메인 검증(`side`/`order_type`/`symbol`/`price
 
 > 소스: `RuleEngine._on_order_request` (`src/ante/rule/engine.py`)
 
-미복구 매수 가드 뒤, RuleContext를 만들기 전에 엔진은 룰 판정 입력을 조회한다. Treasury에서 `get_summary`·`get_budget(bot_id)`(`bot_id`가 있을 때)·`get_prev_day_snapshot(KST 오늘)`을, TradeService에서 봇 포지션(`get_positions`)과 계좌의 KST 오늘 실현 손익(`get_realized_pnl`)을 읽는다. 조회는 `buy`·`sell` 모두 수행한다.
+미복구 매수 가드 뒤, RuleContext를 만들기 전에 엔진은 룰 판정 입력을 조회한다. Treasury에서 `get_summary`·`get_budget(bot_id)`(`bot_id`가 있을 때)·`get_prev_day_snapshot(KST 오늘)`을, TradeService에서 봇 포지션(`get_positions`)과 계좌의 KST 오늘 실현 손익(`get_realized_pnl`)을 읽는다. 이 조회는 `buy`·`sell` 모두 수행한다. 최근 체결 주문 수(`count_filled_orders`, [06](06-rule-catalog.md) 「용어 산식」)는 앞의 조회와 시세 조회(#3097)가 모두 실패하지 않은 매수에서, 켜진 `TradeFrequencyRule`이 있는 계층(계좌 룰이면 계좌 범위, 그 전략의 룰이면 전략 범위)만 읽는다.
 
-- **매수 거부**: `side == "buy"`이고 Treasury가 주입되지 않았거나 Treasury 조회 중 하나라도 예외를 던지면 `_build_safe_rejected_event(reason="account_not_ready: treasury_unavailable")`와 `build_not_ready_notification`을 한 건씩 발행하고 룰 평가 없이 return한다. 포지션 또는 실현 손익 조회가 예외를 던지면 같은 모양으로 사유가 `account_not_ready: positions_unavailable`이다. 둘 다 실패하면 사유는 `treasury_unavailable`이다.
-- **룰 구성과 무관**: 계좌·전략에 켜진 룰이 그 값을 읽는지와 상관없이 거부한다. 손실 룰을 하나도 켜지 않은 계좌와 가상 계좌도 조회 장애 동안 매수가 막히고, 그 순간 트리거된 스탑 매수는 다시 걸리지 않는다(readiness 차단과 같은 성질).
+- **매수 거부**: `side == "buy"`이고 Treasury가 주입되지 않았거나 Treasury 조회 중 하나라도 예외를 던지면 `_build_safe_rejected_event(reason="account_not_ready: treasury_unavailable")`와 `build_not_ready_notification`을 한 건씩 발행하고 룰 평가 없이 return한다. 포지션·실현 손익·최근 체결 주문 수 조회가 예외를 던지면(최근 체결 주문 수는 `bool`이 아닌 0 이상의 `int`가 아니어도) 같은 모양으로 사유가 `account_not_ready: positions_unavailable`이다. 둘 다 실패하면 사유는 `treasury_unavailable`이다.
+- **룰 구성과 무관**: 최근 체결 주문 수를 뺀 조회는 계좌·전략에 켜진 룰이 그 값을 읽는지와 상관없이 거부한다. 손실 룰을 하나도 켜지 않은 계좌와 가상 계좌도 조회 장애 동안 매수가 막히고, 그 순간 트리거된 스탑 매수는 다시 걸리지 않는다(readiness 차단과 같은 성질).
 - **사유 토큰은 둘뿐**: 어느 조회가 실패했는지는 사유에 담지 않고 warning 로그로 남긴다. 알림의 중복 묶음 키가 장애 동안 바뀌지 않게 하기 위해서다.
-- **매도·정정은 불변**: `side == "sell"`(청산 매도·스탑 매도 트리거 포함)과 `OrderModifyEvent`는 실패한 값을 `0.0`으로 채워 룰을 평가한다.
+- **매도·정정은 불변**: `side == "sell"`(청산 매도·스탑 매도 트리거 포함)과 `OrderModifyEvent`는 실패한 값을 `0.0`으로 채워 룰을 평가하고, 최근 체결 주문 수는 조회하지 않는다.
 - **실패가 아닌 것**: 조회가 성공했지만 값이 없는 경우(오늘 이전 스냅샷 없음, 봇 예산 없음)와 TradeService 미주입은 지금처럼 `0.0`으로 채우며 거부 사유가 아니다. 오늘 이전 스냅샷이 없거나 그 `total_asset`이 0 이하·비유한이면 일일 손실 판정은 건너뛰고, 계좌에 켜진 `DailyLossLimitRule`이 있을 때만 주문마다 warning 로그(계좌·스냅샷 날짜·값)를 남긴다. 대체 분모는 #2621에서 정한다.
 
 ### 시장가 매수 시세 (#3097)
@@ -147,7 +147,7 @@ OrderRequestEvent preflight 도메인 검증(`side`/`order_type`/`symbol`/`price
 `side == "buy"`이고 `order_type == "market"`인 주문은 평가 입력의 현재가를 주입된 시세 조회로 채운다. 운영 조립은 계좌마다 Treasury가 시장가 예약에 쓰는 것과 같은 게이트웨이 현재가 조회(`APIGateway.get_current_price(symbol, account_id=)`)를 `RuleEngineManager.set_market_price_resolver(account_id, resolver)`로 넣는다.
 
 - **조회하지 않는 주문**: 매도(청산·손절·스탑 매도 발동 포함), 지정가·`stop_limit`, `stop` 등록, 정정은 조회하지 않고 [05](05-rule-context.md)의 `current_price` 행대로 채운다. `stop` 매수는 등록 때 조회하지 않고, 발동 때 나가는 시장가 주문이 다시 평가될 때 조회한다.
-- **판정 순서**: Treasury 조회가 실패하지 않았을 때만 시세를 조회하고, 그다음 포지션·실현 손익을 조회한다. #3047의 실패가 하나라도 있으면 그 거부(`account_not_ready: <토큰>`과 알림)가 이긴다. 그렇지 않고 시세 조회가 실패했으면 룰 평가 없이 `market_buy_quote_unavailable: <상세>`로 거부하고 알림은 내지 않는다.
+- **판정 순서**: Treasury 조회가 실패하지 않았을 때만 시세를 조회하고, 그다음 포지션·실현 손익을 조회하고, 그때까지 실패가 없는 매수에서만 최근 체결 주문 수(#3099)를 조회한다. #3047의 실패가 하나라도 있으면 그 거부(`account_not_ready: <토큰>`과 알림)가 이긴다. 그렇지 않고 시세 조회가 실패했으면 룰 평가 없이 `market_buy_quote_unavailable: <상세>`로 거부하고 알림은 내지 않는다.
 - **사유**: Treasury가 같은 실패에 쓰는 접두와 같다. 이 사유는 `account_not_ready:` 토큰이 아니다. 거부되면 `OrderValidatedEvent`가 나가지 않아 Treasury는 조회하지 않으므로, 사유는 전략에 한 번만 보인다.
 
 | 실패 | 상세 |
