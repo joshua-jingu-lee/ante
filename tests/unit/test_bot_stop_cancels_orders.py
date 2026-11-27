@@ -298,6 +298,8 @@ async def rig(db: Database, tmp_path: Path):
     r = Rig(db, tmp_path)
     await r.setup()
     yield r
+    if r.broker.gate is not None:
+        r.broker.gate.set()
     await _drain_cleanups(r)
     for bot in list(r.manager._bots.values()):
         if bot._task and not bot._task.done():
@@ -1148,22 +1150,151 @@ async def test_suspend_during_manual_stop_cancel_skips_in_flight_order(
     assert sweep.level == "warning"
 
 
+def _use_treasury(rig: Rig, treasury: Treasury) -> None:
+    rig.manager._treasury_manager = SimpleNamespace(  # type: ignore[assignment]
+        get=lambda account_id: treasury, list_all=lambda: [treasury]
+    )
+
+
+async def _still_pending(task: asyncio.Task[Any]) -> bool:
+    done, _ = await asyncio.wait({task}, timeout=0.5)
+    return not done
+
+
+def _assert_second_cancel(rig: Rig, result: bool) -> None:
+    cancels = rig.events("cancel")
+    if result:
+        assert [e.order_id for e in cancels] == ["ord-1"]
+        return
+    assert [e.order_id for e in cancels] == ["ord-1", "ord-1"]
+    assert cancels[1].reason == "bot_stopped"
+
+
+@pytest.mark.parametrize("handle", ["keep", "liquidate"])
+@pytest.mark.parametrize("result", [True, False])
 @pytest.mark.parametrize("state", ["stopped", "created"])
-async def test_delete_during_suspend_cleanup_skips_in_flight_order(
-    rig: Rig, state: str
+async def test_delete_waits_for_in_flight_suspend_cancel(
+    rig: Rig, state: str, result: bool, handle: str
 ) -> None:
+    treasury = await _treasury(rig)
     await _bot_in(rig, BOT, state)
+    _use_treasury(rig, treasury)
+    await rig.seed("ord-1")
+    rig.trade_service.get_positions.return_value = [
+        SimpleNamespace(symbol="005930", quantity=3.0, account_id=ACCT, exchange="KRX")
+    ]
+    rig.broker.result = result
+    rig.broker.gate = asyncio.Event()
+    rig.log.clear()
+    await rig.bus.publish(_suspend())
+    await _wait_calls(rig)
+
+    task = asyncio.create_task(rig.manager.delete_bot(BOT, handle_positions=handle))
+
+    assert await _still_pending(task)
+    assert treasury.get_budget(BOT) is not None
+    assert rig.events("request") == []
+    assert await rig.status("ord-1") == "open"
+    rig.broker.gate.set()
+    await asyncio.wait_for(task, timeout=5.0)
+    await _drain_cleanups(rig)
+
+    names = rig.names()
+    first = names.index("cancelled" if result else "cancel_failed")
+    if handle == "liquidate":
+        assert first < names.index("request")
+    else:
+        assert rig.events("request") == []
+    _assert_second_cancel(rig, result)
+    assert await rig.status("ord-1") == ("cancelled" if result else "open")
+    assert treasury.get_budget(BOT) is None
+    assert BOT not in rig.manager._bots
+    assert rig.manager._cancelling_order_ids == {}
+
+
+@pytest.mark.parametrize("result", [True, False])
+async def test_running_bot_delete_waits_in_stop_cleanup(rig: Rig, result: bool) -> None:
+    treasury = await _treasury(rig)
+    bot = await _running(rig)
+    _use_treasury(rig, treasury)
+    await rig.seed("ord-1")
+    rig.broker.result = result
+    rig.broker.gate = asyncio.Event()
+    rig.log.clear()
+    manual = asyncio.create_task(rig.manager.stop_bot(BOT))
+    await _wait_calls(rig)
+    await rig.manager.start_bot(BOT)
+    assert bot.status == BotStatus.RUNNING
+    stop_id = await rig.register_stop(BOT)
+
+    task = asyncio.create_task(rig.manager.delete_bot(BOT))
+
+    assert await _still_pending(task)
+    assert [(e.stop_order_id, e.reason) for e in rig.events("stop_expired")] == [
+        (stop_id, "bot_stopped")
+    ]
+    assert bot.status == BotStatus.STOPPED
+    assert treasury.get_budget(BOT) is not None
+    rig.broker.gate.set()
+    await asyncio.wait_for(task, timeout=5.0)
+    await asyncio.wait_for(manual, timeout=5.0)
+
+    _assert_second_cancel(rig, result)
+    [note] = [e for e in rig.events("notify") if "스탑 주문 만료: 1건" in e.message]
+    assert f"미체결 주문 취소: 0건 (실패 {0 if result else 1}건)" in note.message
+    assert "취소하지 않고 남긴" not in note.message
+    assert treasury.get_budget(BOT) is None
+    assert BOT not in rig.manager._bots
+
+
+async def test_cancelled_waiting_delete_leaves_no_entry(rig: Rig) -> None:
+    await _bot_in(rig, BOT, "stopped")
     await rig.seed("ord-1")
     rig.broker.gate = asyncio.Event()
     await rig.bus.publish(_suspend())
     await _wait_calls(rig)
+    task = asyncio.create_task(rig.manager.delete_bot(BOT))
+    assert await _still_pending(task)
 
-    await asyncio.wait_for(rig.manager.delete_bot(BOT), timeout=1.0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
     rig.broker.gate.set()
     await _drain_cleanups(rig)
 
+    assert rig.manager._cancelling_order_ids == {}
+    assert rig.manager._deleting_bots == set()
     assert [e.order_id for e in rig.events("cancel")] == ["ord-1"]
+    [sweep] = rig.events("sweep")
+    assert "미체결 주문 취소: 1건 (실패 0건)" in sweep.message
+    assert BOT in rig.manager._bots
+
+
+async def test_cancelled_owner_still_wakes_waiting_delete(rig: Rig) -> None:
+    await _bot_in(rig, BOT, "stopped")
+    await rig.seed("ord-1")
+    rig.broker.gate = asyncio.Event()
+    await rig.bus.publish(_suspend())
+    await _wait_calls(rig)
+    task = asyncio.create_task(rig.manager.delete_bot(BOT))
+    assert await _still_pending(task)
+
+    sweep = rig.manager._suspension_cleanups[ACCT]
+    sweep.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await sweep
+    await _wait_calls(rig, 2)
+    rig.broker.gate.set()
+    await asyncio.wait_for(task, timeout=5.0)
+
+    cancels = rig.events("cancel")
+    assert [(e.order_id, e.reason) for e in cancels] == [
+        ("ord-1", "account_suspended"),
+        ("ord-1", "bot_stopped"),
+    ]
     assert await rig.status("ord-1") == "cancelled"
+    assert rig.manager._cancelling_order_ids == {}
+    assert BOT not in rig.manager._bots
 
 
 async def test_suspended_bot_notification_has_no_cleanup_lines(rig: Rig) -> None:
@@ -1336,7 +1467,7 @@ async def test_publish_failure_releases_in_flight_order(
     await rig.bus.publish(_suspend())
     await _drain_cleanups(rig)
 
-    assert rig.manager._cancelling_order_ids == set()
+    assert rig.manager._cancelling_order_ids == {}
     assert len(rig.events("sweep_failed")) == 1
     await rig.bus.publish(_suspend())
     await _drain_cleanups(rig)
@@ -1365,7 +1496,7 @@ async def test_result_lookup_failure_releases_in_flight_order(
     await rig.bus.publish(_suspend())
     await _drain_cleanups(rig)
 
-    assert rig.manager._cancelling_order_ids == set()
+    assert rig.manager._cancelling_order_ids == {}
     [sweep] = rig.events("sweep")
     assert "실패 1건" in sweep.message
     rig.broker.result = True
@@ -1510,7 +1641,7 @@ async def test_cleanup_registry_is_empty_after_any_end(
 
     assert rig.manager._suspension_cleanups == {}
     assert rig.manager._suspension_rerun == {}
-    assert rig.manager._cancelling_order_ids == set()
+    assert rig.manager._cancelling_order_ids == {}
     monkeypatch.undo()
     rig.broker.result = True
     await rig.bus.publish(_suspend())
