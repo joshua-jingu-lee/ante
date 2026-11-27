@@ -182,9 +182,6 @@
     "src/ante/notification/telegram.py": {
       "BLE001": 2
     },
-    "src/ante/notification/telegram_receiver.py": {
-      "C901": 1
-    },
     "src/ante/report/store.py": {
       "S608": 1
     },

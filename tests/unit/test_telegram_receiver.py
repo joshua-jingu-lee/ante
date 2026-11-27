@@ -148,10 +148,10 @@ def instrument_service():
 
 
 @pytest.fixture
-def receiver(
+async def receiver(
     adapter, bot_manager, treasury_manager, account_service, instrument_service
 ):
-    return TelegramCommandReceiver(
+    r = TelegramCommandReceiver(
         adapter=adapter,
         allowed_user_ids=[12345],
         polling_interval=1.0,
@@ -161,6 +161,8 @@ def receiver(
         account_service=account_service,
         instrument_service=instrument_service,
     )
+    yield r
+    await r.stop()
 
 
 # ── US-2: 인증 ───────────────────────────────────
@@ -730,13 +732,49 @@ class TestConfirmation:
 
     async def test_confirm_executes_stop(self, receiver, bot_manager):
         """confirm으로 stop이 실행된다."""
+        receiver._reply = AsyncMock()
         await receiver._execute("stop", ["bot-1"], 12345, 100)
-        result = await receiver._handle_confirm(12345)
+        assert await receiver._handle_confirm(12345, 100) == ""
+        await receiver._jobs.join()
+        chat_id, result = receiver._reply.call_args.args
+        assert chat_id == 100
         assert "봇 중지" in result
         assert "실행 중 → 중지됨" in result
         bot_manager.stop_bot.assert_called_once_with(
             "bot-1", suppress_notification=True
         )
+
+    async def test_stop_returns_when_job_swallows_cancellation(
+        self, receiver, bot_manager
+    ):
+        """실행 중인 작업이 정지의 취소를 삼켜도 수신기 정지는 돌아온다."""
+        entered = asyncio.Event()
+        swallowed = asyncio.Event()
+
+        async def _stop_bot(bot_id, *, suppress_notification=False):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                swallowed.set()
+            return None
+
+        bot_manager.stop_bot = AsyncMock(side_effect=_stop_bot)
+        receiver._reply = AsyncMock()
+        await receiver._execute("stop", ["bot-1"], 12345, 100)
+        await receiver._handle_confirm(12345, 100)
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        worker = receiver._worker
+        assert worker is not None
+
+        stopping = asyncio.create_task(receiver.stop())
+        done, _ = await asyncio.wait({stopping}, timeout=5)
+
+        assert stopping in done
+        assert worker.done()
+        assert swallowed.is_set()
+        assert receiver._worker is None
+        bot_manager.stop_bot.assert_awaited_once()
 
     async def test_confirm_no_pending(self, receiver):
         """대기 중인 명령이 없으면 안내 메시지."""
@@ -956,10 +994,10 @@ class TestPollingBatchIsolation:
     """한 업데이트의 예외가 같은 묶음의 뒤 업데이트를 버리지 않는다 (#3012)."""
 
     @pytest.fixture
-    def poll_receiver(self, bot_manager, treasury_manager, account_service):
+    async def poll_receiver(self, bot_manager, treasury_manager, account_service):
         from ante.notification.telegram import TelegramAdapter
 
-        return TelegramCommandReceiver(
+        r = TelegramCommandReceiver(
             adapter=TelegramAdapter(bot_token="TEST", chat_id="0"),
             allowed_user_ids=[12345, 67890],
             polling_interval=0,
@@ -968,12 +1006,15 @@ class TestPollingBatchIsolation:
             treasury_manager=treasury_manager,
             account_service=account_service,
         )
+        yield r
+        await r.stop()
 
     async def _run(self, receiver: TelegramCommandReceiver, batch: list):
         session = _FakeTelegramSession(receiver, batch)
         receiver._running = True
         with patch("aiohttp.ClientSession", return_value=session):
             await asyncio.wait_for(receiver._poll_loop(), timeout=5)
+            await asyncio.wait_for(receiver._jobs.join(), timeout=5)
         return session
 
     async def test_halt_after_failing_command_gets_prompt(
@@ -1010,9 +1051,14 @@ class TestPollingBatchIsolation:
         assert bot_manager.stop_bot.call_count == 1
         account_service.suspend_all.assert_awaited_once()
         sent = session.sent()
-        assert [p["chat_id"] for p in sent] == [100, 200]
-        assert _FAILURE_TEXT in sent[0]["text"]
-        assert "전체 거래가 중지되었습니다" in sent[1]["text"]
+        assert len(sent) == 2
+        by_chat = {
+            cid: [p["text"] for p in sent if p["chat_id"] == cid] for cid in (100, 200)
+        }
+        assert len(by_chat[100]) == 1
+        assert _FAILURE_TEXT in by_chat[100][0]
+        assert len(by_chat[200]) == 1
+        assert "전체 거래가 중지되었습니다" in by_chat[200][0]
         assert all(_SECRET not in p["text"] for p in sent)
         assert poll_receiver._pending_confirm == {}
 
@@ -1065,8 +1111,10 @@ class TestPollingBatchIsolation:
         assert bot_manager.stop_bot.call_count == 1
         sent = session.sent()
         assert len(sent) == 2
-        assert _FAILURE_TEXT in sent[0]["text"]
-        assert sent[1]["text"] == "확인 대기 중인 명령이 없습니다."
+        texts = [p["text"] for p in sent]
+        assert [p["chat_id"] for p in sent] == [100, 100]
+        assert sum(_FAILURE_TEXT in text for text in texts) == 1
+        assert texts.count("확인 대기 중인 명령이 없습니다.") == 1
 
     async def test_failure_reply_error_does_not_block_next_update(
         self, poll_receiver, bot_manager
