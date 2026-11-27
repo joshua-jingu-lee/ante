@@ -1,7 +1,8 @@
 """main 의 조립 함수(_init_*)가 실제로 만든 배선을 동작으로 확인한다 (#2540 S3).
 
 ``assemble`` fixture 를 쓰는 테스트는 실제 ``_init_core`` → ``_init_services`` →
-``_init_account`` → ``_init_trading`` → ``_init_gateway`` → ``_init_ipc`` 를 /tmp
+``_init_account`` → ``_init_trading`` → ``_init_gateway`` → ``_restore_bots`` →
+``_init_feed`` → ``_init_ipc`` 를 /tmp
 아래 임시 config_dir 에서 돌리고 실제 ``_shutdown`` 으로 닫는다. ``_init_core`` 의
 경로·Config 재사용을 보는 두 테스트는 ``_init_core`` 만 돈다.
 
@@ -32,6 +33,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import polars as pl
 import pytest
 
 import ante.bot.reconcile_scheduler as scheduler_mod
@@ -312,6 +314,7 @@ async def assemble(
                 await prepared
         await main_module._init_gateway(s)
         await main_module._restore_bots(s)
+        await main_module._init_feed(s)
         await main_module._init_ipc(s)
         if s.notification_service is not None:
             s.notification_service.release()
@@ -912,6 +915,96 @@ async def test_bots_in_db_are_restored_as_created_before_ipc(
 async def test_restore_step_is_noop_without_bot_manager() -> None:
     """봇 관리자가 없으면 복원 단계는 아무것도 하지 않는다."""
     await main_module._restore_bots(main_module.Services())
+
+
+# ── 컨텍스트 팩토리의 시세 저장소 (#3120) ─────────────────────────────────────
+
+
+def _daily_bars(n: int = 5) -> pl.DataFrame:
+    timestamps = pl.Series(
+        "timestamp", [datetime(2026, 3, 2 + i) for i in range(n)]
+    ).dt.replace_time_zone("UTC")
+    return pl.DataFrame(
+        {
+            "timestamp": timestamps,
+            "symbol": ["005930"] * n,
+            "open": [50000.0 + i for i in range(n)],
+            "high": [50100.0 + i for i in range(n)],
+            "low": [49900.0 + i for i in range(n)],
+            "close": [50050.0 + i for i in range(n)],
+            "volume": [1000 + i for i in range(n)],
+            "source": ["test"] * n,
+        }
+    )
+
+
+async def test_context_factory_holds_the_daemon_parquet_store(
+    assemble: AssembleFn,
+) -> None:
+    """조립된 컨텍스트 팩토리는 데몬이 만든 바로 그 ParquetStore 를 든다."""
+    asm = await assemble([])
+    s = asm.s
+
+    assert s.parquet_store is not None
+    assert s.bot_manager._context_factory._parquet_store is s.parquet_store
+
+
+@pytest.mark.parametrize(
+    ("accounts", "account_id"),
+    [([_kis_account("live-a")], "live-a"), ([], "test")],
+    ids=["live", "virtual"],
+)
+async def test_new_bot_context_reads_bars_stored_in_daemon_parquet_store(
+    assemble: AssembleFn, accounts: list[Account], account_id: str
+) -> None:
+    """새로 만든 봇의 컨텍스트는 저장소에 써 둔 일봉을 돌려준다(실전·가상)."""
+    from ante.bot.config import BotConfig
+
+    asm = await assemble(accounts)
+    s = asm.s
+    s.parquet_store.write("005930", "1d", _daily_bars())
+
+    ctx = s.bot_manager._context_factory.create(
+        BotConfig(bot_id="bot-ohlcv", strategy_id="s1", account_id=account_id)
+    )
+    ohlcv = await ctx.get_ohlcv("005930", "1d", limit=10)
+
+    assert ohlcv.height == 5
+    assert ohlcv["close"].to_list() == _daily_bars()["close"].to_list()
+
+
+async def test_restored_bot_context_reads_bars_stored_in_daemon_parquet_store(
+    assemble: AssembleFn,
+) -> None:
+    """부팅 때 복원된 봇의 컨텍스트도 저장소에 써 둔 일봉을 돌려준다."""
+    asm = await assemble([], before_gateway=_seed_bot_row)
+    s = asm.s
+    s.parquet_store.write("005930", "1d", _daily_bars())
+
+    ctx = s.bot_manager.get_bot("b1")._ctx
+    ohlcv = await ctx.get_ohlcv("005930", "1d", limit=10)
+
+    assert ohlcv.height == 5
+
+
+async def test_init_core_store_reads_empty_before_data_dir_exists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``_init_core`` 가 만든 저장소는 데이터 디렉터리가 없을 때 빈 결과를 읽는다."""
+    monkeypatch.setattr(core_log_mod, "setup_logging", lambda config: None)
+    data_dir = tmp_path / "data"
+    config = Config(
+        static={"data": {"path": str(data_dir)}}, secrets={}, config_dir=tmp_path
+    )
+    s = main_module.Services(config=config)
+    try:
+        await main_module._init_core(s)
+
+        assert not data_dir.exists()
+        assert s.parquet_store.read("005930", "1d", limit=10).is_empty()
+    finally:
+        if s.db is not None:
+            await s.db.close()
 
 
 # ── _init_core·_init_ipc 의 경로 ─────────────────────────────────────────────

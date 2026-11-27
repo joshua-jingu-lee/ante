@@ -18,7 +18,7 @@ from ante.account.readiness import (
 from ante.config import Config, DynamicConfigService
 from ante.core import Database, clock
 from ante.eventbus import EventBus, EventHistoryStore
-from ante.eventbus.events import NotificationEvent
+from ante.eventbus.events import ConfigChangedEvent, NotificationEvent
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +260,7 @@ def _broker_ready_init_accounts(s: Services, accounts: list[Any]) -> list[Any]:
 
 
 async def _init_core(s: Services) -> None:
-    """Config, Database, EventBus, DynamicConfig 초기화."""
+    """Config, Database, EventBus, DynamicConfig, ParquetStore 초기화."""
     if s.config is None:
         s.config = Config.load()
     s.config.validate()
@@ -289,7 +289,6 @@ async def _init_core(s: Services) -> None:
 
     from ante.config.defaults import DEFAULTS
     from ante.config.dynamic import _on_log_level_changed
-    from ante.eventbus.events import ConfigChangedEvent
 
     category_map = {
         "rule": "trading",
@@ -315,6 +314,10 @@ async def _init_core(s: Services) -> None:
 
     s.eventbus.subscribe(ConfigChangedEvent, _on_log_level_changed)
     logger.info("DynamicConfigService 초기화 완료")
+
+    from ante.data import ParquetStore
+
+    s.parquet_store = ParquetStore(base_path=Path(s.config.get("data.path", "data/")))
 
 
 async def _init_services(s: Services) -> None:
@@ -1522,12 +1525,12 @@ async def _init_feed(s: Services) -> None:
     """Data Pipeline, BacktestService, ReportStore 초기화."""
     assert s.db is not None
     assert s.eventbus is not None
+    assert s.parquet_store is not None
 
-    from ante.data import DataCollector, ParquetStore
+    from ante.data import DataCollector
 
     data_path = s.config.get("data.path", "data/")
     Path(data_path).mkdir(parents=True, exist_ok=True)
-    s.parquet_store = ParquetStore(base_path=Path(data_path))
 
     if s.api_gateway:
         s.data_collector = DataCollector(store=s.parquet_store, eventbus=s.eventbus)
