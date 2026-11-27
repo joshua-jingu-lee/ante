@@ -35,7 +35,9 @@ _KEY_ALNUM = "TESTKEYFAKE0000"
 _KEY_PREENCODED = "TEST%2BKEY%2FFAKE%3D%3D"
 _KEYS = (_KEY_SYMBOLS, _KEY_ALNUM, _KEY_PREENCODED)
 _SLOW_SECONDS = 1.0
-_HOLD_SECONDS = 4.0
+_HOLD_SECONDS = 30.0
+_HOLD_RECEIVED = threading.Event()
+_HOLD_RELEASE = threading.Event()
 
 
 def _key_forms(key: str) -> set[str]:
@@ -76,7 +78,8 @@ async def _handle(request: web.Request) -> web.StreamResponse:
         await asyncio.sleep(_SLOW_SECONDS)
         return web.json_response({"status": "000"})
     if behavior == "hold":
-        await asyncio.sleep(_HOLD_SECONDS)
+        _HOLD_RECEIVED.set()
+        await asyncio.to_thread(_HOLD_RELEASE.wait, _HOLD_SECONDS)
         return web.Response(text="held")
     return web.Response(status=503, text="Service Unavailable")
 
@@ -142,12 +145,12 @@ def _fast(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def raw_errors(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """도우미가 받은 예외의 원래 문자열(가리기 전)을 모은다."""
+    """도우미가 받은 예외의 종류와 원래 문자열(가리기 전)을 모은다."""
     seen: list[str] = []
     real = base_mod.describe_source_error
 
     def _spy(exc: BaseException, api_key: str) -> str:
-        seen.append(str(exc))
+        seen.append(f"{type(exc).__name__}: {exc}")
         return real(exc, api_key)
 
     monkeypatch.setattr(dart_mod, "describe_source_error", _spy, raising=False)
@@ -302,8 +305,10 @@ async def test_key_never_leaks(
             connector=aiohttp.TCPConnector(limit=1),
             timeout=aiohttp.ClientTimeout(connect=0.2),
         )
+        _HOLD_RECEIVED.clear()
+        _HOLD_RELEASE.clear()
         hold = asyncio.ensure_future(session.get(server.url("hold")))
-        await asyncio.sleep(0.1)
+        assert await asyncio.to_thread(_HOLD_RECEIVED.wait, 10), "자리를 못 잡았다"
     else:
         if behavior == "slow":
             monkeypatch.setattr(dart_mod, "REQUEST_TIMEOUT", 0.2)
@@ -318,6 +323,7 @@ async def test_key_never_leaks(
         raised = exc
     finally:
         if hold is not None:
+            _HOLD_RELEASE.set()
             hold.cancel()
             await asyncio.gather(hold, return_exceptions=True)
         if session is not None:
@@ -336,6 +342,13 @@ async def test_key_never_leaks(
         assert any(r.levelno >= logging.WARNING for r in feed_records)
 
     _assert_no_key(caplog.text, "로그")
+
+    expected_kind = {"connect_timeout": "ConnectionTimeoutError: ", "slow": "Timeout"}
+    if behavior in expected_kind:
+        assert raw_errors
+        assert all(r.startswith(expected_kind[behavior]) for r in raw_errors), (
+            f"원래 예외가 {behavior}가 아니다: {raw_errors!r}"
+        )
 
     if _KEY_REACHES_SITE.get((behavior, entry), False):
         assert any(any(f in raw for f in _url_forms(key)) for raw in raw_errors), (
