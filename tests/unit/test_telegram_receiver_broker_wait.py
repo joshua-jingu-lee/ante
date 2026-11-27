@@ -109,16 +109,25 @@ class GatedBroker:
 
 
 class Script:
-    """수신 묶음을 대본대로 내고, 대본이 끝나면 정지될 때까지 기다린다."""
+    """수신 묶음을 대본대로 내고, 대본이 끝나면 정지될 때까지 기다린다.
 
-    def __init__(self, batches: list[list[dict]]) -> None:
+    ``free``번째 뒤의 묶음은 ``hold``가 설정된 뒤에 낸다(브로커가 막힌 뒤의 명령).
+    """
+
+    def __init__(
+        self, batches: list[list[dict]], hold: asyncio.Event, free: int
+    ) -> None:
         self._batches = list(batches)
+        self._hold = hold
+        self._free = free
         self.calls = 0
         self._reached: defaultdict[int, asyncio.Event] = defaultdict(asyncio.Event)
 
     async def __call__(self) -> list[dict]:
         self.calls += 1
         self._reached[self.calls].set()
+        if self.calls > self._free:
+            await self._hold.wait()
         if self._batches:
             return self._batches.pop(0)
         await asyncio.Event().wait()
@@ -306,8 +315,8 @@ class Stack:
         assert record is not None
         return record.status
 
-    async def run(self, batches: list[list[dict]]) -> Script:
-        script = Script(batches)
+    async def run(self, batches: list[list[dict]], free: int = 1) -> Script:
+        script = Script(batches, self.broker.entered, free)
         self.receiver._get_updates = script  # type: ignore[method-assign]
         self.receiver.start()
         return script
@@ -412,9 +421,9 @@ async def test_halt_runs_while_stop_confirm_waits_for_broker(stack: Stack) -> No
             [_cmd(2, "/confirm")],
             [_cmd(3, "/halt")],
             [_cmd(4, "/confirm")],
-        ]
+        ],
+        free=2,
     )
-    await asyncio.wait_for(stack.broker.entered.wait(), timeout=WAIT)
     await script.reach(5)
 
     await stack.assert_halted_while_blocked()

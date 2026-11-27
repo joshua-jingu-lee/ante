@@ -57,13 +57,15 @@ def approval_service():
 
 
 @pytest.fixture
-def receiver(adapter, approval_service):
+async def receiver(adapter, approval_service):
     """approval_service가 주입된 TelegramCommandReceiver."""
-    return TelegramCommandReceiver(
+    r = TelegramCommandReceiver(
         adapter=adapter,
         allowed_user_ids=[12345],
         approval_service=approval_service,
     )
+    yield r
+    await r.stop()
 
 
 # ── TelegramAdapter.send_with_buttons ─────────────
@@ -143,6 +145,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
 
         approval_service.approve.assert_called_once_with(
             "abc123", resolved_by="telegram", suppress_notification=True
@@ -163,6 +166,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
 
         reply_text = receiver._reply.call_args[0][1]
         assert "✅ 결재 승인 완료" in reply_text
@@ -186,6 +190,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
 
         reply_text = receiver._reply.call_args[0][1]
         assert "⚠️ 승인되었으나 실행 실패" in reply_text
@@ -203,6 +208,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
 
         approval_service.reject.assert_called_once_with(
             "abc123",
@@ -226,6 +232,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
 
         reply_text = receiver._reply.call_args[0][1]
         assert "❌ 결재 거절 완료" in reply_text
@@ -243,6 +250,7 @@ class TestCallbackQuery:
             }
         }
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         adapter.answer_callback_query.assert_called_once()
         assert "권한" in adapter.answer_callback_query.call_args[0][1]
 
@@ -257,6 +265,7 @@ class TestCallbackQuery:
             }
         }
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         adapter.answer_callback_query.assert_called_once()
         assert "잘못된" in adapter.answer_callback_query.call_args[0][1]
 
@@ -271,6 +280,7 @@ class TestCallbackQuery:
             }
         }
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         adapter.answer_callback_query.assert_called()
         assert "알 수 없는" in adapter.answer_callback_query.call_args[0][1]
 
@@ -289,6 +299,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         reply_text = receiver._reply.call_args[0][1]
         assert "이미 처리된 결재입니다" in reply_text
 
@@ -309,6 +320,7 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         reply_text = receiver._reply.call_args[0][1]
         assert "결재를 찾을 수 없습니다" in reply_text
         assert "ID: abc123" in reply_text
@@ -342,8 +354,10 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
+        await receiver._jobs.join()
         receiver._reply.assert_called_once()
         assert "승인 완료" in receiver._reply.call_args[0][1]
+        adapter.answer_callback_query.assert_called_once_with("cb8", "⏳ 처리 중입니다")
 
 
 # ── /approve, /reject 텍스트 명령 스펙아웃 회귀 (#2379) ──

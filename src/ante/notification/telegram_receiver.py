@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
+from functools import partial
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, cast
 
@@ -15,6 +17,8 @@ from ante.core import clock
 from ante.notification.telegram import TELEGRAM_REQUEST_TIMEOUT
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from ante.account.service import AccountService
     from ante.approval.service import ApprovalService
     from ante.bot.manager import BotManager
@@ -30,6 +34,18 @@ _UPDATE_FAILURE_REPLY = (
     "⚠️ 처리 중 오류가 발생했습니다. "
     "명령이 일부 실행되었을 수 있으니 /status·/bots로 상태를 확인해 주세요."
 )
+
+
+_PROCESSING_ANSWER = "⏳ 처리 중입니다"
+
+
+@dataclass(frozen=True)
+class _Job:
+    """작업자가 실행할 한 건과 그 회신 chat, 버릴 때의 안내."""
+
+    chat_id: int | None
+    run: Callable[[], Awaitable[str]]
+    dropped_notice: str
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -69,6 +85,10 @@ class TelegramCommandReceiver:
 
         self._pending_confirm: dict[int, tuple[str, list[str], float]] = {}
 
+        self._jobs: asyncio.Queue[_Job] = asyncio.Queue()
+        self._worker: asyncio.Task[None] | None = None
+        self._dropped_on_cancel = 0
+
     def start(self) -> None:
         """폴링 루프 시작."""
         if not self._allowed_user_ids:
@@ -90,7 +110,55 @@ class TelegramCommandReceiver:
             except asyncio.CancelledError:
                 pass
         self._task = None
+        if self._worker and not self._worker.done():
+            self._worker.cancel()
+            try:
+                await self._worker
+            except asyncio.CancelledError:
+                pass
+        self._worker = None
+        dropped = len(self._take_queued_jobs()) + self._dropped_on_cancel
+        self._dropped_on_cancel = 0
+        if dropped:
+            logger.warning("텔레그램 작업 %d건을 실행하지 않고 버렸습니다", dropped)
         logger.info("텔레그램 명령 수신 중지")
+
+    def _enqueue(self, job: _Job) -> None:
+        """작업을 줄에 넣고 작업자가 없으면 띄운다."""
+        self._jobs.put_nowait(job)
+        if self._worker is None or self._worker.done():
+            self._worker = asyncio.create_task(self._work())
+
+    def _take_queued_jobs(self) -> list[_Job]:
+        """줄에서 아직 시작하지 않은 작업을 모두 꺼낸다."""
+        jobs: list[_Job] = []
+        while True:
+            try:
+                jobs.append(self._jobs.get_nowait())
+            except asyncio.QueueEmpty:
+                return jobs
+            self._jobs.task_done()
+
+    async def _work(self) -> None:
+        """줄의 작업을 도착 순서대로 하나씩 실행한다."""
+        while True:
+            job = await self._jobs.get()
+            try:
+                await self._run_job(job)
+            except Exception:
+                logger.exception("텔레그램 작업 회신 실패")
+            finally:
+                self._jobs.task_done()
+
+    async def _run_job(self, job: _Job) -> None:
+        """작업을 실행하고 결과나 실패 문구를 그 chat에 회신한다."""
+        try:
+            reply = await job.run()
+        except Exception:
+            logger.exception("텔레그램 작업 실행 실패")
+            reply = _UPDATE_FAILURE_REPLY
+        if reply:
+            await self._reply(job.chat_id, reply)
 
     async def _poll_loop(self) -> None:
         """getUpdates 폴링 루프."""
@@ -204,7 +272,28 @@ class TelegramCommandReceiver:
             return
 
         action, approval_id = data.split(":", 1)
+        if action not in ("approve", "reject"):
+            await self._adapter.answer_callback_query(
+                callback_id, "알 수 없는 동작입니다."
+            )
+            return
 
+        self._enqueue(
+            _Job(
+                chat_id=chat_id,
+                run=partial(self._resolve_approval, action, approval_id),
+                dropped_notice=(
+                    "ℹ️ 전체 거래 중지 요청으로 실행하지 않았습니다 — "
+                    f"결재는 대기 상태입니다\nID: {approval_id}"
+                ),
+            )
+        )
+        await self._adapter.answer_callback_query(callback_id, _PROCESSING_ANSWER)
+
+    async def _resolve_approval(self, action: str, approval_id: str) -> str:
+        """결재를 승인하거나 거절하고 결과 문구를 돌려준다."""
+        if self._approval_service is None:
+            return "ApprovalService가 연결되지 않았습니다."
         try:
             if action == "approve":
                 request = await self._approval_service.approve(
@@ -218,49 +307,35 @@ class TelegramCommandReceiver:
                         if entry.get("action") == "execution_failed":
                             detail = entry.get("detail", "")
                             break
-                    result_msg = (
+                    return (
                         f"⚠️ 승인되었으나 실행 실패\n"
                         f"제목: {request.title}\n"
                         f"ID: {approval_id}\n"
                         f"사유: {detail}"
                     )
-                else:
-                    result_msg = (
-                        f"✅ 결재 승인 완료\n제목: {request.title}\nID: {approval_id}"
-                    )
-            elif action == "reject":
-                request = await self._approval_service.reject(
-                    approval_id,
-                    resolved_by="telegram",
-                    reject_reason="사용자 거절",
-                    suppress_notification=True,
-                )
-                result_msg = (
-                    f"❌ 결재 거절 완료\n"
-                    f"제목: {request.title}\n"
-                    f"ID: {approval_id}\n"
-                    f"사유: 사용자 거절"
-                )
-            else:
-                await self._adapter.answer_callback_query(
-                    callback_id, "알 수 없는 동작입니다."
-                )
-                return
+                return f"✅ 결재 승인 완료\n제목: {request.title}\nID: {approval_id}"
+            request = await self._approval_service.reject(
+                approval_id,
+                resolved_by="telegram",
+                reject_reason="사용자 거절",
+                suppress_notification=True,
+            )
+            return (
+                f"❌ 결재 거절 완료\n"
+                f"제목: {request.title}\n"
+                f"ID: {approval_id}\n"
+                f"사유: 사용자 거절"
+            )
         except ValueError as e:
             err = str(e)
             if "찾을 수 없음" in err:
-                result_msg = f"❌ 결재를 찾을 수 없습니다\nID: {approval_id}"
-            elif "만료" in err:
-                result_msg = f"ℹ️ 만료된 결재입니다\nID: {approval_id}"
-            else:
-                result_msg = f"ℹ️ 이미 처리된 결재입니다 ({err})\nID: {approval_id}"
+                return f"❌ 결재를 찾을 수 없습니다\nID: {approval_id}"
+            if "만료" in err:
+                return f"ℹ️ 만료된 결재입니다\nID: {approval_id}"
+            return f"ℹ️ 이미 처리된 결재입니다 ({err})\nID: {approval_id}"
         except Exception:
-            logger.exception("콜백 결재 처리 오류: %s", data)
-            result_msg = "처리 중 오류가 발생했습니다."
-
-        await self._adapter.answer_callback_query(callback_id, result_msg)
-        if chat_id:
-            await self._reply(chat_id, result_msg)
+            logger.exception("콜백 결재 처리 오류: %s:%s", action, approval_id)
+            return "처리 중 오류가 발생했습니다."
 
     async def _reply_update_failure(self, update: Any) -> None:
         """예외로 끝난 업데이트의 허용 사용자에게 원인 없는 실패 답을 보낸다."""
@@ -298,7 +373,7 @@ class TelegramCommandReceiver:
     ) -> str:
         """명령 실행 후 결과 문자열 반환."""
         if command == "confirm":
-            return await self._handle_confirm(user_id)
+            return await self._handle_confirm(user_id, chat_id)
 
         if command in _DANGEROUS_COMMANDS:
             if command == "halt" and self._account_service:
@@ -348,7 +423,7 @@ class TelegramCommandReceiver:
 
         return "확인하려면 /confirm 을 입력해 주세요."
 
-    async def _handle_confirm(self, user_id: int) -> str:
+    async def _handle_confirm(self, user_id: int, chat_id: int | None = None) -> str:
         """확인 처리."""
         pending = self._pending_confirm.pop(user_id, None)
         if not pending:
@@ -365,7 +440,18 @@ class TelegramCommandReceiver:
         if command == "clear_halt":
             return await self._cmd_clear_halt(args)
         if command == "stop":
-            return await self._cmd_stop(args)
+            bot_id = args[0] if args else "?"
+            self._enqueue(
+                _Job(
+                    chat_id=chat_id,
+                    run=partial(self._cmd_stop, args),
+                    dropped_notice=(
+                        f"ℹ️ 전체 거래 중지 요청으로 {bot_id} 중지를 실행하지 "
+                        "않았습니다. /bots로 상태를 확인해 주세요."
+                    ),
+                )
+            )
+            return ""
 
         return "알 수 없는 명령입니다."
 
@@ -529,6 +615,7 @@ class TelegramCommandReceiver:
             return "이미 거래가 중지된 상태입니다."
 
         reason = " ".join(args) if args else "텔레그램 명령"
+        dropped = self._take_queued_jobs()
         try:
             await self._account_service.suspend_all(
                 reason=reason,
@@ -538,11 +625,25 @@ class TelegramCommandReceiver:
             return (
                 f"⚠️ 전체 거래 중지가 일부 계좌에서 실패했습니다.\n{exc}\n사유: {reason}"
             )
+        except asyncio.CancelledError:
+            self._dropped_on_cancel += len(dropped)
+            dropped = []
+            raise
+        finally:
+            await self._notify_dropped(dropped)
         return (
             "\U0001f6a8 전체 거래가 중지되었습니다.\n"
             f"사유: {reason}\n"
             "해제하려면 /clear_halt 를 입력하세요."
         )
+
+    async def _notify_dropped(self, jobs: list[_Job]) -> None:
+        """버린 작업마다 그 chat에 실행하지 않았다는 안내를 보낸다."""
+        for job in jobs:
+            try:
+                await self._reply(job.chat_id, job.dropped_notice)
+            except Exception:
+                logger.exception("텔레그램 버린 작업 안내 실패")
 
     async def _cmd_clear_halt(self, args: list[str]) -> str:
         """전역 정지 해제 (계좌 상태만 ACTIVE 복구; 봇 자동 재시작 없음)."""
