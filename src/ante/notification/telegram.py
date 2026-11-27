@@ -50,21 +50,27 @@ class TelegramLogRedactFilter(logging.Filter):
     """텔레그램 모듈 로그의 메시지와 트레이스백에서 봇 토큰을 가린다."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        """레코드를 가린 완성 문자열과 가린 예외 텍스트로 바꿔 통과시킨다."""
+        """가린 결과가 원문과 다른 메시지·예외만 가린 텍스트로 바꿔 통과시킨다."""
         token = record.__dict__.pop(TELEGRAM_SECRET_ATTR, "")
         try:
-            record.msg = _redact(record.getMessage(), token)
-            record.args = None
+            message = record.getMessage()
+            redacted = _redact(message, token)
+            if redacted != message:
+                record.msg = redacted
+                record.args = None
             if record.exc_info and record.exc_info[1] is not None:
                 text = _EXC_FORMATTER.formatException(record.exc_info)
-                record.exc_text = _redact(text, token)
+                redacted = _redact(text, token)
+                if redacted != text:
+                    record.exc_text = redacted
+                    record.exc_info = None
             elif record.exc_text:
                 record.exc_text = _redact(record.exc_text, token)
         except (TypeError, ValueError, LookupError, AttributeError, RuntimeError):
             record.msg = _FILTER_FAILURE_MESSAGE
             record.args = None
             record.exc_text = None
-        record.exc_info = None
+            record.exc_info = None
         return True
 
 

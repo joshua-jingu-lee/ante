@@ -331,3 +331,41 @@ def test_both_telegram_loggers_carry_the_filter():
     for name in set(_SITE_LOGGER.values()):
         filters = logging.getLogger(name).filters
         assert any(isinstance(f, TelegramLogRedactFilter) for f in filters), name
+
+
+@pytest.mark.parametrize("site", _RECEIVER_SITES)
+def test_record_without_secret_keeps_exception_fields(site):
+    target = logging.getLogger(_SITE_LOGGER[site])
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JsonFormatter())
+    target.addHandler(handler)
+    try:
+        try:
+            raise RuntimeError("작업 실패: 비밀 없음")
+        except RuntimeError:
+            target.exception("텔레그램 작업 실행 실패: %s", "job-1")
+    finally:
+        target.removeHandler(handler)
+
+    (line,) = [json.loads(x) for x in stream.getvalue().splitlines()]
+    assert line["msg"] == "텔레그램 작업 실행 실패: job-1"
+    assert line["exc"]["type"] == "RuntimeError"
+    assert line["exc"]["message"] == "작업 실패: 비밀 없음"
+    assert "Traceback" in line["exc"]["traceback"]
+    assert line["exc"]["fingerprint"]
+
+
+def test_secret_only_in_message_keeps_exception_fields(caplog):
+    target = logging.getLogger(_SITE_LOGGER["reply"])
+
+    with caplog.at_level(logging.DEBUG):
+        try:
+            raise RuntimeError("비밀 없음")
+        except RuntimeError:
+            target.warning("주소 %s", f"/bot{_TOKEN}/x", exc_info=True)
+
+    (record,) = [r for r in caplog.records if r.name == target.name]
+    assert record.exc_info is not None
+    assert _TOKEN not in caplog.text
+    assert "/bot***/x" in record.getMessage()
