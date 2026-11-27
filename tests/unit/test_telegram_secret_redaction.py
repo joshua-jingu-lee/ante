@@ -9,6 +9,7 @@ import asyncio
 import io
 import json
 import logging
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 from unittest.mock import patch
@@ -222,8 +223,10 @@ def test_describe_masks_url_encoded_token(encoded):
     assert "/bot***/getUpdates?x=1" in out
 
 
-def test_describe_masks_url_encoded_token_without_url_shape():
-    encoded = quote(_TOKEN, safe="")
+@pytest.mark.parametrize(
+    "encoded", [quote(_TOKEN, safe=""), _TOKEN.replace(":", "%3a")]
+)
+def test_describe_masks_url_encoded_token_without_url_shape(encoded):
 
     out = describe_telegram_error(RuntimeError(f"key={encoded}"), _TOKEN)
 
@@ -369,3 +372,58 @@ def test_secret_only_in_message_keeps_exception_fields(caplog):
     assert record.exc_info is not None
     assert _TOKEN not in caplog.text
     assert "/bot***/x" in record.getMessage()
+
+
+def test_fake_token_has_bot_token_shape():
+    assert re.fullmatch(r"\d+:[A-Za-z0-9_-]+", _TOKEN)
+
+
+@pytest.mark.parametrize(
+    "encoded", [_TOKEN, quote(_TOKEN, safe=""), _TOKEN.replace(":", "%3a")]
+)
+def test_regex_masks_url_shaped_token_without_known_token(encoded):
+    exc = RuntimeError(f"url=https://api.telegram.org/bot{encoded}/getUpdates")
+
+    out = describe_telegram_error(exc, "")
+
+    assert out == "RuntimeError: url=https://api.telegram.org/bot***/getUpdates"
+
+
+@pytest.mark.parametrize("word", ["/bots", "/botfather", "/bot", "/bot123", "/bot:x"])
+def test_non_token_bot_words_are_unchanged(word):
+    exc = ValueError(f"unknown command {word} here")
+
+    assert describe_telegram_error(exc, _TOKEN) == (
+        f"ValueError: unknown command {word} here"
+    )
+
+
+@pytest.mark.parametrize("site", _RECEIVER_SITES)
+def test_bots_command_record_is_unchanged(site, caplog):
+    target = logging.getLogger(_SITE_LOGGER[site])
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JsonFormatter())
+    target.addHandler(handler)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            target.info("텔레그램 명령: text=%s", "/bots")
+            try:
+                raise ValueError("unknown command /bots")
+            except ValueError:
+                target.exception("명령 처리 실패: %s", "/bots")
+    finally:
+        target.removeHandler(handler)
+
+    info, failure = [r for r in caplog.records if r.name == target.name]
+    assert (info.msg, info.args) == ("텔레그램 명령: text=%s", ("/bots",))
+    assert failure.exc_info is not None
+    lines = [json.loads(x) for x in stream.getvalue().splitlines()]
+    assert [line["msg"] for line in lines] == [
+        "텔레그램 명령: text=/bots",
+        "명령 처리 실패: /bots",
+    ]
+    exc = lines[1]["exc"]
+    assert exc["message"] == "unknown command /bots"
+    assert exc["fingerprint"]
+    assert "Traceback" in exc["traceback"]

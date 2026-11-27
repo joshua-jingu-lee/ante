@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_REQUEST_TIMEOUT = 5.0
 
-_BOT_PATH_RE = re.compile(r"/bot[^/?#\s'\"]+")
+_BOT_PATH_RE = re.compile(r"/bot\d+(?::|%3[Aa])[^/?#\s'\"]+")
 
 LEVEL_EMOJI = {
     NotificationLevel.CRITICAL: "\U0001f6a8",
@@ -30,12 +30,22 @@ _FILTER_FAILURE_MESSAGE = "텔레그램 로그 가림 실패 — 원본 메시�
 _EXC_FORMATTER = logging.Formatter()
 
 
+def _encoded_token_re(token: str) -> re.Pattern[str]:
+    """퍼센트 인코딩 부분만 대소문자를 무시하는, 인코딩된 토큰의 정규식."""
+    parts = re.split(r"(%[0-9A-F]{2})", quote(token, safe=""))
+    return re.compile(
+        "".join(
+            f"(?i:{re.escape(part)})" if i % 2 else re.escape(part)
+            for i, part in enumerate(parts)
+        )
+    )
+
+
 def _redact(text: str, token: object) -> str:
-    """주소 꼴의 봇 경로와, 주어지면 원본·인코딩된 토큰을 가린다."""
+    """주소 꼴의 봇 토큰과, 주어지면 원본·인코딩된 토큰을 가린다."""
     text = _BOT_PATH_RE.sub("/bot***", text)
     if isinstance(token, str) and token:
-        for secret in (token, quote(token, safe="")):
-            text = text.replace(secret, "***")
+        text = _encoded_token_re(token).sub("***", text.replace(token, "***"))
     return text
 
 
