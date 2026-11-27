@@ -200,6 +200,32 @@ class PerformanceTracker:
             return 0.0
         return 0.0 if row is None else float(row["realized_pnl"])
 
+    async def count_filled_orders(
+        self, *, account_id: str, since: datetime, strategy_id: str | None = None
+    ) -> int:
+        """``since`` 이후 체결 행이 있는 주문 수. naive면 ``ValueError``."""
+        if since.tzinfo is None:
+            raise ValueError("count_filled_orders needs an aware datetime")
+        sql = """SELECT COUNT(DISTINCT COALESCE(NULLIF(order_id, ''), trade_id))
+                    AS order_count
+                 FROM trades
+                 WHERE account_id = ? AND status = ? AND timestamp >= ?"""
+        params: list[Any] = [
+            account_id,
+            TradeStatus.FILLED.value,
+            since.astimezone(UTC).isoformat(),
+        ]
+        if strategy_id is not None:
+            sql += " AND strategy_id = ?"
+            params.append(strategy_id)
+        try:
+            row = await self._db.fetch_one(sql, tuple(params))
+        except OperationalError as exc:
+            if not is_missing_table(exc):
+                raise
+            return 0
+        return 0 if row is None else int(row["order_count"])
+
     async def get_weekly_summary(
         self,
         bot_id: str | None = None,

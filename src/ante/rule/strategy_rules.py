@@ -138,9 +138,10 @@ class UnrealizedLossLimitRule(Rule):
 
 
 class TradeFrequencyRule(Rule):
-    """단위 시간당 거래 빈도 제한.
+    """단위 시간당 거래 빈도 제한. 매도는 허용한다.
 
-    context.metadata["recent_trade_count"]에서 최근 거래 수를 참조.
+    엔진이 매수 평가에 싣는 ``context.metadata["recent_trade_count"]``(직전
+    60분의 체결 주문 수)를 참조하고, 그 키가 없는 매수는 거부한다.
     """
 
     CONFIG_KEYS: ClassVar[frozenset[str]] = frozenset({"max_trades_per_hour"})
@@ -157,9 +158,26 @@ class TradeFrequencyRule(Rule):
         return errors
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
+        if context.side == "sell":
+            return RuleEvaluation(
+                rule_id=self.rule_id,
+                rule_name=self.name,
+                result=RuleResult.PASS,
+                action=RuleAction.LOG,
+                message="Sell order is always allowed for position liquidation",
+            )
+
         max_trades = self.config.get("max_trades_per_hour", 10)
 
-        recent_trades = context.metadata.get("recent_trade_count", 0)
+        if "recent_trade_count" not in context.metadata:
+            return RuleEvaluation(
+                rule_id=self.rule_id,
+                rule_name=self.name,
+                result=RuleResult.REJECT,
+                action=RuleAction.LOG,
+                message="Recent trade count unavailable",
+            )
+        recent_trades = context.metadata["recent_trade_count"]
 
         if recent_trades >= max_trades:
             return RuleEvaluation(
